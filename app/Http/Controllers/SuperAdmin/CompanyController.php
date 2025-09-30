@@ -125,7 +125,7 @@ class CompanyController extends Controller
         catch(\Exception $e){
             return response()->json([
                 'error' => 1,
-                'message' => "Something went wrong",
+                'message' => $e->getMessage(),
             ], 500);
         }
     }

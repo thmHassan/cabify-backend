@@ -10,7 +10,7 @@
         "laravel/framework": "^10.10",
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
-        "php-open-source-saver/jwt-auth": "*",
+        "php-open-source-saver/jwt-auth": "^2.3",
         "stancl/tenancy": "^3.9"
     },
     "require-dev": {
