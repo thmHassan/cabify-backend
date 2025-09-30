@@ -32,14 +32,6 @@ jobs:
           target: "/var/www/html/backend.cabifyit.com"
           strip_components: 1
           overwrite: true
-          exclude: |
-            .git*
-            .github*
-            node_modules
-            tests
-            storage/logs/*
-            storage/framework/cache/*
-            vendor/*
 
       - name: Run SSH commands
         uses: appleboy/ssh-action@v0.1.7
