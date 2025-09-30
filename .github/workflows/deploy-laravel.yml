@@ -25,7 +25,6 @@ jobs:
         
       - name: Fix permissions for deployment
         run: |
-          sudo chown -R $USER:www-data .
           sudo find . -type d -exec chmod 775 {} \;
           sudo find . -type f -exec chmod 664 {} \;
 
