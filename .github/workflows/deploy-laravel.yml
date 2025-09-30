@@ -30,7 +30,7 @@ jobs:
           port: 22
           source: "."
           target: "/var/www/html/backend.cabifyit.com"
-          rm: true
+          overwrite: true
           strip_components: 1
           exclude: |
             .git*
