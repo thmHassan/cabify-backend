@@ -1,10 +1,9 @@
-.git*
-.github*
+.git
 node_modules
 tests
-storage/logs/*
-storage/framework/cache/*
-storage/framework/sessions/*
-storage/framework/views/*
-vendor/*
+vendor
+storage/logs
+storage/framework/cache
+storage/framework/sessions
+storage/framework/views
 .env
