@@ -16,11 +16,8 @@ jobs:
       - name: Fix file permissions
         run: sudo chmod -R u+rwX,go+rX,go-w .
 
-      - name: Remove .git folder for deployment
-        run: rm -rf .git
-
-      - name: Remove .git folder for deployment
-        run: rm -rf .git
+      - name: Remove non-deploy folders
+        run: rm -rf .github .git node_modules tests vendor
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
