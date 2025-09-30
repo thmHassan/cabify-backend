@@ -54,7 +54,7 @@ class CompanyController extends Controller
                 'manage_zones' => 'required',
                 'cms' => 'required',
                 'lost_found' => 'required',
-                'accounts' => 'required',
+                'accounts' => 'required', 
             ]);
 
             $count = Tenant::count();
