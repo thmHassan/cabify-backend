@@ -30,6 +30,11 @@ jobs:
           port: 22
           source: "."
           target: "/var/www/html/backend.cabifyit.com"
+          rm: true
+          strip_components: 1
+          exclude: |
+            .git*
+            node_modules
 
       - name: Run SSH commands
         uses: appleboy/ssh-action@v0.1.7
@@ -45,4 +50,6 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+            sudo chown -R www-data:www-data storage bootstrap/cache
+            sudo chmod -R 775 storage bootstrap/cache
             sudo systemctl reload nginx
