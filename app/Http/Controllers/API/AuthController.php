@@ -22,7 +22,7 @@ class AuthController extends Controller
         // Ensure user exists and has the role
         $user = User::where('email', $data['email'])->first();
         if (! $user) {
-            return response()->json(['error' => 1, 'message' => 'Invalid credentials.'], 401);
+            return response()->json(['error' => 1, 'message' => 'Invalid credentials'], 401);
         }
 
         if ($user->role !== $data['role']) {
