@@ -8,19 +8,24 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
+      # Step 1: Checkout the repo
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # Step 2: Set up PHP
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
           extensions: mbstring, bcmath, pdo, pdo_mysql, curl, xml, json
 
+      # Step 3: Install Composer dependencies locally
       - name: Install Composer dependencies
         run: composer install --no-dev --prefer-dist --optimize-autoloader
 
+      # Step 4: Upload files to server
       - name: Upload to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -32,7 +37,9 @@ jobs:
           target: "/var/www/html/backend.cabifyit.com"
           strip_components: 1
           overwrite: true
+        # Note: Do NOT use `exclude:` here, use .scpignore file instead
 
+      # Step 5: Run server-side commands
       - name: Run SSH commands
         uses: appleboy/ssh-action@v0.1.7
         with:
