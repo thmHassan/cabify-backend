@@ -1,4 +1,4 @@
-name: Deploy Laravel
+name: Deploy Laravel to GCP
 
 on:
   push:
@@ -10,26 +10,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the repo
       - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Fix file permissions
         run: sudo chmod -R u+rwX,go+rX,go-w .
 
-      # Step 2: Set up PHP
+      - name: Remove .git folder for deployment
+        run: rm -rf .git
+
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
           extensions: mbstring, bcmath, pdo, pdo_mysql, curl, xml, json
+          coverage: none
 
-      # Step 3: Install Composer dependencies locally
       - name: Install Composer dependencies
         run: composer install --no-dev --prefer-dist --optimize-autoloader
 
-      # Step 4: Upload files to server
-      - name: Upload to server
+      - name: Upload files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -40,9 +40,7 @@ jobs:
           target: "/var/www/html/backend.cabifyit.com"
           strip_components: 1
           overwrite: true
-        # Note: Do NOT use `exclude:` here, use .scpignore file instead
 
-      # Step 5: Run server-side commands
       - name: Run SSH commands
         uses: appleboy/ssh-action@v0.1.7
         with:
@@ -53,6 +51,8 @@ jobs:
           script: |
             cd /var/www/html/backend.cabifyit.com
             composer install --no-dev --optimize-autoloader
+            sudo chown -R www-data:www-data storage bootstrap/cache
+            sudo chmod -R 775 storage bootstrap/cache
             php artisan migrate --force
             php artisan config:cache
             php artisan route:cache
