@@ -19,6 +19,9 @@ jobs:
       - name: Remove non-deploy folders
         run: rm -rf .github .git node_modules tests vendor
 
+      - name: Fix all file permissions for CI
+        run: sudo chmod -R u+rwX,go+rX,go-w 
+
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
