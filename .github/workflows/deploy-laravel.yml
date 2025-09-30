@@ -15,12 +15,7 @@ jobs:
 
       - name: Remove non-deploy folders
         run: rm -rf .github .git node_modules tests vendor
-
-      - name: Fix ownership and permissions
-        run: |
-          sudo chown -R $USER:$USER .
-          sudo chmod -R u+rwX,go+rX,go-w .
-
+        
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -57,4 +52,3 @@ jobs:
             php artisan route:cache
             php artisan view:cache
             sudo systemctl reload nginx
-
