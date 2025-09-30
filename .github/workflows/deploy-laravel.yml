@@ -22,6 +22,12 @@ jobs:
           php-version: '8.1'
           extensions: mbstring, bcmath, pdo, pdo_mysql, curl, xml, json
           coverage: none
+        
+      - name: Fix permissions for deployment
+        run: |
+          sudo chown -R dev:www-data .
+          sudo find . -type d -exec chmod 775 {} \;
+          sudo find . -type f -exec chmod 664 {} \;
 
       - name: Upload files to server
         uses: appleboy/scp-action@v0.1.7
