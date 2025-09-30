@@ -31,7 +31,7 @@ class AuthController extends Controller
 
         // Attempt to create token
         $credentials = ['email' => $data['email'], 'password' => $data['password']];
-
+ 
         if (! $token = auth('api')->attempt($credentials)) {
             return response()->json(['error' => 1, 'message' => 'Invalid credentials'], 401);
         }
