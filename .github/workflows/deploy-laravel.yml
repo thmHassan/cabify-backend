@@ -29,7 +29,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
           source: "."
-          target: "/var/www/html/backend"
+          target: "/var/www/html/backend.cabifyit.com"
 
       - name: Run SSH commands
         uses: appleboy/ssh-action@v0.1.7
@@ -39,7 +39,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
           script: |
-            cd /var/www/html/backend
+            cd /var/www/html/backend.cabifyit.com
             composer install --no-dev --optimize-autoloader
             php artisan migrate --force
             php artisan config:cache
