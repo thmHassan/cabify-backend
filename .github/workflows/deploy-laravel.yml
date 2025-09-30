@@ -19,6 +19,9 @@ jobs:
       - name: Remove .git folder for deployment
         run: rm -rf .git
 
+      - name: Remove .git folder for deployment
+        run: rm -rf .git
+
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
