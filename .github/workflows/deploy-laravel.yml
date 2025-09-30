@@ -13,14 +13,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Fix file permissions
-        run: sudo chmod -R u+rwX,go+rX,go-w .
-
       - name: Remove non-deploy folders
         run: rm -rf .github .git node_modules tests vendor
-
-      - name: Fix all file permissions for CI
-        run: sudo chmod -R u+rwX,go+rX,go-w .
+        
+      - name: Fix ownership and permissions
+        run: |
+          sudo chown -R $USER:$USER .
+          sudo chmod -R u+rwX,go+rX,go-w .
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
