@@ -8,6 +8,7 @@ use App\Http\Controllers\SuperAdmin\OnboardingController;
 use App\Http\Controllers\SuperAdmin\DocumentController;
 use App\Http\Controllers\SuperAdmin\VehicleTypeController;
 use App\Http\Controllers\SuperAdmin\HomeController;
+use App\Http\Controllers\SuperAdmin\SubscriptionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -34,11 +35,14 @@ Route::group(['middleware' => ['auth:api']], function () {
     Route::group(['middleware' => ['role:superadmin']], function () {
         Route::post('/super-admin/update-profile', [HomeController::class, 'updateProfile']);
         Route::post('/super-admin/change-password', [HomeController::class, 'changePassword']);
+        Route::get('/super-admin/dashboard', [HomeController::class, 'dashboard']);
         
         Route::post('/super-admin/create-company', [CompanyController::class, 'createCompany']);
+        Route::get('/super-admin/edit-company', [CompanyController::class, 'getEditCompany']);
         Route::post('/super-admin/edit-company', [CompanyController::class, 'editCompany']);
         Route::get('/super-admin/company-cards', [CompanyController::class, 'companyCards']);
         Route::get('/super-admin/company-list', [CompanyController::class, 'companyList']);
+        Route::get('/super-admin/company-details', [CompanyController::class, 'companyDetails']);
 
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);
@@ -54,6 +58,12 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-vehicle-type', [VehicleTypeController::class, 'editVehicleType']);
         Route::post('/super-admin/delete-vehicle-type', [VehicleTypeController::class, 'deleteVehicleType']);
         Route::get('/super-admin/vehicle-type-list', [VehicleTypeController::class, 'vehicleTypeList']);
+
+        Route::get('/super-admin/subscription-cards', [SubscriptionController::class, 'subscriptionCards']);
+        Route::post('/super-admin/create-subscription', [SubscriptionController::class, 'createSubscription']);
+        Route::post('/super-admin/edit-subscription', [SubscriptionController::class, 'editSubscription']);
+        Route::get('/super-admin/edit-subscription', [SubscriptionController::class, 'getEditSubscription']);
+        Route::get('/super-admin/subscription-list', [SubscriptionController::class, 'subscriptionList']);
     });
 
     // Example: driver-only

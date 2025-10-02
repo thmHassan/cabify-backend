@@ -55,12 +55,19 @@ class CompanyController extends Controller
                 'cms' => 'required',
                 'lost_found' => 'required',
                 'accounts' => 'required', 
+                'picture' => 'required|image|mimes:jpg,jpeg,png,gif|max:2048', 
             ]);
 
             $count = Tenant::count();
 
             $tenantId = strtolower(str_replace(' ', '_', $request->company_name)).($count+1);
 
+            $filename = '';
+            if(isset($request->picture) && $request->picture != NULL){
+                $file = $request->file('picture');
+                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->move(public_path('pictures'), $filename);
+            }
             $tenant = Tenant::create([
                 'id' => $tenantId,
                 'company_name' => $request->company_name,
@@ -104,6 +111,7 @@ class CompanyController extends Controller
                 'accounts' => $request->accounts,
                 'status' => 'active',
                 'password' => Hash::make($request->password),
+                'picture' => (isset($filename) && $filename != '') ? public_path('pictures').'/'.$filename : ''
             ]);
 
             // $tenant->database()->manager()->createDatabase($tenant);
@@ -189,6 +197,19 @@ class CompanyController extends Controller
             $tenant->password = Hash::make($request->password);
             $tenant->save();
 
+            if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
+                unlink(public_path('pictures/'.$tenant->picture));
+            }
+
+            $$filename = '';
+            if(isset($request->picture) && $request->picture != NULL){
+                $file = $request->file('picture');
+                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->move(public_path('pictures'), $filename);
+                $tenant->picture = public_path('pictures').'/'.$filename;
+            }
+            $tenant->save();
+
             return response()->json([
                 'success' => 1,
                 'message' => "Client {$tenant->id} updated successfully!",
@@ -239,6 +260,97 @@ class CompanyController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => "Something went wrong"
+            ], 500);
+        }
+    }
+
+    public function getEditCompany(Request $request){
+        try{
+            $request->validate([
+                'id' => 'required'
+            ]);
+
+            $company = Tenant::where("id", $request->id)->first();
+
+            return response()->json([
+                'success' => 1,
+                'company' => $company
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function companyDetails(Request $request){
+        try{
+            $data['map_api']['map_api_name'] = 'Google Maps';
+            $data['map_api']['map_api_status'] = 'Active';
+            $data['map_api']['monthly_request'] = '850K';
+            $data['map_api']['monthly_cost'] = '$420';
+            $data['map_api']['last_used'] = '2024-12-10 14:30';
+
+            $data['call_api']['call_api_name'] = 'Twillio';
+            $data['call_api']['call_api_status'] = 'Active';
+            $data['call_api']['monthly_minutes'] = '1250';
+            $data['call_api']['monthly_cost'] = '$125';
+            $data['call_api']['last_used'] = '2024-12-10 14:30';
+
+            $data['payment_info']['payment_mode'] = 'Online';
+            $data['payment_info']['payment_status'] = 'PAID';
+            $data['payment_info']['last_payment'] = '2024-12-01';
+            $data['payment_info']['next_payment'] = '2025-01-01';
+            $data['payment_info']['amount'] = '$199';
+            
+            $data['usage_statistic']['total_booking'] = '1247';
+            $data['usage_statistic']['active_drivers'] = '42';
+            $data['usage_statistic']['last_payment'] = '4.8';
+
+            $data['payment_history'] = [
+                [
+                    'date' => '2024-12-01',
+                    'amount' => '$199',
+                    'status' => 'paid',
+                    'method' => 'cash'
+                ],
+                [
+                    'date' => '2024-12-01',
+                    'amount' => '$199',
+                    'status' => 'failed',
+                    'method' => 'online'
+                ],
+                [
+                    'date' => '2024-12-01',
+                    'amount' => '$199',
+                    'status' => 'processing',
+                    'method' => 'cash'
+                ],
+                [
+                    'date' => '2024-12-01',
+                    'amount' => '$199',
+                    'status' => 'pending',
+                    'method' => 'cash'
+                ]
+            ];
+
+            $data['api_configuration']['map_api_provide'] = 'Google Maps';
+            $data['api_configuration']['call_api_provide'] = 'Twillio';
+            $data['api_configuration']['payment_method'] = 'Online';
+            $data['api_configuration']['plan_type'] = 'Premium';
+            $data['api_configuration']['map_search_api_provider'] = 'Google Maps';
+
+            return response()->json([
+                'success' => 1,
+                'data' => $data
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
             ], 500);
         }
     }
