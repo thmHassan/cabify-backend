@@ -19,8 +19,8 @@ class CompanyController extends Controller
                 'email' => 'required|email|unique:tenants,data->email',
                 'password' => 'required|string|min:6',
                 'company_admin_name' => 'required|max:255',
-                'user_name' => 'required|max:255',
-                'company_id' => 'required|unique:tenants,data->company_id',
+                // 'user_name' => 'required|max:255',
+                // 'company_id' => 'required|unique:tenants,data->company_id',
                 'contact_person' => 'required|max:255',
                 'phone' => 'required',
                 'address' => 'required|max:255',
@@ -65,9 +65,9 @@ class CompanyController extends Controller
                 'id' => $tenantId,
                 'company_name' => $request->company_name,
                 'company_admin_name' => $request->company_admin_name,
-                'user_name' => $request->user_name,
+                // 'user_name' => $request->user_name,
                 'email' => $request->email,
-                'company_id' => $request->company_id,
+                // 'company_id' => $request->company_id,
                 'contact_person' => $request->contact_person,
                 'phone' => $request->phone,
                 'address' => $request->address,
@@ -139,7 +139,7 @@ class CompanyController extends Controller
                 'email' => 'email|unique:tenants,data->email',
                 'password' => 'string|min:6',
                 'company_admin_name' => 'max:255',
-                'user_name' => 'max:255',
+                // 'user_name' => 'max:255',
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
@@ -149,7 +149,7 @@ class CompanyController extends Controller
 
             $tenant->company_name = isset($request->company_name) ? $request->company_name : $tenant->company_name;
             $tenant->company_admin_name = isset($request->company_admin_name) ? $request->company_admin_name : $tenant->company_admin_name;
-            $tenant->user_name = isset($request->user_name) ? $request->user_name : $tenant->user_name;
+            // $tenant->user_name = isset($request->user_name) ? $request->user_name : $tenant->user_name;
             $tenant->email = isset($request->email) ? $request->email : $tenant->email;
             $tenant->contact_person = isset($request->contact_person) ? $request->contact_person : $tenant->contact_person;
             $tenant->phone = isset($request->phone) ? $request->phone : $tenant->phone;
