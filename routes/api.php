@@ -36,6 +36,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/update-profile', [HomeController::class, 'updateProfile']);
         Route::post('/super-admin/change-password', [HomeController::class, 'changePassword']);
         Route::get('/super-admin/dashboard', [HomeController::class, 'dashboard']);
+        Route::get('/super-admin/usage-monitoring', [HomeController::class, 'usageMonitoring']);
         
         Route::post('/super-admin/create-company', [CompanyController::class, 'createCompany']);
         Route::get('/super-admin/edit-company', [CompanyController::class, 'getEditCompany']);

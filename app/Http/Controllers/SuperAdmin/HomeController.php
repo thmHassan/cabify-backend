@@ -111,4 +111,56 @@ class HomeController extends Controller
             ], 500);
         }
     }
+
+    public function usageMonitoring(){
+        try{
+            $activeCompanies = Tenant::where('data->status', 'active')->count();
+            $totalAPICalls =  19;
+            $companyList = [
+                [
+                    'company_name' => 'ABC',
+                    'api_calls_today' => '12500',
+                    'map_request' => '8500',
+                    'voip_minutes' => '1250',
+                    'dispatchers' => '5/10'
+                ],
+                [
+                    'company_name' => 'ABC',
+                    'api_calls_today' => '12500',
+                    'map_request' => '8500',
+                    'voip_minutes' => '1250',
+                    'dispatchers' => '5/10'
+                ],
+                [
+                    'company_name' => 'ABC',
+                    'api_calls_today' => '12500',
+                    'map_request' => '8500',
+                    'voip_minutes' => '1250',
+                    'dispatchers' => '5/10'
+                ],
+                [
+                    'company_name' => 'ABC',
+                    'api_calls_today' => '12500',
+                    'map_request' => '8500',
+                    'voip_minutes' => '1250',
+                    'dispatchers' => '5/10'
+                ]
+            ];
+
+            return response()->json([
+                'success' => 1,
+                'data' => [
+                    'activeCompanies' => $activeCompanies,
+                    'totalAPICalls' => $totalAPICalls
+                ],
+                'company_list' => $companyList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
