@@ -9,6 +9,7 @@ use App\Http\Controllers\SuperAdmin\DocumentController;
 use App\Http\Controllers\SuperAdmin\VehicleTypeController;
 use App\Http\Controllers\SuperAdmin\HomeController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
+use App\Http\Controllers\SuperAdmin\SubadminController;
 
 /*
 |--------------------------------------------------------------------------
@@ -65,6 +66,11 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-subscription', [SubscriptionController::class, 'editSubscription']);
         Route::get('/super-admin/edit-subscription', [SubscriptionController::class, 'getEditSubscription']);
         Route::get('/super-admin/subscription-list', [SubscriptionController::class, 'subscriptionList']);
+        
+        Route::post('/super-admin/create-subadmin', [SubadminController::class, 'createSubadmin']);
+        Route::post('/super-admin/edit-subadmin', [SubadminController::class, 'editSubadmin']);
+        Route::get('/super-admin/edit-subadmin', [SubadminController::class, 'getEditSubadmin']);
+        Route::get('/super-admin/subadmin-list', [SubadminController::class, 'subadminList']);
     });
 
     // Example: driver-only

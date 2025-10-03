@@ -14,7 +14,6 @@ class VehicleTypeController extends Controller
                 'vehicle_type_name' => 'required|max:255',
                 'order_no' => 'required',
                 'vehicle_type_service' => 'required|max:255',
-                'recommended_price' => 'required|max:255',
                 'minimum_price' => 'required|max:255',
                 'minimum_distance' => 'required|max:255',
                 'vehicle_image' => 'required',
@@ -39,7 +38,6 @@ class VehicleTypeController extends Controller
             $vehicleType->vehicle_type_name = $request->vehicle_type_name;
             $vehicleType->order_no = $request->order_no;
             $vehicleType->vehicle_type_service = $request->vehicle_type_service;
-            $vehicleType->recommended_price = $request->recommended_price;
             $vehicleType->minimum_price = $request->minimum_price;
             $vehicleType->minimum_distance = $request->minimum_distance;
             if(isset($request->vehicle_image) && $request->vehicle_image != NULL){
@@ -85,7 +83,6 @@ class VehicleTypeController extends Controller
                 'vehicle_type_name' => 'required|max:255',
                 'order_no' => 'required',
                 'vehicle_type_service' => 'required|max:255',
-                'recommended_price' => 'required|max:255',
                 'minimum_price' => 'required|max:255',
                 'minimum_distance' => 'required|max:255',
                 'vehicle_image' => 'required',
@@ -110,7 +107,6 @@ class VehicleTypeController extends Controller
             $vehicleType->vehicle_type_name = $request->vehicle_type_name;
             $vehicleType->order_no = $request->order_no;
             $vehicleType->vehicle_type_service = $request->vehicle_type_service;
-            $vehicleType->recommended_price = $request->recommended_price;
             $vehicleType->minimum_price = $request->minimum_price;
             $vehicleType->minimum_distance = $request->minimum_distance;
             if(isset($request->vehicle_image) && $request->vehicle_image != NULL){
