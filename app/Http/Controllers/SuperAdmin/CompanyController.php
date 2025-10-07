@@ -433,8 +433,7 @@ class CompanyController extends Controller
             }
             elseif($subscription->billing_cycle == "yearly"){
                 $interval = "year";
-            }
-            
+            }      
 
             $products = Product::all(['limit' => 100]);
             $existing = collect($products->data)->firstWhere('name', $subscription->id);
@@ -449,7 +448,6 @@ class CompanyController extends Controller
                 ]);
                 $productId = $product->id;
             }
-
 
             $existingPrice = Price::all([
                 'limit' => 100,
@@ -481,6 +479,10 @@ class CompanyController extends Controller
                 ]],
                 'success_url' => $YOUR_DOMAIN . 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
                 'cancel_url' => $YOUR_DOMAIN . 'subscription-cancel',
+                'metadata' => [
+                    'user_id' => $tenantId,
+                    'plan_id' => $subscription->id,
+                ],
             ]);
 
             return response()->json(['url' => $checkout_session->url]);
