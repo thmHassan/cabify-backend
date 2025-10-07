@@ -567,7 +567,7 @@ class CompanyController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
-            ], 500);
+            ], 500); 
         }
     }
 }
