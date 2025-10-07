@@ -496,7 +496,7 @@ class CompanyController extends Controller
 
     public function stripeWebhook(Request $request){
         try{
-            $payload = @file_get_contents('php://input');
+            $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
             $endpoint_secret = env('STRIPE_WEBHOOK_SECRET');
 
