@@ -47,6 +47,7 @@ jobs:
             composer install --no-dev --optimize-autoloader --prefer-dist
             sudo chmod -R 775 /var/www/html/backend.cabifyit.com/storage
             sudo chmod -R 775 /var/www/html/backend.cabifyit.com/bootstrap/cache
+            sudo chmod -R 775 /var/www/html/backend.cabifyit.com/public
             php artisan migrate
             php artisan config:cache
             php artisan route:cache

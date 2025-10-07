@@ -426,7 +426,7 @@ class CompanyController extends Controller
             $tenant = Tenant::where("id", $tenantId)->first();
 
             $subscription = Subscription::where("id", $tenant->subscription_type)->first();
-            $amount = $subscription->amount;
+            $amount = $subscription->amount * 100;
             $interval = "month";
             if($subscription->billing_cycle == "monthly"){
                 $interval = "month";

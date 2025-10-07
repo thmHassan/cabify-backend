@@ -26,6 +26,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
+Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 Route::post('login', [AuthController::class, 'login']);
 
 Route::group(['middleware' => ['auth:api']], function () {
@@ -48,7 +49,6 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/company-subscription-list', [CompanyController::class, 'subscriptionList']);
         Route::post('/super-admin/cash-payment', [CompanyController::class, 'cashPayment']);
         Route::post('/super-admin/create-stripe-payment-url', [CompanyController::class, 'createStripePaymentUrl']);
-        Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);
