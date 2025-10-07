@@ -503,7 +503,7 @@ class CompanyController extends Controller
             try {
                 $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
             } catch (\Exception $e) {
-                return response('Webhook error', 400);
+                return response($e->getMessage(), 400);
             }
 
             switch ($event->type) {
