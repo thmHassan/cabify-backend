@@ -45,6 +45,10 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/company-cards', [CompanyController::class, 'companyCards']);
         Route::get('/super-admin/company-list', [CompanyController::class, 'companyList']);
         Route::get('/super-admin/company-details', [CompanyController::class, 'companyDetails']);
+        Route::get('/super-admin/company-subscription-list', [CompanyController::class, 'subscriptionList']);
+        Route::post('/super-admin/cash-payment', [CompanyController::class, 'cashPayment']);
+        Route::post('/super-admin/create-stripe-payment-url', [CompanyController::class, 'createStripePaymentUrl']);
+        Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);

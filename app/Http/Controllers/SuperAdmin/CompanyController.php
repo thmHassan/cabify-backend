@@ -8,6 +8,14 @@ use App\Models\Tenant;
 use Illuminate\Support\Facades\Artisan;
 use DB;
 use Illuminate\Support\Facades\Hash;
+use App\Models\Subscription;
+use Stripe\Stripe;
+use Stripe\Checkout\Session;
+use Stripe\Price;
+use Stripe\Product;
+use Stripe\Webhook;
+use Stripe\Checkout\Session as CheckoutSession;
+use Stripe\Subscription as StripeSubscription;
 
 class CompanyController extends Controller
 {
@@ -111,7 +119,8 @@ class CompanyController extends Controller
                 'accounts' => $request->accounts,
                 'status' => 'active',
                 'password' => Hash::make($request->password),
-                'picture' => (isset($filename) && $filename != '') ? public_path('pictures').'/'.$filename : ''
+                'picture' => (isset($filename) && $filename != '') ? public_path('pictures').'/'.$filename : '',
+                'payment_status' => 'pending'
             ]);
 
             // $tenant->database()->manager()->createDatabase($tenant);
@@ -345,6 +354,213 @@ class CompanyController extends Controller
             return response()->json([
                 'success' => 1,
                 'data' => $data
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function cashPayment(Request $request){
+        try{
+            $request->validate([
+                'id' => 'required'
+            ]);
+
+            $user = Tenant::where("id", $request->id)->first();
+            $user->payment_status = "success";
+            $user->payment_method = "cash";
+            $user->save();
+
+            $subscription = Subscription::where("id", $user->subscription_type)->first();
+            if($subscription->billing_cycle == "monthly"){
+                $user->expiry_date = date('Y-m-d', strtotime('+1 month'));
+            }
+            elseif($subscription->billing_cycle == "quarterly"){
+                $user->expiry_date = date('Y-m-d', strtotime('+3 months'));
+            }
+            elseif($subscription->billing_cycle == "yearly"){
+                $user->expiry_date = date('Y-m-d', strtotime('+1 year'));
+            }
+            $user->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => "Payment status updated successfully"
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function subscriptionList(Request $request){
+        try{
+            $subscriptionList = Subscription::orderBy("id","DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'list' => $subscriptionList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function createStripePaymentUrl(Request $request){
+        try{
+            Stripe::setApiKey(env('STRIPE_SECRET'));
+            $YOUR_DOMAIN = env('FRONTEND_URL');
+            
+            $tenantId = $request->id;
+            $tenant = Tenant::where("id", $tenantId)->first();
+
+            $subscription = Subscription::where("id", $tenant->subscription_type)->first();
+            $amount = $subscription->amount;
+            $interval = "month";
+            if($subscription->billing_cycle == "monthly"){
+                $interval = "month";
+            }
+            elseif($subscription->billing_cycle == "yearly"){
+                $interval = "year";
+            }
+            
+
+            $products = Product::all(['limit' => 100]);
+            $existing = collect($products->data)->firstWhere('name', $subscription->id);
+
+            if($existing){
+                $productId = $existing->id;
+            }
+            else{
+                $product = Product::create([
+                    'name' => $subscription->id,
+                    'description' => $subscription->plan_name . ", ". $subscription->billing_cycle. ", ". $subscription->amount .", ". $subscription->features,
+                ]);
+                $productId = $product->id;
+            }
+
+
+            $existingPrice = Price::all([
+                'limit' => 100,
+                'product' => $productId,
+            ]);
+
+            $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
+                $p->unit_amount == $amount && $p->recurring->interval == $interval
+            );
+
+            if ($matching) {
+                $priceId = $matching->id;
+            } else {
+                $price = Price::create([
+                    'unit_amount' => $amount,
+                    'currency' => 'usd',
+                    'recurring' => ['interval' => $interval],
+                    'product' => $productId,
+                ]);
+                $priceId = $price->id;
+            }
+
+            $checkout_session = Session::create([
+                'mode' => 'subscription',
+                'payment_method_types' => ['card'],
+                'line_items' => [[
+                    'price' => $priceId,
+                    'quantity' => 1,
+                ]],
+                'success_url' => $YOUR_DOMAIN . 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
+                'cancel_url' => $YOUR_DOMAIN . 'subscription-cancel',
+            ]);
+
+            return response()->json(['url' => $checkout_session->url]);
+
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function stripeWebhook(Request $request){
+        try{
+            $payload = @file_get_contents('php://input');
+            $sig_header = $request->header('Stripe-Signature');
+            $endpoint_secret = env('STRIPE_WEBHOOK_SECRET');
+
+            try {
+                $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
+            } catch (\Exception $e) {
+                return response('Webhook error', 400);
+            }
+
+            switch ($event->type) {
+                case 'checkout.session.completed':
+                    $session = $event->data->object;
+                    \Log::info($session);
+                    // Save subscription and payment info
+                    $userId = $session->metadata->user_id ?? null;
+                    \DB::table('subscriptions')->updateOrInsert(
+                        ['user_id' => $userId],
+                        [
+                            'stripe_subscription_id' => $session->subscription,
+                            'status' => 'active',
+                            'expiry_date' => now()->addMonth(), // based on plan interval
+                        ]
+                    );
+                    break;
+
+                case 'invoice.payment_succeeded':
+                    $invoice = $event->data->object;
+                    $subscriptionId = $invoice->subscription;
+                    \Log::info($invoice);
+                    // Extend expiry date
+                    \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                        ->update([
+                            'status' => 'active',
+                            'expiry_date' => now()->addMonth(),
+                        ]);
+                    break;
+
+                case 'invoice.payment_failed':
+                    $invoice = $event->data->object;
+                    $subscriptionId = $invoice->subscription;
+                    \Log::info($invoice);
+                    // Extend expiry date
+                    \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                        ->update([
+                            'status' => 'active',
+                            'expiry_date' => now()->addMonth(),
+                        ]);
+                    break;
+
+                case 'payment_intent.payment_failed':
+                    $invoice = $event->data->object;
+                    $subscriptionId = $invoice->subscription;
+                    \Log::info($invoice);
+                    // Extend expiry date
+                    \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                        ->update([
+                            'status' => 'active',
+                            'expiry_date' => now()->addMonth(),
+                        ]);
+                    break;
+            }
+            return response()->json([
+                'success' => 1,
+                'message' => 'Payment done and subscription created successfully'
             ]);
         }
         catch(\Exception $e){
