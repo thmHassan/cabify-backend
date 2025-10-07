@@ -481,7 +481,13 @@ class CompanyController extends Controller
                 'cancel_url' => $YOUR_DOMAIN . 'subscription-cancel',
                 'metadata' => [
                     'user_id' => $tenantId,
-                    'plan_id' => $subscription->id,
+                    'subscription_id' => $subscription->id,
+                ],
+                'subscription_data' => [
+                    'metadata' => [
+                        'user_id' => $tenantId,
+                        'subscription_id' => $subscription->id,
+                    ],
                 ],
             ]);
 
@@ -511,17 +517,26 @@ class CompanyController extends Controller
             switch ($event->type) {
                 case 'checkout.session.completed':
                     $session = $event->data->object;
-                    \Log::info($session);
-                    // Save subscription and payment info
                     $userId = $session->metadata->user_id ?? null;
-                    \DB::table('subscriptions')->updateOrInsert(
-                        ['user_id' => $userId],
-                        [
-                            'stripe_subscription_id' => $session->subscription,
-                            'status' => 'active',
-                            'expiry_date' => now()->addMonth(), // based on plan interval
-                        ]
-                    );
+                    $subscriptionId = $session->metadata->subscription_id ?? null;
+                    
+                    $tenant = Tenant::where("id", $userId)->first();
+                    $subscription = Subscription::where("id", $userId)->first();
+
+                    $tenant->payment_status = "success";
+                    $tenant->payment_method = "stripe";
+                    $tenant->save();
+
+                    if($subscription->billing_cycle == "monthly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 month'));
+                    }
+                    elseif($subscription->billing_cycle == "quarterly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+3 months'));
+                    }
+                    elseif($subscription->billing_cycle == "yearly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
+                    }
+                    $tenant->save();
                     break;
 
                 case 'invoice.payment_succeeded':
