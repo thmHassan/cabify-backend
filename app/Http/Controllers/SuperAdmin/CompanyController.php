@@ -557,13 +557,13 @@ class CompanyController extends Controller
                     $userSubscription->features = $subscription->features;
                     $userSubscription->status = 'active';
                     if($subscription->billing_cycle == "monthly"){
-                        $userSubscription->expiry_at = date('Y-m-d', strtotime('+1 month'));
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
                     }
                     elseif($subscription->billing_cycle == "quarterly"){
-                        $userSubscription->expiry_at = date('Y-m-d', strtotime('+3 months'));
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
                     }
                     elseif($subscription->billing_cycle == "yearly"){
-                        $userSubscription->expiry_at = date('Y-m-d', strtotime('+1 year'));
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
                     }
                     $userSubscription->save();
                     break;
