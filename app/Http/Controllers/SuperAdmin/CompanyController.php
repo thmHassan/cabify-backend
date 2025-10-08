@@ -542,8 +542,8 @@ class CompanyController extends Controller
 
                 case 'invoice.payment_succeeded':
                     $session = $event->data->object;
-                    $userId = $session->metadata->user_id ?? null;
-                    $subscriptionId = $session->metadata->subscription_id ?? null;
+                    $userId = $session->subscription_details->metadata->user_id ?? null;
+                    $subscriptionId = $session->subscription_details->metadata->subscription_id ?? null;
                     
                     $tenant = Tenant::where("id", $userId)->first();
                     $subscription = Subscription::where("id", $subscriptionId)->first();
