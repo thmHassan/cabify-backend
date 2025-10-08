@@ -16,6 +16,7 @@ use Stripe\Product;
 use Stripe\Webhook;
 use Stripe\Checkout\Session as CheckoutSession;
 use Stripe\Subscription as StripeSubscription;
+use App\Models\UserSubscription;
 
 class CompanyController extends Controller
 {
@@ -540,15 +541,31 @@ class CompanyController extends Controller
                     break;
 
                 case 'invoice.payment_succeeded':
-                    $invoice = $event->data->object;
-                    $subscriptionId = $invoice->subscription;
-                    \Log::info($invoice);
-                    // Extend expiry date
-                    \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
-                        ->update([
-                            'status' => 'active',
-                            'expiry_date' => now()->addMonth(),
-                        ]);
+                    $session = $event->data->object;
+                    $userId = $session->metadata->user_id ?? null;
+                    $subscriptionId = $session->metadata->subscription_id ?? null;
+                    
+                    $tenant = Tenant::where("id", $userId)->first();
+                    $subscription = Subscription::where("id", $userId)->first();
+
+                    $userSubscription = new UserSubscription;
+                    $userSubscription->subscription_id = $subscription->id;
+                    $userSubscription->user_id = $tenant->id;
+                    $userSubscription->plan_name = $subscription->plan_name;
+                    $userSubscription->billing_cycle = $subscription->billing_cycle;
+                    $userSubscription->amount = $subscription->amount;
+                    $userSubscription->features = $subscription->features;
+                    $userSubscription->status = 'active';
+                    if($subscription->billing_cycle == "monthly"){
+                        $userSubscription->expiry_at = date('Y-m-d', strtotime('+1 month'));
+                    }
+                    elseif($subscription->billing_cycle == "quarterly"){
+                        $userSubscription->expiry_at = date('Y-m-d', strtotime('+3 months'));
+                    }
+                    elseif($subscription->billing_cycle == "yearly"){
+                        $userSubscription->expiry_at = date('Y-m-d', strtotime('+1 year'));
+                    }
+                    $userSubscription->save();
                     break;
 
                 case 'invoice.payment_failed':
