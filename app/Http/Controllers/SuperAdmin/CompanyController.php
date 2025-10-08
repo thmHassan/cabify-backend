@@ -522,7 +522,7 @@ class CompanyController extends Controller
                     $subscriptionId = $session->metadata->subscription_id ?? null;
                     
                     $tenant = Tenant::where("id", $userId)->first();
-                    $subscription = Subscription::where("id", $userId)->first();
+                    $subscription = Subscription::where("id", $subscriptionId)->first();
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
@@ -546,7 +546,7 @@ class CompanyController extends Controller
                     $subscriptionId = $session->metadata->subscription_id ?? null;
                     
                     $tenant = Tenant::where("id", $userId)->first();
-                    $subscription = Subscription::where("id", $userId)->first();
+                    $subscription = Subscription::where("id", $subscriptionId)->first();
 
                     $userSubscription = new UserSubscription;
                     $userSubscription->subscription_id = $subscription->id;
@@ -573,11 +573,11 @@ class CompanyController extends Controller
                     $subscriptionId = $invoice->subscription;
                     \Log::info($invoice);
                     // Extend expiry date
-                    \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
-                        ->update([
-                            'status' => 'active',
-                            'expiry_date' => now()->addMonth(),
-                        ]);
+                    // \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                    //     ->update([
+                    //         'status' => 'active',
+                    //         'expiry_date' => now()->addMonth(),
+                    //     ]);
                     break;
 
                 case 'payment_intent.payment_failed':
@@ -585,11 +585,11 @@ class CompanyController extends Controller
                     $subscriptionId = $invoice->subscription;
                     \Log::info($invoice);
                     // Extend expiry date
-                    \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
-                        ->update([
-                            'status' => 'active',
-                            'expiry_date' => now()->addMonth(),
-                        ]);
+                    // \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                    //     ->update([
+                    //         'status' => 'active',
+                    //         'expiry_date' => now()->addMonth(),
+                    //     ]);
                     break;
             }
             return response()->json([
