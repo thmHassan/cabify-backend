@@ -386,6 +386,7 @@ class CompanyController extends Controller
             elseif($subscription->billing_cycle == "yearly"){
                 $user->expiry_date = date('Y-m-d', strtotime('+1 year'));
             }
+            $user->payment_amount = $subscription->amount;
             $user->save();
 
             return response()->json([
@@ -526,6 +527,7 @@ class CompanyController extends Controller
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
+                    $tenant->payment_amount = $subscription->amount;
                     $tenant->save();
 
                     if($subscription->billing_cycle == "monthly"){
