@@ -66,6 +66,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-vehicle-type', [VehicleTypeController::class, 'editVehicleType']);
         Route::post('/super-admin/delete-vehicle-type', [VehicleTypeController::class, 'deleteVehicleType']);
         Route::get('/super-admin/vehicle-type-list', [VehicleTypeController::class, 'vehicleTypeList']);
+        Route::get('/super-admin/all-vehicle-type-list', [VehicleTypeController::class, 'allVehicleTypeList']);
 
         Route::get('/super-admin/subscription-cards', [SubscriptionController::class, 'subscriptionCards']);
         Route::post('/super-admin/create-subscription', [SubscriptionController::class, 'createSubscription']);

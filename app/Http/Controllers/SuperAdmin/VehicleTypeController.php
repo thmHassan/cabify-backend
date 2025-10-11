@@ -185,4 +185,21 @@ class VehicleTypeController extends Controller
             ]);
         }
     }
+
+    public function allVehicleTypeList(){
+        try{
+            $list = VehicleType::orderBy("id","DESC")->get();
+            return response()->json([
+                'success' => 1,
+                'message' => 'List fetched successfully',
+                'list' => $list
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
