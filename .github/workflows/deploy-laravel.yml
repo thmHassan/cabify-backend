@@ -49,6 +49,7 @@ jobs:
             sudo chmod -R 775 /var/www/html/backend.cabifyit.com/bootstrap/cache
             sudo chmod -R 775 /var/www/html/backend.cabifyit.com/public
             php artisan migrate
+            php artisan tenants:migrate --path=database/migrations/tenant
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache

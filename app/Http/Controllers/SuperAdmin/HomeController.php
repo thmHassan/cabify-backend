@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Hash;
+use App\Models\Setting;
 
 class HomeController extends Controller
 {
@@ -154,6 +155,52 @@ class HomeController extends Controller
                     'totalAPICalls' => $totalAPICalls
                 ],
                 'company_list' => $companyList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getAPIKeys(){
+        try{
+            $settingKeys = Setting::orderBy("id", "DESC")->first();
+            return response()->json([
+                'success' => 1,
+                'settingKeys' => $settingKeys
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function storeAPIKeys(Request $request){
+        try{
+            $settingKeys = Setting::orderBy("id", "DESC")->first();
+            if(!isset($settingKeys) || $settingKeys == NULL){
+                $settingKeys = new Setting;
+            }
+            $settingKeys->stripe_secret = $request->stripe_secret;
+            $settingKeys->stripe_key = $request->stripe_key;
+            $settingKeys->barikoi_key = $request->barikoi_key;
+            $settingKeys->google_map_key = $request->google_map_key;
+            $settingKeys->firebase_key = $request->firebase_key;
+            $settingKeys->smtp_host = $request->smtp_host;
+            $settingKeys->smtp_user_name = $request->smtp_user_name;
+            $settingKeys->smtp_password = $request->smtp_password;
+            $settingKeys->smtp_from_address = $request->smtp_from_address;
+            $settingKeys->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'API keys saved successfully'
             ]);
         }
         catch(\Exception $e){
