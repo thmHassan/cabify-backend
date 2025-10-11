@@ -468,7 +468,8 @@ class CompanyController extends Controller
     public function createStripePaymentUrl(Request $request){
         try{
             Stripe::setApiKey(env('STRIPE_SECRET'));
-            $YOUR_DOMAIN = env('FRONTEND_URL');
+            $YOUR_DOMAIN = "http://localhost:5173/";
+            // $YOUR_DOMAIN = env('FRONTEND_URL');
             
             $tenantId = $request->id;
             $tenant = Tenant::where("id", $tenantId)->first();
@@ -526,7 +527,7 @@ class CompanyController extends Controller
                     'quantity' => 1,
                 ]],
                 'success_url' => $YOUR_DOMAIN . 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
-                'cancel_url' => $YOUR_DOMAIN . 'subscription-cancel',
+                'cancel_url' => $YOUR_DOMAIN . 'payment-failed',
                 'metadata' => [
                     'user_id' => $tenantId,
                     'subscription_id' => $subscription->id,
