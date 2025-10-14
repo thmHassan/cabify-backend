@@ -10,6 +10,7 @@ use App\Http\Controllers\SuperAdmin\VehicleTypeController;
 use App\Http\Controllers\SuperAdmin\HomeController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
+use App\Http\Controllers\SuperAdmin\PlotController;
 use App\Http\Controllers\Company\DispatcherController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
@@ -81,6 +82,11 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/edit-subadmin', [SubadminController::class, 'getEditSubadmin']);
         Route::get('/super-admin/subadmin-list', [SubadminController::class, 'subadminList']);
         Route::get('/super-admin/get-subadmin-permission', [SubadminController::class, 'getSubadminPermission']);
+
+        Route::post('/super-admin/create-plot', [PlotController::class, 'createPlot']);
+        Route::post('/super-admin/edit-plot', [PlotController::class, 'editPlot']);
+        Route::get('/super-admin/edit-plot', [PlotController::class, 'getEditPlot']);
+        Route::get('/super-admin/plot-list', [PlotController::class, 'plotList']);
     });
 });
 
