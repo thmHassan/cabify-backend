@@ -16,7 +16,7 @@ class AuthController extends Controller
         $data = $request->validate([
             'email' => 'required|email',
             'password' => 'required|string',
-            'role' => 'required|string|in:superadmin,client,dispatcher,driver,passenger',
+            'role' => 'required|string|in:superadmin,subadmin,client,dispatcher,driver,passenger',
         ]);
 
         // Ensure user exists and has the role

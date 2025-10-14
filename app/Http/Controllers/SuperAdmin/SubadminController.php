@@ -122,4 +122,20 @@ class SubadminController extends Controller
             ], 500);
         }
     }
+
+    public function getSubadminPermission(Request $request){
+        try{
+            $user = $request->user();
+            return response()->json([
+                'success' => 1,
+                'permissions' => $user->permissions
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

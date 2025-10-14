@@ -10,6 +10,8 @@ use App\Http\Controllers\SuperAdmin\VehicleTypeController;
 use App\Http\Controllers\SuperAdmin\HomeController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
+use App\Http\Controllers\Company\DispatcherController;
+use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
 |--------------------------------------------------------------------------
@@ -28,13 +30,13 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 Route::post('login', [AuthController::class, 'login']);
+Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 
 Route::group(['middleware' => ['auth:api']], function () {
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('me', [AuthController::class, 'me']);
 
-    // Example: routes only for dispatchers and super_admin
-    Route::group(['middleware' => ['role:superadmin']], function () {
+    Route::group(['middleware' => ['role:superadmin,subadmin']], function () {
         Route::post('/super-admin/update-profile', [HomeController::class, 'updateProfile']);
         Route::post('/super-admin/change-password', [HomeController::class, 'changePassword']);
         Route::get('/super-admin/dashboard', [HomeController::class, 'dashboard']);
@@ -78,12 +80,21 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-subadmin', [SubadminController::class, 'editSubadmin']);
         Route::get('/super-admin/edit-subadmin', [SubadminController::class, 'getEditSubadmin']);
         Route::get('/super-admin/subadmin-list', [SubadminController::class, 'subadminList']);
+        Route::get('/super-admin/get-subadmin-permission', [SubadminController::class, 'getSubadminPermission']);
     });
+});
 
-    // Example: driver-only
-    Route::group(['middleware' => ['role:driver']], function () {
-        Route::get('driver-only', function () {
-            return response()->json(['message' => 'hello driver']);
-        });
-    });
+Route::group(['middleware' => ['auth.tenant.jwt']], function () {
+    // Route::group(['middleware' => ['tenant']], function () {
+        Route::post('/company/create-dispatcher', [DispatcherController::class, 'createDispatcher']);
+    // });
+});
+
+Route::get('/tenant/me', function (Illuminate\Http\Request $request) {
+    try {
+        $tenant = auth('tenant')->setToken($request->bearerToken())->user();
+        return response()->json(['tenant' => $tenant]);
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Unauthenticated', 'error' => $e->getMessage()], 401);
+    }
 });
