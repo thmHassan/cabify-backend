@@ -45,7 +45,7 @@ class SubadminController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
-            ]);
+            ], 500);
         }
     }
 
@@ -87,7 +87,7 @@ class SubadminController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
-            ]);
+            ], 500);
         }
     }
 
@@ -103,7 +103,7 @@ class SubadminController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
-            ]);
+            ], 500);
         }
     }
 
@@ -119,7 +119,7 @@ class SubadminController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
-            ]);
+            ], 500);
         }
     }
 }
