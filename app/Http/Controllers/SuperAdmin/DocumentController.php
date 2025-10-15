@@ -110,4 +110,20 @@ class DocumentController extends Controller
             ], 500);
         }
     }
+
+    public function getEditDocument(Request $request){
+        try{
+            $document =DocumentType::where("id", $request->id)->first();
+            return response()->json([
+                'success' => 1,
+                'document' => $document
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

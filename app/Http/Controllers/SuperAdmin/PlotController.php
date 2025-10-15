@@ -90,4 +90,24 @@ class PlotController extends Controller
             ], 500);
         }
     }
+
+    public function deletePlot(Request $request){
+        try{
+            $plot = Plot::where("id", $request->id)->first();
+
+            if(isset($plot) && $plot != NULL){
+                $plot->delete();
+            }
+            return response()->json([
+                'success' => 1,
+                'message' => 'Plot deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

@@ -62,6 +62,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         
         Route::post('/super-admin/create-document', [DocumentController::class, 'createDocument']);
         Route::post('/super-admin/edit-document', [DocumentController::class, 'editDocument']);
+        Route::get('/super-admin/edit-document', [DocumentController::class, 'getEditDocument']);
         Route::get('/super-admin/document-list', [DocumentController::class, 'documentList']);
         Route::post('/super-admin/delete-document', [DocumentController::class, 'deleteDocument']);
         
@@ -87,6 +88,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-plot', [PlotController::class, 'editPlot']);
         Route::get('/super-admin/edit-plot', [PlotController::class, 'getEditPlot']);
         Route::get('/super-admin/plot-list', [PlotController::class, 'plotList']);
+        Route::get('/super-admin/delete-plot', [PlotController::class, 'deletePlot']);
     });
 });
 
