@@ -201,10 +201,12 @@ class CompanyController extends Controller
             $request->validate([
                 'id' => 'required',
                 'company_name' => 'max:255',
-                'email' => 'email|unique:tenants,data->email',
-                'password' => 'string|min:6',
+                'email' => [
+                    'email',
+                    Rule::unique('tenants', 'data->email')->ignore($request->id, 'id'),
+                ],
+                'password' => 'nullable|string|min:6',
                 'company_admin_name' => 'max:255',
-                // 'user_name' => 'max:255',
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
