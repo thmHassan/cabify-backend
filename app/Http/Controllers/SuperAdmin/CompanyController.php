@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Artisan;
 use DB;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Subscription;
+use App\Models\TenantUser;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
 use Stripe\Price;
@@ -17,6 +18,8 @@ use Stripe\Webhook;
 use Stripe\Checkout\Session as CheckoutSession;
 use Stripe\Subscription as StripeSubscription;
 use App\Models\UserSubscription;
+use Illuminate\Support\Facades\Auth;
+use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 class CompanyController extends Controller
 {
@@ -28,8 +31,6 @@ class CompanyController extends Controller
                 'email' => 'required|email|unique:tenants,data->email',
                 'password' => 'required|string|min:6',
                 'company_admin_name' => 'required|max:255',
-                // 'user_name' => 'required|max:255',
-                // 'company_id' => 'required|unique:tenants,data->company_id',
                 'contact_person' => 'required|max:255',
                 'phone' => 'required',
                 'address' => 'required|max:255',
@@ -77,52 +78,52 @@ class CompanyController extends Controller
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('pictures'), $filename);
             }
-            $tenant = Tenant::create([
-                'id' => $tenantId,
-                'company_name' => $request->company_name,
-                'company_admin_name' => $request->company_admin_name,
-                // 'user_name' => $request->user_name,
-                'email' => $request->email,
-                // 'company_id' => $request->company_id,
-                'contact_person' => $request->contact_person,
-                'phone' => $request->phone,
-                'address' => $request->address,
-                'city' => $request->city,
-                'currency' => $request->currency,
-                'maps_api' => $request->maps_api,
-                'search_api' => $request->search_api,
-                'log_map_search_result' => $request->log_map_search_result,
-                'voip' => $request->voip,
-                'drivers_allowed' => $request->drivers_allowed,
-                'sub_company' => $request->sub_company,
-                'passengers_allowed' => $request->passengers_allowed,
-                'uber_plot_hybrid' => $request->uber_plot_hybrid,
-                'dispatchers_allowed' => $request->dispatchers_allowed,
-                'subscription_type' => $request->subscription_type,
-                'fleet_management' => $request->fleet_management,
-                'sos_features' => $request->sos_features,
-                'notes' => $request->notes,
-                'stripe_enable' => $request->stripe_enable,
-                'stripe_enablement' => $request->stripe_enablement,
-                'units' => $request->units,
-                'country_of_use' => $request->country_of_use,
-                'time_zone' => $request->time_zone,
-                'enable_smtp' => $request->enable_smtp,
-                'dispatcher' => $request->dispatcher,
-                'map' => $request->map,
-                'push_notification' => $request->push_notification,
-                'usage_monitoring' => $request->usage_monitoring,
-                'revenue_statements' => $request->revenue_statements,
-                'zone' => $request->zone,
-                'manage_zones' => $request->manage_zones,
-                'cms' => $request->cms,
-                'lost_found' => $request->lost_found,
-                'accounts' => $request->accounts,
-                'status' => 'active',
-                'password' => Hash::make($request->password),
-                'picture' => (isset($filename) && $filename != '') ? public_path('pictures').'/'.$filename : '',
-                'payment_status' => 'pending'
-            ]);
+
+            $tenant = new Tenant();
+            $tenant->id = $tenantId;
+            $tenant->company_name = $request->company_name;
+            $tenant->company_admin_name = $request->company_admin_name;
+            $tenant->email = $request->email;
+            $tenant->contact_person = $request->contact_person;
+            $tenant->phone = $request->phone;
+            $tenant->address = $request->address;
+            $tenant->city = $request->city;
+            $tenant->currency = $request->currency;
+            $tenant->maps_api = $request->maps_api;
+            $tenant->search_api = $request->search_api;
+            $tenant->log_map_search_result = $request->log_map_search_result;
+            $tenant->voip = $request->voip;
+            $tenant->drivers_allowed = $request->drivers_allowed;
+            $tenant->sub_company = $request->sub_company;
+            $tenant->passengers_allowed = $request->passengers_allowed;
+            $tenant->uber_plot_hybrid = $request->uber_plot_hybrid;
+            $tenant->dispatchers_allowed = $request->dispatchers_allowed;
+            $tenant->subscription_type = $request->subscription_type;
+            $tenant->fleet_management = $request->fleet_management;
+            $tenant->sos_features = $request->sos_features;
+            $tenant->notes = $request->notes;
+            $tenant->stripe_enable = $request->stripe_enable;
+            $tenant->stripe_enablement = $request->stripe_enablement;
+            $tenant->units = $request->units;
+            $tenant->country_of_use = $request->country_of_use;
+            $tenant->time_zone = $request->time_zone;
+            $tenant->enable_smtp = $request->enable_smtp;
+            $tenant->dispatcher = $request->dispatcher;
+            $tenant->map = $request->map;
+            $tenant->push_notification = $request->push_notification;
+            $tenant->usage_monitoring = $request->usage_monitoring;
+            $tenant->revenue_statements = $request->revenue_statements;
+            $tenant->zone = $request->zone;
+            $tenant->manage_zones = $request->manage_zones;
+            $tenant->cms = $request->cms;
+            $tenant->lost_found = $request->lost_found;
+            $tenant->accounts = $request->accounts;
+            $tenant->status = 'active';
+            $tenant->password = Hash::make($request->password);
+            $tenant->picture = $filename ?? null;
+            $tenant->payment_status = 'pending';
+            $tenant->database = 'tenant_' . $tenantId;
+            $tenant->save();
 
             // $tenant->database()->manager()->createDatabase($tenant);
             // $tenant->createDatabase();
@@ -275,7 +276,7 @@ class CompanyController extends Controller
         catch(\Exception $e){
             return response()->json([
                 'error' => 1,
-                'message' => "Something went wrong"
+                'message' => $e->getMessage()
             ], 500);
         }
     }
@@ -644,6 +645,50 @@ class CompanyController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Payment done and subscription created successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            \Log::info($e->getMessage());
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500); 
+        }
+    }
+
+    public function companyLogin(Request $request){
+        try{
+            $request->validate([
+                'email' => 'required|email',
+                'password' => 'required',
+            ]);
+            
+            $tenant = TenantUser::where("data->email",$request->email)->first();
+            
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Tenant not found'
+                ], 404);
+            }
+
+            if (!Hash::check($request->password, $tenant->data['password'])) {
+                return response()->json(['message' => 'Invalid credentials'], 401);
+            }
+            
+            // $token = JWTAuth::fromUser($tenant);
+            // $token = auth('tenant')->login($tenant);
+
+            // $credentials = $request->only('email', 'password');
+            // if (!$token = Auth::guard('tenant')->attempt($credentials)) {
+            //     return response()->json(['error' => 'Unauthorized'], 401);
+            // }
+            $token = JWTAuth::fromUser($tenant);
+
+            return response()->json([
+                'message' => 'Tenant login successful',
+                'token' => $token,
+                'tenant_id' => $tenant->id,
             ]);
         }
         catch(\Exception $e){

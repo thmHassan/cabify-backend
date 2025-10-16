@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,6 +20,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // JWTAuth::resolveGuard(function () {
+        //     return auth('tenant');
+        // });
     }
 }

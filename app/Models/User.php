@@ -46,7 +46,6 @@ class User extends Authenticatable implements JWTSubject
         'permissions' => 'array',
     ];
 
-     // JWTSubject methods
     public function getJWTIdentifier()
     {
         return $this->getKey();
