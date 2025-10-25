@@ -16,6 +16,7 @@ use App\Http\Controllers\Company\UserController;
 use App\Http\Controllers\Company\DriverController;
 use App\Http\Controllers\Company\DocumentTypeController;
 use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeController;
+use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -132,6 +133,12 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/delete-vehicle-type', [CompanyVehicleTypeController::class, 'deleteVehicleType']);
         Route::get('/company/list-vehicle-type', [CompanyVehicleTypeController::class, 'listVehicleType']);
         Route::get('/company/all-vehicle-type', [CompanyVehicleTypeController::class, 'allVehicleType']);
+        
+        Route::post('/company/create-plot', [CompanyPlotController::class, 'createPlot']);
+        Route::post('/company/edit-plot', [CompanyPlotController::class, 'editPlot']);
+        Route::get('/company/edit-plot', [CompanyPlotController::class, 'getEditPlot']);
+        Route::get('/company/list-plot', [CompanyPlotController::class, 'plotList']);
+        Route::get('/company/delete-plot', [CompanyPlotController::class, 'deletePlot']);
     // });
 });
 
