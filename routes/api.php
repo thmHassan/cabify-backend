@@ -12,6 +12,10 @@ use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
 use App\Http\Controllers\SuperAdmin\PlotController;
 use App\Http\Controllers\Company\DispatcherController;
+use App\Http\Controllers\Company\UserController;
+use App\Http\Controllers\Company\DriverController;
+use App\Http\Controllers\Company\DocumentTypeController;
+use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -92,9 +96,42 @@ Route::group(['middleware' => ['auth:api']], function () {
     });
 });
 
-Route::group(['middleware' => ['auth.tenant.jwt']], function () {
+Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     // Route::group(['middleware' => ['tenant']], function () {
         Route::post('/company/create-dispatcher', [DispatcherController::class, 'createDispatcher']);
+        Route::post('/company/edit-dispatcher', [DispatcherController::class, 'editDispatcher']);
+        Route::get('/company/edit-dispatcher', [DispatcherController::class, 'getEditDispatcher']);
+        Route::get('/company/list-dispatcher', [DispatcherController::class, 'listDispatcher']);
+        Route::get('/company/dispatcher-cards', [DispatcherController::class, 'dispatcherCards']);
+        Route::get('/company/delete-dispatcher', [DispatcherController::class, 'deleteDispatcher']);
+        
+        Route::post('/company/create-user', [UserController::class, 'createUser']);
+        Route::post('/company/edit-user', [UserController::class, 'editUser']);
+        Route::get('/company/edit-user', [UserController::class, 'getEditUser']);
+        Route::get('/company/list-user', [UserController::class, 'listUser']);
+        Route::get('/company/delete-user', [UserController::class, 'deleteUser']);
+        Route::get('/company/change-user-status', [UserController::class, 'changeUserStatus']);
+
+        Route::post('/company/create-driver', [DriverController::class, 'createDriver']);
+        Route::post('/company/edit-driver', [DriverController::class, 'editDriver']);
+        Route::get('/company/edit-driver', [DriverController::class, 'getEditDriver']);
+        Route::get('/company/list-driver', [DriverController::class, 'listDriver']);
+        Route::get('/company/delete-driver', [DriverController::class, 'deleteDriver']);
+        Route::get('/company/change-driver-status', [DriverController::class, 'changeDriverStatus']);
+        Route::post('/company/add-wallet-balance', [DriverController::class, 'addWalletBalance']);
+        
+        Route::post('/company/create-document-type', [DocumentTypeController::class, 'createDocumentType']);
+        Route::post('/company/edit-document-type', [DocumentTypeController::class, 'editDocumentType']);
+        Route::get('/company/edit-document-type', [DocumentTypeController::class, 'getEditDocumentType']);
+        Route::get('/company/delete-document-type', [DocumentTypeController::class, 'deleteDocumentType']);
+        Route::get('/company/list-document-type', [DocumentTypeController::class, 'listDocumentType']);
+        
+        Route::post('/company/create-vehicle-type', [CompanyVehicleTypeController::class, 'createVehicleType']);
+        Route::post('/company/edit-vehicle-type', [CompanyVehicleTypeController::class, 'editVehicleType']);
+        Route::get('/company/edit-vehicle-type', [CompanyVehicleTypeController::class, 'getEditVehicleType']);
+        Route::get('/company/delete-vehicle-type', [CompanyVehicleTypeController::class, 'deleteVehicleType']);
+        Route::get('/company/list-vehicle-type', [CompanyVehicleTypeController::class, 'listVehicleType']);
+        Route::get('/company/all-vehicle-type', [CompanyVehicleTypeController::class, 'allVehicleType']);
     // });
 });
 

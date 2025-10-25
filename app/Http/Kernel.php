@@ -67,5 +67,6 @@ class Kernel extends HttpKernel
         'role' => \App\Http\Middleware\RoleMiddleware::class,
         'tenant' => \App\Http\Middleware\SwitchTenantDatabase::class,
         'auth.tenant.jwt' => \App\Http\Middleware\TenantAuthenticate::class,
+        'tenant.db' => \App\Http\Middleware\SetTenantDatabase::class,
     ];
 }
