@@ -17,6 +17,7 @@ use App\Http\Controllers\Company\DriverController;
 use App\Http\Controllers\Company\DocumentTypeController;
 use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeController;
 use App\Http\Controllers\Company\PlotController as CompanyPlotController;
+use App\Http\Controllers\Company\SettingController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -64,6 +65,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);
         Route::post('/super-admin/change-onboarding-request-status', [OnboardingController::class, 'changeOnboardingRequestStatus']);
         Route::get('/super-admin/onboarding-request-list', [OnboardingController::class, 'onboardingRequestList']);
+        Route::get('/super-admin/edit-onboarding-request', [OnboardingController::class, 'getSingleOnboardingRequest']);
         
         Route::post('/super-admin/create-document', [DocumentController::class, 'createDocument']);
         Route::post('/super-admin/edit-document', [DocumentController::class, 'editDocument']);
@@ -139,6 +141,15 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/edit-plot', [CompanyPlotController::class, 'getEditPlot']);
         Route::get('/company/list-plot', [CompanyPlotController::class, 'plotList']);
         Route::get('/company/delete-plot', [CompanyPlotController::class, 'deletePlot']);
+        Route::get('/company/all-plot', [CompanyPlotController::class, 'allPlot']);
+        Route::post('/company/store-backup-plot', [CompanyPlotController::class, 'storeBackupPlot']);
+        
+        Route::get('/company/get-company-profile', [SettingController::class, 'getCompanyProfile']);
+        Route::post('/company/save-company-profile', [SettingController::class, 'saveCompanyProfile']);
+        Route::post('/company/update-password', [SettingController::class, 'updatePassword']);
+        Route::post('/company/update-mobile-setting', [SettingController::class, 'updateMobileSetting']);
+        Route::get('/company/get-mobile-setting', [SettingController::class, 'getMobileSetting']);
+
     // });
 });
 

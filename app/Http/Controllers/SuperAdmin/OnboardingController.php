@@ -261,4 +261,21 @@ class OnboardingController extends Controller
             ], 500);
         }
     }
+
+    public function getSingleOnboardingRequest(Request $request){
+        try{
+            $onboardingRequest = OnboardingRequest::where("id", $request->id)->first();
+
+            return response()->json([
+                'success' => 1,
+                'onboardingRequest' => $onboardingRequest
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }

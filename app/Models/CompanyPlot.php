@@ -12,6 +12,7 @@ class CompanyPlot extends Model
     protected $table = "plots";
 
     protected $casts = [
-        'features' => 'array'
+        'features' => 'array',
+        'backup_plots' => 'array'
     ];
 }
