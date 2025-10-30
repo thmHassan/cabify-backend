@@ -91,7 +91,7 @@ class OnboardingController extends Controller
                 'company_name' => 'max:255',
                 'email' => [
                     'email',
-                    Rule::unique('onboarding_requests', 'email')->ignore($request->id),
+                    Rule::unique('onboarding_requests', 'email')->ignore($request->id, 'id'),
                 ],
                 'password' => 'string|min:6',
                 'company_admin_name' => 'max:255',
