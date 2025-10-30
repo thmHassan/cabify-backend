@@ -169,6 +169,27 @@ class VehicleTypeController extends Controller
         }
     }
 
+    public function getEditVehicleType(Request $request){
+        try{
+            $request->validate([
+                'id' => 'required',
+            ]);
+
+            $vehicleType = VehicleType::where("id", $request->id)->first();
+
+            return response()->json([
+                'error' => 1,
+                'vehicleType' => $vehicleType
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
     public function vehicleTypeList(Request $request){
         try{
             $list = VehicleType::orderBy("id","DESC")->paginate(10);

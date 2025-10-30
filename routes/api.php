@@ -75,6 +75,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         
         Route::post('/super-admin/create-vehicle-type', [VehicleTypeController::class, 'createVehicleType']);
         Route::post('/super-admin/edit-vehicle-type', [VehicleTypeController::class, 'editVehicleType']);
+        Route::get('/super-admin/edit-vehicle-type', [VehicleTypeController::class, 'getEditVehicleType']);
         Route::post('/super-admin/delete-vehicle-type', [VehicleTypeController::class, 'deleteVehicleType']);
         Route::get('/super-admin/vehicle-type-list', [VehicleTypeController::class, 'vehicleTypeList']);
         Route::get('/super-admin/all-vehicle-type-list', [VehicleTypeController::class, 'allVehicleTypeList']);
