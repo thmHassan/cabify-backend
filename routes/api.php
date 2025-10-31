@@ -150,6 +150,11 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::post('/company/update-password', [SettingController::class, 'updatePassword']);
         Route::post('/company/update-mobile-setting', [SettingController::class, 'updateMobileSetting']);
         Route::get('/company/get-mobile-setting', [SettingController::class, 'getMobileSetting']);
+        Route::post('/company/save-main-commission', [SettingController::class, 'saveMainCommission']);
+        Route::get('/company/get-commission-data', [SettingController::class, 'getCommissionData']);
+        Route::post('/company/save-package-topup', [SettingController::class, 'savePackageTopup']);
+        Route::post('/company/edit-package-topup', [SettingController::class, 'editPackageTopup']);
+        Route::get('/company/delete-package-topup', [SettingController::class, 'deletePackageTopup']);
 
     // });
 });

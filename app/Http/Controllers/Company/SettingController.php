@@ -8,6 +8,7 @@ use App\Models\CompanySetting;
 use App\Models\TenantUser;
 use App\Models\Tenant;
 use App\Models\MobileAppSetting;
+use App\Models\PackageSetting;
 use Hash;
 
 class SettingController extends Controller
@@ -160,6 +161,142 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'setting' => $settings
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function saveMainCommission(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            if(!isset($settings) || $settings == NULL){
+                $settings = new CompanySetting;
+            }
+
+            $settings->package_type = $request->package_type;
+            $settings->package_days = isset($request->package_days) ? $request->package_days : NULL;
+            $settings->package_amount = isset($request->package_amount) ? $request->package_amount : NULL;
+            $settings->package_percentage = isset($request->package_percentage) ? $request->package_percentage : NULL;
+            $settings->cancellation_per_day = isset($request->cancellation_per_day) ? $request->cancellation_per_day : NULL;
+            $settings->waiting_time_charge = isset($request->waiting_time_charge) ? $request->waiting_time_charge : NULL;
+            $settings->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Commission settings saved successfully'
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function savePackageTopup(Request $request){
+        try{
+            $request->validate([
+                'package_name' => 'required',
+                'package_type' => 'required',
+                'package_duration' => 'required',
+                'package_price' => 'required',
+            ]);
+            $data = new PackageSetting;
+            $data->package_name = $request->package_name;
+            $data->package_type = $request->package_type;
+            $data->package_duration = $request->package_duration;
+            $data->package_price = $request->package_price;
+            $data->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package Topup saved successfully'
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function editPackageTopup(Request $request){
+        try{
+            $request->validate([
+                'id' => 'required',
+                'package_name' => 'required',
+                'package_type' => 'required',
+                'package_duration' => 'required',
+                'package_price' => 'required',
+            ]);
+            $data = PackageSetting::where("id", $request->id)->first();
+            $data->package_name = $request->package_name;
+            $data->package_type = $request->package_type;
+            $data->package_duration = $request->package_duration;
+            $data->package_price = $request->package_price;
+            $data->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package Topup updated successfully'
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getCommissionData(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            $data['package_type'] = $settings->package_type;
+            $data['package_days'] = $settings->package_days;
+            $data['package_amount'] = $settings->package_amount;
+            $data['package_percentage'] = $settings->package_percentage;
+            $data['cancellation_per_day'] = $settings->cancellation_per_day;
+            $data['waiting_time_charge'] = $settings->waiting_time_charge;
+
+            $packageTopups = PackageSetting::orderBy("id", "DESC")->get();
+            
+            return response()->json([
+                'success' => 1,
+                'data' => [
+                    'main_commission' => (object) $data,
+                    'packageTopups' => $packageTopups
+                ]
+                ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deletePackageTopup(Request $request){
+        try{
+            $packageTopup = PackageSetting::where("id", $request->id)->first();
+
+            if(isset($packageTopup) && $packageTopup != NULL){
+                $packageTopup->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package popup deleted successfully'
             ]);
         }
         catch(Exception $e){
