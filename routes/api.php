@@ -18,6 +18,7 @@ use App\Http\Controllers\Company\DocumentTypeController;
 use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeController;
 use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use App\Http\Controllers\Company\SettingController;
+use App\Http\Controllers\Company\SubCompanyController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -155,6 +156,12 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::post('/company/save-package-topup', [SettingController::class, 'savePackageTopup']);
         Route::post('/company/edit-package-topup', [SettingController::class, 'editPackageTopup']);
         Route::get('/company/delete-package-topup', [SettingController::class, 'deletePackageTopup']);
+        
+        Route::post('/company/create-sub-company', [SubCompanyController::class, 'createSubCompany']);
+        Route::post('/company/edit-sub-company', [SubCompanyController::class, 'editSubCompany']);
+        Route::get('/company/edit-sub-company', [SubCompanyController::class, 'getEditSubCompany']);
+        Route::get('/company/list-sub-company', [SubCompanyController::class, 'listSubCompany']);
+        Route::get('/company/delete-sub-company', [SubCompanyController::class, 'deleteSubCompany']);
 
     // });
 });
