@@ -311,7 +311,7 @@ class CompanyController extends Controller
             }
             $tenants = Tenant::orderBy("id","DESC")->paginate($perPage);
             if($request->status != 'all'){
-                $tenants = Tenant::where('data->status', $request->status)->orderBy("id", "DESC")->paginate(10);
+                $tenants = Tenant::where('data->status', $request->status)->orderBy("id", "DESC")->paginate($perPage);
             }
             return response()->json([
                 'success' => 1,
