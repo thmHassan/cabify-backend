@@ -47,6 +47,12 @@ class Handler extends ExceptionHandler
                 ], 404);
             }
 
+            if ($e->getMessage() == 'Unauthenticated.' || $e->getMessage() == 'unauthenticated.') {
+                return response()->json([
+                    'message' => 'Unauthenticated.'
+                ], 401);
+            }
+
             return response()->json([
                 'message' => $e->getMessage(),
             ], method_exists($e, 'getStatusCode') ? $e->getStatusCode() : 500);
