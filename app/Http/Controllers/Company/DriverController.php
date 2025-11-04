@@ -115,7 +115,11 @@ class DriverController extends Controller
 
     public function listDriver(Request $request){
         try{
-            $drivers = CompanyDriver::where("status", $request->status)->orderBy("id", "DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $drivers = CompanyDriver::where("status", $request->status)->orderBy("id", "DESC")->paginate($perPage);
             return response()->json([
                 'success' => 1,
                 'list' => $drivers

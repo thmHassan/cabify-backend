@@ -189,7 +189,11 @@ class VehicleTypeController extends Controller
 
     public function listVehicleType(Request $request){
         try{
-            $list = CompanyVehicleType::orderBy("id","DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $list = CompanyVehicleType::orderBy("id","DESC")->paginate($perPage);
 
             return response()->json([
                 'success' => 1,

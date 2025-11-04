@@ -82,7 +82,11 @@ class SubCompanyController extends Controller
 
     public function listSubCompany(Request $request){
         try{
-            $subCompanies = SubCompany::orderBy("id", "DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $subCompanies = SubCompany::orderBy("id", "DESC")->paginate($perPage);
 
             return response()->json([
                 'success' => 1,

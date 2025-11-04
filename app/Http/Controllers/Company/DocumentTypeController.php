@@ -124,7 +124,11 @@ class DocumentTypeController extends Controller
 
     public function listDocumentType(Request $request){
         try{
-            $documentType = CompanyDocumentType::orderBy("id", "DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $documentType = CompanyDocumentType::orderBy("id", "DESC")->paginate($perPage);
 
             return response()->json([
                 'success' => 1,

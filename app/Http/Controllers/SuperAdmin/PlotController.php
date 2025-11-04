@@ -77,7 +77,11 @@ class PlotController extends Controller
 
     public function plotList(Request $request){
         try{
-            $plots = Plot::orderBy("id", "DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $plots = Plot::orderBy("id", "DESC")->paginate($perPage);
             return response()->json([
                 'success' => 1,
                 'list' => $plots

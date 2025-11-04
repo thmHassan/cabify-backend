@@ -305,7 +305,11 @@ class CompanyController extends Controller
 
     public function companyList(Request $request){
         try{
-            $tenants = Tenant::orderBy("id","DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $tenants = Tenant::orderBy("id","DESC")->paginate($perPage);
             if($request->status != 'all'){
                 $tenants = Tenant::where('data->status', $request->status)->orderBy("id", "DESC")->paginate(10);
             }

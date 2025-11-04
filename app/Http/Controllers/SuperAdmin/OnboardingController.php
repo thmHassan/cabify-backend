@@ -241,7 +241,11 @@ class OnboardingController extends Controller
 
     public function onboardingRequestList(Request $request){
         try{
-            $lists = OnboardingRequest::where("status", $request->status)->orderBy("id",'DESC')->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $lists = OnboardingRequest::where("status", $request->status)->orderBy("id",'DESC')->paginate($perPage);
             $pendingCount = OnboardingRequest::where("status", "pending")->count();
             $approvedCount = OnboardingRequest::where("status", "approved")->count();
             $rejectedCount = OnboardingRequest::where("status", "rejected")->count();

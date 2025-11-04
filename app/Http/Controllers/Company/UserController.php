@@ -81,7 +81,11 @@ class UserController extends Controller
 
     public function listUser(Request $request){
         try{
-            $users = CompanyUser::orderBy("id", "DESC")->paginate(10);
+            $perPage = 10;
+            if(isset($request->perPage) && $request->perPage != NULL){
+                $perPage = $request->perPage;
+            }
+            $users = CompanyUser::orderBy("id", "DESC")->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
