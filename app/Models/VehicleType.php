@@ -9,4 +9,28 @@ class VehicleType extends Model
 {
     use HasFactory;
     protected $table = "vehicle_types";
+
+    protected $casts = [
+        "attributes" => "array",
+    ];
+
+    public function getFromArrayAttribute($value)
+    {
+        return explode(",",$value);
+    }
+
+    public function getToArrayAttribute($value)
+    {
+        return explode(",",$value);
+    }
+    
+    public function getPriceArrayAttribute($value)
+    {
+        return explode(",",$value);
+    }
+
+    public function getBackupBidVehicleTypeAttribute($value)
+    {
+        return explode(",",$value);
+    }
 }

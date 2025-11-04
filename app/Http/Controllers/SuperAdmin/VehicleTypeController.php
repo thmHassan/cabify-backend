@@ -32,6 +32,7 @@ class VehicleTypeController extends Controller
                 'from_array' => 'required_if:mileage_system,dynamic',
                 'to_array' => 'required_if:mileage_system,dynamic',
                 'price_array' => 'required_if:mileage_system,dynamic',
+                'attribute_array' => 'required',
             ]);
             
             $vehicleType = new VehicleType;
@@ -61,6 +62,7 @@ class VehicleTypeController extends Controller
             $vehicleType->from_array = implode(",", $request->from_array);
             $vehicleType->to_array = implode(",", $request->to_array);
             $vehicleType->price_array = implode(",", $request->price_array);
+            $vehicleType->attributes = $request->attribute_array;
             $vehicleType->save();
 
             return response()->json([
@@ -101,6 +103,7 @@ class VehicleTypeController extends Controller
                 'from_array' => 'required_if:mileage_system,dynamic',
                 'to_array' => 'required_if:mileage_system,dynamic',
                 'price_array' => 'required_if:mileage_system,dynamic',
+                'attribute_array' => 'required',
             ]);
             
             $vehicleType = VehicleType::where("id", $request->id)->first();
@@ -130,6 +133,7 @@ class VehicleTypeController extends Controller
             $vehicleType->from_array = implode(",", $request->from_array);
             $vehicleType->to_array = implode(",", $request->to_array);
             $vehicleType->price_array = implode(",", $request->price_array);
+            $vehicleType->attributes = $request->attribute_array;
             $vehicleType->save();
 
             return response()->json([
