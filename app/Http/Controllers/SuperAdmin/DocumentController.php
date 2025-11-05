@@ -81,11 +81,17 @@ class DocumentController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $list = DocumentType::orderBy('id','DESC')->paginate($perPage);
+            $list = DocumentType::orderBy('id','DESC');
+            if(isset($request->search) && $request->search != NULL){
+                $list->where(function($query) use ($request){
+                    $query->where("document_name", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $list->paginate($perPage);
             return response()->json([
                 'success' => 1,
                 'message' => 'List fetched successfully',
-                'list' => $list
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

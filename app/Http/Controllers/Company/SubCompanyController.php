@@ -86,11 +86,18 @@ class SubCompanyController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $subCompanies = SubCompany::orderBy("id", "DESC")->paginate($perPage);
+            $subCompanies = SubCompany::orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $subCompanies->where(function($query) use ($request){
+                    $query->where("name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $subCompanies->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
-                'list' => $subCompanies
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

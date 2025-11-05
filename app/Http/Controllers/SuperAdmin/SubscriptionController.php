@@ -114,10 +114,16 @@ class SubscriptionController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $subscriptionList = Subscription::orderBy("id","DESC")->paginate($perPage);
+            $subscriptionList = Subscription::orderBy("id","DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $subscriptionList->where(function($query) use ($request){
+                    $query->where("plan_name", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $subscriptionList->paginate($perPage);
             return response()->json([
                 'success' => 1,
-                'list' => $subscriptionList
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

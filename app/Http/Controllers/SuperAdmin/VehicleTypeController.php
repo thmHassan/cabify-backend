@@ -200,11 +200,18 @@ class VehicleTypeController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $list = VehicleType::orderBy("id","DESC")->paginate($perPage);
+            $list = VehicleType::orderBy("id","DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $list->where(function($query) use ($request){
+                    $query->where("vehicle_type_name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("vehicle_type_service", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $list->paginate($perPage);
             return response()->json([
                 'success' => 1,
                 'message' => 'List fetched successfully',
-                'list' => $list
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

@@ -129,11 +129,18 @@ class DispatcherController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $dispatchers = Dispatcher::orderBy("id", "DESC")->paginate($perPage);
+            $dispatchers = Dispatcher::orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $dispatchers->where(function($query) use ($request){
+                    $query->where("name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $dispatchers->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
-                'dispatchers' => $dispatchers
+                'dispatchers' => $data
             ]);
         }
         catch(\Exception $e){

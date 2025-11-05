@@ -81,10 +81,17 @@ class PlotController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $plots = CompanyPlot::orderBy("id", "DESC")->paginate($perPage);
+            $plots = CompanyPlot::orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $plots->where(function($query) use ($request){
+                    $query->where("name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("features", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $plots->paginate($perPage);
             return response()->json([
                 'success' => 1,
-                'list' => $plots
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

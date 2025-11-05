@@ -245,14 +245,22 @@ class OnboardingController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $lists = OnboardingRequest::where("status", $request->status)->orderBy("id",'DESC')->paginate($perPage);
+            $lists = OnboardingRequest::where("status", $request->status)->orderBy("id",'DESC');
+            if(isset($request->search) && $request->search != NULL){
+                $lists->where(function($query) use ($request){
+                    $query->where("company_name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            
+            $data = $lists->paginate($perPage);
             $pendingCount = OnboardingRequest::where("status", "pending")->count();
             $approvedCount = OnboardingRequest::where("status", "approved")->count();
             $rejectedCount = OnboardingRequest::where("status", "rejected")->count();
             return response()->json([
                 'success' => 1,
                 'message' => 'List fetched successfully',
-                'list' => $lists,
+                'list' => $data,
                 'pendingCount' => $pendingCount,
                 'approvedCount' => $approvedCount,
                 'rejectedCount' => $rejectedCount

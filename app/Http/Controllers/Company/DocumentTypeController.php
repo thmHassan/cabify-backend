@@ -128,11 +128,17 @@ class DocumentTypeController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $documentType = CompanyDocumentType::orderBy("id", "DESC")->paginate($perPage);
+            $documentType = CompanyDocumentType::orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $documentType->where(function($query) use ($request){
+                    $query->where("document_name", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $documentType->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
-                'list' => $documentType
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

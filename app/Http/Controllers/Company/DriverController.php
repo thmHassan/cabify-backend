@@ -119,10 +119,17 @@ class DriverController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $drivers = CompanyDriver::where("status", $request->status)->orderBy("id", "DESC")->paginate($perPage);
+            $drivers = CompanyDriver::where("status", $request->status)->orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $drivers->where(function($query) use ($request){
+                    $query->where("name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $list = $drivers->paginate($perPage);
             return response()->json([
                 'success' => 1,
-                'list' => $drivers
+                'list' => $list
             ]);
         }
         catch(\Exception $e){

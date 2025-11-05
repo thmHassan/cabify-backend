@@ -97,10 +97,17 @@ class SubadminController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $list = User::where('role','subadmin')->orderBy("id", "DESC")->paginate($perPage);
+            $list = User::where('role','subadmin')->orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $list->where(function($query) use ($request){
+                    $query->where("name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $list->paginate($perPage);
             return response()->json([
                 'success' => 1,
-                'list' => $list
+                'list' => $data
             ]);
         }
         catch(\Exception $e){

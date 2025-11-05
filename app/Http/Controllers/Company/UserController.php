@@ -85,11 +85,18 @@ class UserController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $users = CompanyUser::orderBy("id", "DESC")->paginate($perPage);
+            $users = CompanyUser::orderBy("id", "DESC");
+            if(isset($request->search) && $request->search != NULL){
+                $users->where(function($query) use ($request){
+                    $query->where("name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $users->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
-                'users' => $users
+                'users' => $data
             ]);
         }
         catch(\Exception $e){

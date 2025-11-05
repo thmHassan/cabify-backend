@@ -309,20 +309,27 @@ class CompanyController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $tenants = Tenant::orderBy("id","DESC")->paginate($perPage);
+            $tenants = Tenant::orderBy("id","DESC");
             if($request->status != 'all'){
-                $tenants = Tenant::where('data->status', $request->status)->orderBy("id", "DESC")->paginate($perPage);
+                $tenants = Tenant::orderBy("id","DESC")->where('data->status', $request->status);
             }
+            if(isset($request->search) && $request->search != NULL){
+                $tenants->where(function($query) use ($request){
+                    $query->where("data->company_name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("data->email", "LIKE" ,"%".$request->search."%");
+                });
+            }
+            $data = $tenants->paginate($perPage);
             return response()->json([
                 'success' => 1,
                 'message' => 'List fetched successfully',
-                'list' => $tenants
+                'list' => $data
             ]);
         }
         catch(\Exception $e){
             return response()->json([
                 'error' => 1,
-                'message' => "Something went wrong"
+                'message' => $e->getMessage()
             ], 500);
         }
     }
