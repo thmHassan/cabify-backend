@@ -20,6 +20,7 @@ use Stripe\Subscription as StripeSubscription;
 use App\Models\UserSubscription;
 use Illuminate\Support\Facades\Auth;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
+use Illuminate\Validation\Rule;
 
 class CompanyController extends Controller
 {
