@@ -261,7 +261,7 @@ class CompanyController extends Controller
                 unlink(public_path('pictures/'.$tenant->picture));
             }
 
-            $$filename = '';
+            $filename = '';
             if(isset($request->picture) && $request->picture != NULL){
                 $file = $request->file('picture');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
