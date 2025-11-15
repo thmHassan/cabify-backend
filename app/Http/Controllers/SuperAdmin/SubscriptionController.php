@@ -33,13 +33,16 @@ class SubscriptionController extends Controller
                 'plan_name' => 'required|max:255',
                 'billing_cycle' => 'required',
                 'amount' => 'required',
-                'features' => 'required',
+                'billing_cycle_deduct_option' => 'required',
+                'deduct_type' => 'required',
             ]);
 
             $subscription = new Subscription;
             $subscription->plan_name = $request->plan_name;
             $subscription->billing_cycle = $request->billing_cycle;
             $subscription->amount = $request->amount;
+            $subscription->billing_cycle_deduct_option = $request->billing_cycle_deduct_option;
+            $subscription->deduct_type = $request->deduct_type;
             $subscription->features = implode(",",$request->features);
             $subscription->save();
 
@@ -85,13 +88,16 @@ class SubscriptionController extends Controller
                 'plan_name' => 'required|max:255',
                 'billing_cycle' => 'required',
                 'amount' => 'required',
-                'features' => 'required',
+                'billing_cycle_deduct_option' => 'required',
+                'deduct_type' => 'required',
             ]);
 
             $subscription = Subscription::where("id", $request->id)->first();
             $subscription->plan_name = $request->plan_name;
             $subscription->billing_cycle = $request->billing_cycle;
             $subscription->amount = $request->amount;
+            $subscription->billing_cycle_deduct_option = $request->billing_cycle_deduct_option;
+            $subscription->deduct_type = $request->deduct_type;
             $subscription->features = implode(",",$request->features);
             $subscription->save();
 
