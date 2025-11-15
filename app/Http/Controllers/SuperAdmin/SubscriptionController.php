@@ -43,7 +43,7 @@ class SubscriptionController extends Controller
             $subscription->amount = $request->amount;
             $subscription->billing_cycle_deduct_option = $request->billing_cycle_deduct_option;
             $subscription->deduct_type = $request->deduct_type;
-            $subscription->features = implode(",",$request->features);
+            // $subscription->features = implode(",",$request->features);
             $subscription->save();
 
             return response()->json([
@@ -66,7 +66,7 @@ class SubscriptionController extends Controller
             ]);
             
             $subscription = Subscription::where("id", $request->id)->first();
-            $subscription->features = explode(",", $subscription->features);
+            // $subscription->features = explode(",", $subscription->features);
 
             return response()->json([
                 'success' => 1,
@@ -98,7 +98,7 @@ class SubscriptionController extends Controller
             $subscription->amount = $request->amount;
             $subscription->billing_cycle_deduct_option = $request->billing_cycle_deduct_option;
             $subscription->deduct_type = $request->deduct_type;
-            $subscription->features = implode(",",$request->features);
+            // $subscription->features = implode(",",$request->features);
             $subscription->save();
 
             return response()->json([
