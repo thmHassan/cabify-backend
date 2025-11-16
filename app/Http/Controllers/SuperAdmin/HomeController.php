@@ -24,14 +24,14 @@ class HomeController extends Controller
             $me->email = $request->email;
 
             if(isset($request->profile_picture) && $request->profile_picture != NULL && $me->profile_picture && file_exists($me->profile_picture)) {
-                unlink(public_path('profile_pictures/'.$me->profile_picture));
+                unlink(asset('profile_pictures/'.$me->profile_picture));
             }
 
             if(isset($request->profile_picture) && $request->profile_picture != NULL){
                 $file = $request->file('profile_picture');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $file->move(public_path('profile_pictures'), $filename);
-                $me->profile_picture = public_path('profile_pictures').'/'.$filename;
+                $file->move(asset('profile_pictures'), $filename);
+                $me->profile_picture = asset('profile_pictures').'/'.$filename;
             }
 
             $me->save();
