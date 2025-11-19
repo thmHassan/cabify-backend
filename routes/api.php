@@ -19,6 +19,10 @@ use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeCont
 use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use App\Http\Controllers\Company\SettingController;
 use App\Http\Controllers\Company\SubCompanyController;
+use App\Http\Controllers\Driver\AuthController as DriverAuthController;
+use App\Http\Controllers\Driver\SettingController as DriverSettingController;
+use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
+use App\Http\Controllers\Driver\TicketController as DriverTicketController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -164,6 +168,29 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/delete-sub-company', [SubCompanyController::class, 'deleteSubCompany']);
 
     // });
+});
+
+Route::group(['middleware' => ['tenant.db']], function () {
+    Route::post('/driver/login', [DriverAuthController::class, 'login']);
+    Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
+
+    Route::group(['middleware' => ['auth.driver.jwt']], function () {
+        Route::post('/driver/add-wallet-amount', [DriverSettingController::class, 'addWalletAmount']);
+        Route::get('/driver/balance-transaction', [DriverSettingController::class, 'balanceTransaction']);
+   
+        Route::post('/driver/contact-us', [DriverSettingController::class, 'contactUs']);
+        Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
+        Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
+        
+        Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
+        Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
+
+        Route::post('/driver/create-ticket', [DriverTicketController::class, 'createTicket']);
+        Route::get('/driver/ticket-list', [DriverTicketController::class, 'ticketList']);
+        
+        Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
+        Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);
+    });
 });
 
 Route::get('/tenant/me', function (Illuminate\Http\Request $request) {

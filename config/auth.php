@@ -50,6 +50,11 @@ return [
             'provider' => 'tenant_users',
             'hash' => false,
         ],
+        'driver' => [
+            'driver' => 'jwt',
+            'provider' => 'drivers',
+            'hash' => false,
+        ],
     ],
 
     /*
@@ -77,6 +82,10 @@ return [
         'tenant_users' => [
             'driver' => 'eloquent',
             'model' => App\Models\TenantUser::class,
+        ],
+        'drivers' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\CompanyDriver::class,
         ],
 
         // 'users' => [
