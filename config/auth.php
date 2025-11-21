@@ -55,6 +55,11 @@ return [
             'provider' => 'drivers',
             'hash' => false,
         ],
+        'rider' => [
+            'driver' => 'jwt',
+            'provider' => 'riders',
+            'hash' => false,
+        ],
     ],
 
     /*
@@ -87,7 +92,10 @@ return [
             'driver' => 'eloquent',
             'model' => App\Models\CompanyDriver::class,
         ],
-
+        'riders' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\CompanyRider::class,
+        ],
         // 'users' => [
         //     'driver' => 'database',
         //     'table' => 'users',

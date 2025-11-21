@@ -68,6 +68,7 @@ class Kernel extends HttpKernel
         'tenant' => \App\Http\Middleware\SwitchTenantDatabase::class,
         'auth.tenant.jwt' => \App\Http\Middleware\TenantAuthenticate::class,
         'auth.driver.jwt' => \App\Http\Middleware\DriverAuthenticate::class,
+        'auth.rider.jwt' => \App\Http\Middleware\RiderAuthenticate::class,
         'tenant.db' => \App\Http\Middleware\SetTenantDatabase::class,
     ];
 }

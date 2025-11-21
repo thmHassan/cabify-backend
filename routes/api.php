@@ -23,6 +23,10 @@ use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
 use App\Http\Controllers\Driver\TicketController as DriverTicketController;
+use App\Http\Controllers\Rider\AuthController as RiderAuthController;
+use App\Http\Controllers\Rider\EmergencyContactController as RiderEmergencyContactController;
+use App\Http\Controllers\Rider\SettingController as RiderSettingController;
+use App\Http\Controllers\Rider\TicketController as RiderTicketController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -190,6 +194,31 @@ Route::group(['middleware' => ['tenant.db']], function () {
         
         Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
         Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);
+    });
+});
+
+Route::group(['middleware' => ['tenant.db']], function () {
+    Route::post('/rider/login', [RiderAuthController::class, 'login']);
+    Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
+
+    Route::group(['middleware' => ['auth.rider.jwt']], function () {
+        Route::post('/rider/add-emergency-contact', [RiderEmergencyContactController::class, 'addEmergencyContact']);
+        Route::post('/rider/edit-emergency-contact', [RiderEmergencyContactController::class, 'editEmergencyContact']);
+        Route::get('/rider/delete-emergency-contact', [RiderEmergencyContactController::class, 'deleteEmergencyContact']);
+        Route::get('/rider/list-emergency-contact', [RiderEmergencyContactController::class, 'listEmergencyContact']);
+        
+        Route::post('/rider/create-contact-us', [RiderSettingController::class, 'createContactUs']);
+        Route::get('/rider/faqs', [RiderSettingController::class, 'faqs']);
+        Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
+
+        Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
+        Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
+
+        Route::get('rider/logout', [RiderAuthController::class, 'logout']);
+        Route::post('/rider/delete-account', [RiderAuthController::class, 'deleteAccount']);
+
+        Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
+        Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
     });
 });
 
