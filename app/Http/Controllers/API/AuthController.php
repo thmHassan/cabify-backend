@@ -62,4 +62,21 @@ class AuthController extends Controller
         auth('api')->logout();
         return response()->json(['message' => 'Successfully logged out']);
     }
+
+    public function me(Request $request){
+        try{
+            $data = auth('api')->user();
+
+            return response()->json([
+                'success' => 1,
+                'data' => $data
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
