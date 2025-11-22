@@ -50,9 +50,9 @@ Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 
 Route::group(['middleware' => ['auth:api']], function () {
     Route::post('logout', [AuthController::class, 'logout']);
-    Route::get('me', [AuthController::class, 'me']);
-
+    
     Route::group(['middleware' => ['role:superadmin,subadmin']], function () {
+        Route::get('super-admin/me', [AuthController::class, 'me']);
         Route::post('/super-admin/update-profile', [HomeController::class, 'updateProfile']);
         Route::post('/super-admin/change-password', [HomeController::class, 'changePassword']);
         Route::get('/super-admin/dashboard', [HomeController::class, 'dashboard']);

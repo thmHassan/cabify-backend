@@ -141,7 +141,7 @@ class OnboardingController extends Controller
             $onboardingRequest->lost_found = isset($request->lost_found) ? $request->lost_found : $onboardingRequest->lost_found;
             $onboardingRequest->accounts = isset($request->accounts) ? $request->accounts : $onboardingRequest->accounts;
             $onboardingRequest->status = isset($request->status) ? $request->status : $onboardingRequest->status;
-            $onboardingRequest->password = Hash::make($request->password);
+            $onboardingRequest->password = isset(request->password) ? Hash::make($request->password) : $onboardingRequest->password;
             $onboardingRequest->save();
 
             return response()->json([

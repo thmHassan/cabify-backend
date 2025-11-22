@@ -84,6 +84,8 @@ class CompanyController extends Controller
             $tenant->id = $tenantId;
             $tenant->company_name = $request->company_name;
             $tenant->company_admin_name = $request->company_admin_name;
+            $tenant->user_name = $request->user_name;
+            $tenant->company_id = $request->company_id;
             $tenant->email = $request->email;
             $tenant->contact_person = $request->contact_person;
             $tenant->phone = $request->phone;
@@ -217,7 +219,8 @@ class CompanyController extends Controller
 
             $tenant->company_name = isset($request->company_name) ? $request->company_name : $tenant->company_name;
             $tenant->company_admin_name = isset($request->company_admin_name) ? $request->company_admin_name : $tenant->company_admin_name;
-            // $tenant->user_name = isset($request->user_name) ? $request->user_name : $tenant->user_name;
+            $tenant->user_name = isset($request->user_name) ? $request->user_name : $tenant->user_name;
+            $tenant->company_id = isset($request->company_id) ? $request->company_id : $tenant->company_id;
             $tenant->email = isset($request->email) ? $request->email : $tenant->email;
             $tenant->contact_person = isset($request->contact_person) ? $request->contact_person : $tenant->contact_person;
             $tenant->phone = isset($request->phone) ? $request->phone : $tenant->phone;
