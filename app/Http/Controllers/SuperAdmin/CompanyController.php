@@ -77,7 +77,7 @@ class CompanyController extends Controller
             $filename = '';
             if(isset($request->picture) && $request->picture != NULL){
                 $file = $request->file('picture');
-                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $filename = 'pictures/'.time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('pictures'), $filename);
             }
 
@@ -270,7 +270,7 @@ class CompanyController extends Controller
                 $file = $request->file('picture');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('pictures'), $filename);
-                $tenant->picture = public_path('pictures').'/'.$filename;
+                $tenant->picture = 'pictures/'.$filename;
             }
             $tenant->save();
 
@@ -458,6 +458,7 @@ class CompanyController extends Controller
             $user->save();
 
             $payment = new Transaction;
+            $payment->user_id = $request->id;
             $payment->amount = $subscription->amount;
             $payment->status = 'paid';
             $payment->method = 'cash';
@@ -618,6 +619,7 @@ class CompanyController extends Controller
                     $tenant->save();
 
                     $payment = new Transaction;
+                    $payment->user_id = $userId;
                     $payment->amount = $subscription->amount;
                     $payment->status = 'paid';
                     $payment->method = 'card';
@@ -653,6 +655,7 @@ class CompanyController extends Controller
                     $userSubscription->save();
 
                     $payment = new Transaction;
+                    $payment->user_id = $userId;
                     $payment->amount = $subscription->amount;
                     $payment->status = 'paid';
                     $payment->method = 'card';
@@ -669,7 +672,9 @@ class CompanyController extends Controller
                     //         'status' => 'active',
                     //         'expiry_date' => now()->addMonth(),
                     //     ]);
+                    $userId = $session->subscription_details->metadata->user_id ?? null;
                     $payment = new Transaction;
+                    $payment->user_id = $userId;
                     $payment->amount = $subscription->amount;
                     $payment->status = 'failed';
                     $payment->method = 'card';
@@ -687,7 +692,9 @@ class CompanyController extends Controller
                     //         'expiry_date' => now()->addMonth(),
                     //     ]);
 
+                    $userId = $session->subscription_details->metadata->user_id ?? null;
                     $payment = new Transaction;
+                    $payment->user_id = $userId;
                     $payment->amount = $subscription->amount;
                     $payment->status = 'failed';
                     $payment->method = 'card';
@@ -741,6 +748,29 @@ class CompanyController extends Controller
                 'message' => 'Tenant login successful',
                 'token' => $token,
                 'tenant_id' => $tenant->id,
+            ]);
+        }
+        catch(\Exception $e){
+            \Log::info($e->getMessage());
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500); 
+        }
+    }
+
+    public function paymentHistory(Request $request){
+        try{
+            $request->validate([
+                'user_id' => 'required'
+            ]);
+            
+            $paymentHistory = Transaction::where('user_id', $request->user_id)->orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Payment history fetched successfully',
+                'list' => $paymentHistory
             ]);
         }
         catch(\Exception $e){

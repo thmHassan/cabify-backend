@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Subscription;
 use App\Models\Tenant;
+use Carbon\Carbon;
 
 class SubscriptionController extends Controller
 {
@@ -131,6 +132,38 @@ class SubscriptionController extends Controller
             return response()->json([
                 'success' => 1,
                 'list' => $data
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function subscriptionManagement(Request $request){
+        try{
+            $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->orderBy('created_at','DESC')->paginate(10);
+            return response()->json([
+                'success' => 1,
+                'list' => $activeSubscription
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function pendingSubscription(Request $request){
+        try{
+            $pendingSubscription = Tenant::where('data->expiry_date', '<', Carbon::now()->format('Y-m-d'))->orderBy('created_at','DESC')->paginate(10);
+            return response()->json([
+                'success' => 1,
+                'list' => $pendingSubscription
             ]);
         }
         catch(\Exception $e){

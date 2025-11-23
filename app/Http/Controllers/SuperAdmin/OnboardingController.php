@@ -23,7 +23,15 @@ class OnboardingController extends Controller
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
+                'picture' => 'required|image|mimes:jpg,jpeg,png,gif|max:2048', 
             ]);
+
+            $filename = '';
+            if(isset($request->picture) && $request->picture != NULL){
+                $file = $request->file('picture');
+                $filename = 'pictures/'.time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->move(public_path('pictures'), $filename);
+            }
 
             $onboardingRequest = OnboardingRequest::create([
                 'company_name' => $request->company_name,
@@ -67,6 +75,7 @@ class OnboardingController extends Controller
                 'accounts' => $request->accounts,
                 'status' => 'pending',
                 'password' => Hash::make($request->password),
+                'picture' => $filename
             ]);
 
             return response()->json([
@@ -76,7 +85,6 @@ class OnboardingController extends Controller
 
         }
         catch(\Exception $e){
-            dd($e->getMessage());
             return response()->json([
                 'error' => 1,
                 'message' => 'Something went wrong'
@@ -100,6 +108,7 @@ class OnboardingController extends Controller
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
+                'picture' => 'image|mimes:jpg,jpeg,png,gif|max:2048', 
             ]);
 
             $onboardingRequest = OnboardingRequest::where("id", $request->id)->first();
@@ -144,6 +153,20 @@ class OnboardingController extends Controller
             $onboardingRequest->accounts = isset($request->accounts) ? $request->accounts : $onboardingRequest->accounts;
             $onboardingRequest->status = isset($request->status) ? $request->status : $onboardingRequest->status;
             $onboardingRequest->password = isset(request->password) ? Hash::make($request->password) : $onboardingRequest->password;
+            $onboardingRequest->password = isset(request->password) ? Hash::make($request->password) : $onboardingRequest->password;
+            
+            if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
+                unlink(public_path('pictures/'.$tenant->picture));
+            }
+
+            $filename = '';
+            if(isset($request->picture) && $request->picture != NULL){
+                $file = $request->file('picture');
+                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->move(public_path('pictures'), $filename);
+                $onboardingRequest->picture = 'pictures/'.$filename;
+            }
+            
             $onboardingRequest->save();
 
             return response()->json([
@@ -218,6 +241,7 @@ class OnboardingController extends Controller
                     'accounts' => $onboardingRequest->accounts,
                     'status' => 'active',
                     'password' => $onboardingRequest->password,
+                    'picture' => $onboardingRequest->picture,
                 ]);
 
                 $tenant->run(function () {
