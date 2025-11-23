@@ -70,6 +70,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/company-subscription-list', [CompanyController::class, 'subscriptionList']);
         Route::post('/super-admin/cash-payment', [CompanyController::class, 'cashPayment']);
         Route::post('/super-admin/create-stripe-payment-url', [CompanyController::class, 'createStripePaymentUrl']);
+        Route::get('/super-admin/payment-history', [CompanyController::class, 'paymentHistory']);
 
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);
@@ -95,6 +96,8 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/edit-subscription', [SubscriptionController::class, 'editSubscription']);
         Route::get('/super-admin/edit-subscription', [SubscriptionController::class, 'getEditSubscription']);
         Route::get('/super-admin/subscription-list', [SubscriptionController::class, 'subscriptionList']);
+        Route::get('/super-admin/subscription-management', [SubscriptionController::class, 'subscriptionManagement']);
+        Route::get('/super-admin/pending-subscription', [SubscriptionController::class, 'pendingSubscription']);
         
         Route::post('/super-admin/create-subadmin', [SubadminController::class, 'createSubadmin']);
         Route::post('/super-admin/edit-subadmin', [SubadminController::class, 'editSubadmin']);

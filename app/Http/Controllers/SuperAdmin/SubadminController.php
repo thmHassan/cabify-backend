@@ -32,7 +32,7 @@ class SubadminController extends Controller
                 $file = $request->file('profile_picture');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('profile_pictures'), $filename);
-                $subadmin->profile_picture = public_path('pictures').'/'.$filename;
+                $subadmin->profile_picture = 'pictures/'.$filename;
                 $subadmin->save();
             }
 
@@ -74,7 +74,7 @@ class SubadminController extends Controller
                 $file = $request->file('profile_picture');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('profile_pictures'), $filename);
-                $subadmin->profile_picture = public_path('pictures').'/'.$filename;
+                $subadmin->profile_picture = 'pictures/'.$filename;
                 $subadmin->save();
             }
 
