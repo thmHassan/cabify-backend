@@ -11,6 +11,7 @@ use App\Http\Controllers\SuperAdmin\HomeController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
 use App\Http\Controllers\SuperAdmin\PlotController;
+use App\Http\Controllers\SuperAdmin\PaymentController;
 use App\Http\Controllers\Company\DispatcherController;
 use App\Http\Controllers\Company\UserController;
 use App\Http\Controllers\Company\DriverController;
@@ -106,6 +107,8 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/edit-plot', [PlotController::class, 'getEditPlot']);
         Route::get('/super-admin/plot-list', [PlotController::class, 'plotList']);
         Route::get('/super-admin/delete-plot', [PlotController::class, 'deletePlot']);
+        
+        Route::get('/super-admin/payment-list', [PaymentController::class, 'paymentList']);
     });
 });
 
