@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Setting;
+use Carbon\Carbon;
 
 class HomeController extends Controller
 {
@@ -83,9 +84,9 @@ class HomeController extends Controller
 
     public function dashboard(){
         try{
-            $totalCompanies = Tenant::count();
-            $activeSubscription = 2;
-            $monthlyRevenue = 100;
+            $totalCompanies = Tenant::where('data->created_at', '>=', Carbon::now()->subHours(3))->count();
+            $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
+            $monthlyRevenue = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())->sum('data->payment_amount');
             $recentTransaction = [];
             $APIStatus['google_map']['requests'] = 1;  
             $APIStatus['google_map']['cost'] = 1;  

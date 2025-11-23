@@ -5,14 +5,15 @@ namespace App\Http\Controllers\SuperAdmin;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Subscription;
+use App\Models\Tenant;
 
 class SubscriptionController extends Controller
 {
     public function subscriptionCards(){
         try{
-            $data['active_subscription'] = '12';
-            $data['monthly_revenue'] = '6800';
-            $data['pending_renewals'] = '04';
+            $data['active_subscription'] = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
+            $data['monthly_revenue'] = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())->sum('data->payment_amount');
+            $data['pending_renewals'] = Tenant::where('data->expiry_date', '<', Carbon::now()->format('Y-m-d'))->count();
 
             return response()->json([
                 'success' => 1,

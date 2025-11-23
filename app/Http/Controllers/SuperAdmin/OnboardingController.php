@@ -18,8 +18,8 @@ class OnboardingController extends Controller
                 'email' => 'email|unique:onboarding_requests,email',
                 'password' => 'string|min:6',
                 'company_admin_name' => 'max:255',
-                // 'user_name' => 'max:255',
-                // 'company_id' => 'unique:onboarding_requests,company_id',
+                'user_name' => 'max:255',
+                'company_id' => 'unique:onboarding_requests,company_id',
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
@@ -28,9 +28,9 @@ class OnboardingController extends Controller
             $onboardingRequest = OnboardingRequest::create([
                 'company_name' => $request->company_name,
                 'company_admin_name' => $request->company_admin_name,
-                // 'user_name' => $request->user_name,
+                'user_name' => $request->user_name,
                 'email' => $request->email,
-                // 'company_id' => $request->company_id,
+                'company_id' => $request->company_id,
                 'contact_person' => $request->contact_person,
                 'phone' => $request->phone,
                 'address' => $request->address,
@@ -95,7 +95,8 @@ class OnboardingController extends Controller
                 ],
                 'password' => 'string|min:6',
                 'company_admin_name' => 'max:255',
-                // 'user_name' => 'max:255',
+                'user_name' => 'max:255',
+                'company_id' => 'max:255',
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
@@ -104,7 +105,8 @@ class OnboardingController extends Controller
             $onboardingRequest = OnboardingRequest::where("id", $request->id)->first();
             $onboardingRequest->company_name = isset($request->company_name) ? $request->company_name : $onboardingRequest->company_name;
             $onboardingRequest->company_admin_name = isset($request->company_admin_name) ? $request->company_admin_name : $onboardingRequest->company_admin_name;
-            // $onboardingRequest->user_name = isset($request->user_name) ? $request->user_name : $onboardingRequest->user_name;
+            $onboardingRequest->user_name = isset($request->user_name) ? $request->user_name : $onboardingRequest->user_name;
+            $onboardingRequest->company_id = isset($request->company_id) ? $request->company_id : $onboardingRequest->company_id;
             $onboardingRequest->email = isset($request->email) ? $request->email : $onboardingRequest->email;
             $onboardingRequest->contact_person = isset($request->contact_person) ? $request->contact_person : $onboardingRequest->contact_person;
             $onboardingRequest->phone = isset($request->phone) ? $request->phone : $onboardingRequest->phone;
@@ -177,9 +179,9 @@ class OnboardingController extends Controller
                     'id' => $tenantId,
                     'company_name' => $onboardingRequest->company_name,
                     'company_admin_name' => $onboardingRequest->company_admin_name,
-                    // 'user_name' => $onboardingRequest->user_name,
+                    'user_name' => $onboardingRequest->user_name,
                     'email' => $onboardingRequest->email,
-                    // 'company_id' => $onboardingRequest->company_id,
+                    'company_id' => $onboardingRequest->company_id,
                     'contact_person' => $onboardingRequest->contact_person,
                     'phone' => $onboardingRequest->phone,
                     'address' => $onboardingRequest->address,

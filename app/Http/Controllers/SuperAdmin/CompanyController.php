@@ -21,6 +21,7 @@ use App\Models\UserSubscription;
 use Illuminate\Support\Facades\Auth;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Validation\Rule;
+use App\Models\Transaction;
 
 class CompanyController extends Controller
 {
@@ -290,13 +291,15 @@ class CompanyController extends Controller
     public function companyCards(){
         try{
             $totalCompanies = Tenant::count();
-            $activeCompanies = Tenant::where('data->status', 'active')->count();
+            $activeCompanies = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
+            $monthlyRevenue = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())->sum('data->payment_amount');
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Data fetched successfully',
                 'total_companies' => $totalCompanies,
-                'active_companies' => $activeCompanies
+                'active_companies' => $activeCompanies,
+                'monthly_revenue' => $monthlyRevenue 
             ]);
         }
         catch(\Exception $e){
@@ -450,8 +453,15 @@ class CompanyController extends Controller
             elseif($subscription->billing_cycle == "yearly"){
                 $user->expiry_date = date('Y-m-d', strtotime('+1 year'));
             }
+            $user->subscription_start_date = date('Y-m-d');
             $user->payment_amount = $subscription->amount;
             $user->save();
+
+            $payment = new Transaction;
+            $payment->amount = $subscription->amount;
+            $payment->status = 'paid';
+            $payment->method = 'cash';
+            $payment->save();
 
             return response()->json([
                 'success' => 1,
@@ -604,7 +614,14 @@ class CompanyController extends Controller
                     elseif($subscription->billing_cycle == "yearly"){
                         $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
                     }
+                    $user->subscription_start_date = date('Y-m-d');
                     $tenant->save();
+
+                    $payment = new Transaction;
+                    $payment->amount = $subscription->amount;
+                    $payment->status = 'paid';
+                    $payment->method = 'card';
+                    $payment->save();
                     break;
 
                 case 'invoice.payment_succeeded':
@@ -632,7 +649,14 @@ class CompanyController extends Controller
                     elseif($subscription->billing_cycle == "yearly"){
                         $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
                     }
+                    $userSubscription->subscription_start_date = date('Y-m-d');
                     $userSubscription->save();
+
+                    $payment = new Transaction;
+                    $payment->amount = $subscription->amount;
+                    $payment->status = 'paid';
+                    $payment->method = 'card';
+                    $payment->save();
                     break;
 
                 case 'invoice.payment_failed':
@@ -645,6 +669,11 @@ class CompanyController extends Controller
                     //         'status' => 'active',
                     //         'expiry_date' => now()->addMonth(),
                     //     ]);
+                    $payment = new Transaction;
+                    $payment->amount = $subscription->amount;
+                    $payment->status = 'failed';
+                    $payment->method = 'card';
+                    $payment->save();
                     break;
 
                 case 'payment_intent.payment_failed':
@@ -657,6 +686,12 @@ class CompanyController extends Controller
                     //         'status' => 'active',
                     //         'expiry_date' => now()->addMonth(),
                     //     ]);
+
+                    $payment = new Transaction;
+                    $payment->amount = $subscription->amount;
+                    $payment->status = 'failed';
+                    $payment->method = 'card';
+                    $payment->save();
                     break;
             }
             return response()->json([
