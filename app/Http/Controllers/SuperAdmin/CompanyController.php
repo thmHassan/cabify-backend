@@ -263,7 +263,7 @@ class CompanyController extends Controller
             $tenant->save();
 
             if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
-                unlink(public_path('pictures/'.$tenant->picture));
+                // unlink(public_path('pictures/'.$tenant->picture));
             }
 
             $filename = '';
