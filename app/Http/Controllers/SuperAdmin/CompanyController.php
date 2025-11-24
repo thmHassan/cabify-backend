@@ -349,10 +349,11 @@ class CompanyController extends Controller
             ]);
 
             $company = Tenant::where("id", $request->id)->first();
-
+            $subscription = Subscription::where('id', $company->subscription_type)->first();
             return response()->json([
                 'success' => 1,
-                'company' => $company
+                'company' => $company,
+                'subscription' => $subscription
             ]);
         }
         catch(\Exception $e){
