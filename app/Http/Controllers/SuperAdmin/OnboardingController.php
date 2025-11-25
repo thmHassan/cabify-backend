@@ -152,8 +152,7 @@ class OnboardingController extends Controller
             $onboardingRequest->lost_found = isset($request->lost_found) ? $request->lost_found : $onboardingRequest->lost_found;
             $onboardingRequest->accounts = isset($request->accounts) ? $request->accounts : $onboardingRequest->accounts;
             $onboardingRequest->status = isset($request->status) ? $request->status : $onboardingRequest->status;
-            $onboardingRequest->password = isset(request->password) ? Hash::make($request->password) : $onboardingRequest->password;
-            $onboardingRequest->password = isset(request->password) ? Hash::make($request->password) : $onboardingRequest->password;
+            $onboardingRequest->password = isset($request->password) ? Hash::make($request->password) : $onboardingRequest->password;
             
             if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
                 unlink(public_path('pictures/'.$tenant->picture));
