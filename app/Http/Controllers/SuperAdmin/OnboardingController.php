@@ -315,4 +315,25 @@ class OnboardingController extends Controller
             ]);
         }
     }
+
+    public function deleteOnboardingRequest(Request $request){
+        try{
+            $data = OnboardingRequest::where("id", $request->id)->first();
+
+            if(isset($data) && $data != NULL){
+                $data->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Onboarding request deleted successfully'
+            ]);
+        }   
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
