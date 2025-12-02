@@ -173,4 +173,25 @@ class SubscriptionController extends Controller
             ]);
         }
     }
+
+    public function deleteSubscription(Request $request){
+        try{
+            $data = Subscription::where("id", $request->id)->first();
+
+            if(isset($data) && $data != NULL){
+                $data->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Subscription deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }

@@ -149,4 +149,25 @@ class SubadminController extends Controller
             ], 500);
         }
     }
+
+    public function deleteSubadmin(Request $request){
+        try{
+            $data = User::where("id", $request->id)->first();
+
+            if(isset($data) && $data != NULL){
+                $data->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Sub Admin deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

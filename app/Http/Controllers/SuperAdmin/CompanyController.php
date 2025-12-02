@@ -783,4 +783,26 @@ class CompanyController extends Controller
             ], 500); 
         }
     }
+
+    public function deleteCompany(Request $request){
+        try{
+            $data = Tenant::where("id", $request->id)->first();
+
+            if(isset($data) && $data != NULL){
+                $data->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Company deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            \Log::info($e->getMessage());
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500); 
+        }
+    }
 }

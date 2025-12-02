@@ -71,12 +71,14 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/cash-payment', [CompanyController::class, 'cashPayment']);
         Route::post('/super-admin/create-stripe-payment-url', [CompanyController::class, 'createStripePaymentUrl']);
         Route::get('/super-admin/payment-history', [CompanyController::class, 'paymentHistory']);
+        Route::get('/super-admin/delete-company', [CompanyController::class, 'deleteCompany']);
 
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);
         Route::post('/super-admin/change-onboarding-request-status', [OnboardingController::class, 'changeOnboardingRequestStatus']);
         Route::get('/super-admin/onboarding-request-list', [OnboardingController::class, 'onboardingRequestList']);
         Route::get('/super-admin/edit-onboarding-request', [OnboardingController::class, 'getSingleOnboardingRequest']);
+        Route::get('/super-admin/delete-onboarding-request', [OnboardingController::class, 'deleteOnboardingRequest']);
         
         Route::post('/super-admin/create-document', [DocumentController::class, 'createDocument']);
         Route::post('/super-admin/edit-document', [DocumentController::class, 'editDocument']);
@@ -98,12 +100,14 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/subscription-list', [SubscriptionController::class, 'subscriptionList']);
         Route::get('/super-admin/subscription-management', [SubscriptionController::class, 'subscriptionManagement']);
         Route::get('/super-admin/pending-subscription', [SubscriptionController::class, 'pendingSubscription']);
+        Route::get('/super-admin/delete-subscription', [SubscriptionController::class, 'deleteSubscription']);
         
         Route::post('/super-admin/create-subadmin', [SubadminController::class, 'createSubadmin']);
         Route::post('/super-admin/edit-subadmin', [SubadminController::class, 'editSubadmin']);
         Route::get('/super-admin/edit-subadmin', [SubadminController::class, 'getEditSubadmin']);
         Route::get('/super-admin/subadmin-list', [SubadminController::class, 'subadminList']);
         Route::get('/super-admin/get-subadmin-permission', [SubadminController::class, 'getSubadminPermission']);
+        Route::get('/super-admin/delete-subadmin', [SubadminController::class, 'deleteSubadmin']);
 
         Route::post('/super-admin/create-plot', [PlotController::class, 'createPlot']);
         Route::post('/super-admin/edit-plot', [PlotController::class, 'editPlot']);
