@@ -321,9 +321,9 @@ class CompanyController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $tenants = Tenant::orderBy("id","DESC");
+            $tenants = Tenant::orderBy("created_at","DESC");
             if($request->status != 'all'){
-                $tenants = Tenant::orderBy("id","DESC")->where('data->status', $request->status);
+                $tenants = Tenant::orderBy("created_at","DESC")->where('data->status', $request->status);
             }
             if(isset($request->search) && $request->search != NULL){
                 $tenants->where(function($query) use ($request){
