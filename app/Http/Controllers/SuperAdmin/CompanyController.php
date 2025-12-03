@@ -470,6 +470,26 @@ class CompanyController extends Controller
             $payment->method = 'cash';
             $payment->save();
 
+            $userSubscription = new UserSubscription;
+            $userSubscription->subscription_id = $subscription->id;
+            $userSubscription->user_id = $user->id;
+            $userSubscription->plan_name = $subscription->plan_name;
+            $userSubscription->billing_cycle = $subscription->billing_cycle;
+            $userSubscription->amount = $subscription->amount;
+            $userSubscription->features = $subscription->features;
+            $userSubscription->status = 'active';
+            if($subscription->billing_cycle == "monthly"){
+                $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
+            }
+            elseif($subscription->billing_cycle == "quarterly"){
+                $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
+            }
+            elseif($subscription->billing_cycle == "yearly"){
+                $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
+            }
+            $userSubscription->subscription_start_date = date('Y-m-d');
+            $userSubscription->save();
+
             return response()->json([
                 'success' => 1,
                 'message' => "Payment status updated successfully"
