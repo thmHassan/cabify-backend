@@ -101,6 +101,8 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/subscription-management', [SubscriptionController::class, 'subscriptionManagement']);
         Route::get('/super-admin/pending-subscription', [SubscriptionController::class, 'pendingSubscription']);
         Route::get('/super-admin/delete-subscription', [SubscriptionController::class, 'deleteSubscription']);
+        Route::get('/super-admin/stripe-keys', [SubscriptionController::class, 'getStripeKeys']);
+        Route::post('/super-admin/stripe-keys', [SubscriptionController::class, 'storeStripeKeys']);
         
         Route::post('/super-admin/create-subadmin', [SubadminController::class, 'createSubadmin']);
         Route::post('/super-admin/edit-subadmin', [SubadminController::class, 'editSubadmin']);
