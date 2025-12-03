@@ -621,8 +621,28 @@ class CompanyController extends Controller
                     elseif($subscription->billing_cycle == "yearly"){
                         $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
                     }
-                    $user->subscription_start_date = date('Y-m-d');
+                    $tenant->subscription_start_date = date('Y-m-d');
                     $tenant->save();
+
+                    $userSubscription = new UserSubscription;
+                    $userSubscription->subscription_id = $subscription->id;
+                    $userSubscription->user_id = $tenant->id;
+                    $userSubscription->plan_name = $subscription->plan_name;
+                    $userSubscription->billing_cycle = $subscription->billing_cycle;
+                    $userSubscription->amount = $subscription->amount;
+                    $userSubscription->features = $subscription->features;
+                    $userSubscription->status = 'active';
+                    if($subscription->billing_cycle == "monthly"){
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
+                    }
+                    elseif($subscription->billing_cycle == "quarterly"){
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
+                    }
+                    elseif($subscription->billing_cycle == "yearly"){
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
+                    }
+                    $userSubscription->subscription_start_date = date('Y-m-d');
+                    $userSubscription->save();
 
                     $payment = new Transaction;
                     $payment->user_id = $userId;
@@ -639,6 +659,23 @@ class CompanyController extends Controller
                     
                     $tenant = Tenant::where("id", $userId)->first();
                     $subscription = Subscription::where("id", $subscriptionId)->first();
+
+                    $tenant->payment_status = "success";
+                    $tenant->payment_method = "stripe";
+                    $tenant->payment_amount = $subscription->amount;
+                    $tenant->save();
+
+                    if($subscription->billing_cycle == "monthly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 month'));
+                    }
+                    elseif($subscription->billing_cycle == "quarterly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+3 months'));
+                    }
+                    elseif($subscription->billing_cycle == "yearly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
+                    }
+                    $tenant->subscription_start_date = date('Y-m-d');
+                    $tenant->save();
 
                     $userSubscription = new UserSubscription;
                     $userSubscription->subscription_id = $subscription->id;
