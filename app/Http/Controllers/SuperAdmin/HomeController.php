@@ -190,6 +190,7 @@ class HomeController extends Controller
             }
             $settingKeys->stripe_secret = $request->stripe_secret;
             $settingKeys->stripe_key = $request->stripe_key;
+            $settingKeys->stripe_webhook_secret = $request->stripe_webhook_secret;
             $settingKeys->barikoi_key = $request->barikoi_key;
             $settingKeys->google_map_key = $request->google_map_key;
             $settingKeys->firebase_key = $request->firebase_key;

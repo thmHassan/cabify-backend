@@ -27,6 +27,8 @@ class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase
         'city',
         'currency',
         'maps_api',
+        'google_api_key',
+        'barikoi_api_key',
         'search_api',
         'log_map_search_result',
         'voip',

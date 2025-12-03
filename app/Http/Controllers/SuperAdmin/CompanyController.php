@@ -115,6 +115,8 @@ class CompanyController extends Controller
             $tenant->enable_smtp = $request->enable_smtp;
             $tenant->dispatcher = $request->dispatcher;
             $tenant->map = $request->map;
+            $tenant->google_api_key = $request->google_api_key;
+            $tenant->barikoi_api_key = $request->barikoi_api_key;
             $tenant->push_notification = $request->push_notification;
             $tenant->usage_monitoring = $request->usage_monitoring;
             $tenant->revenue_statements = $request->revenue_statements;
@@ -230,6 +232,8 @@ class CompanyController extends Controller
             $tenant->city = isset($request->city) ? $request->city : $tenant->city;
             $tenant->currency = isset($request->currency) ? $request->currency : $tenant->currency;
             $tenant->maps_api = isset($request->maps_api) ? $request->maps_api : $tenant->maps_api;
+            $tenant->google_api_key = isset($request->google_api_key) ? $request->google_api_key : $tenant->google_api_key;
+            $tenant->barikoi_api_key = isset($request->barikoi_api_key) ? $request->barikoi_api_key : $tenant->barikoi_api_key;
             $tenant->search_api = isset($request->search_api) ? $request->search_api : $tenant->search_api;
             $tenant->log_map_search_result = isset($request->log_map_search_result) ? $request->log_map_search_result : $tenant->log_map_search_result;
             $tenant->voip = isset($request->voip) ? $request->voip : $tenant->voip;
