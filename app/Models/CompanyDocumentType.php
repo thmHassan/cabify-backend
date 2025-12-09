@@ -15,6 +15,8 @@ class CompanyDocumentType extends Model
     protected $appends = ['uploaded_document'];
 
     public function getUploadedDocumentAttribute(){
-        return DriverDocument::where("driver_id", auth('driver')->user()->id)->where("document_id", $this->id)->first();
+        if(auth('driver')->user()){
+            return DriverDocument::where("driver_id", auth('driver')->user()->id)->where("document_id", $this->id)->first();
+        }
     }
 }

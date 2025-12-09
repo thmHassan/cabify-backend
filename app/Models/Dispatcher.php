@@ -9,5 +9,5 @@ class Dispatcher extends Model
 {
     use HasFactory;
 
-    protected $table = "dispatchers";
+    protected $table = "dispatcher";
 }
