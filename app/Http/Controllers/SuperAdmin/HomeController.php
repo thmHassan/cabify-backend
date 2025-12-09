@@ -212,4 +212,21 @@ class HomeController extends Controller
             ], 500);
         }
     }
+
+    public function paymentReminderList(){
+        try{
+            $tenantList = Tenant::whereDate('data->expiry_date', '<', today())->get();
+
+            return response()->json([
+                'success' => 1,
+                'list' => $tenantList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

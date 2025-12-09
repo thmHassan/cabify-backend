@@ -60,6 +60,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/usage-monitoring', [HomeController::class, 'usageMonitoring']);
         Route::get('/super-admin/api-keys', [HomeController::class, 'getAPIKeys']);
         Route::post('/super-admin/api-keys', [HomeController::class, 'storeAPIKeys']);
+        Route::get('/super-admin/payment-reminder-list', [HomeController::class, 'paymentReminderList']);
         
         Route::post('/super-admin/create-company', [CompanyController::class, 'createCompany']);
         Route::get('/super-admin/edit-company', [CompanyController::class, 'getEditCompany']);
