@@ -73,7 +73,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/create-stripe-payment-url', [CompanyController::class, 'createStripePaymentUrl']);
         Route::get('/super-admin/payment-history', [CompanyController::class, 'paymentHistory']);
         Route::get('/super-admin/delete-company', [CompanyController::class, 'deleteCompany']);
-
+        
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);
         Route::post('/super-admin/change-onboarding-request-status', [OnboardingController::class, 'changeOnboardingRequestStatus']);
@@ -93,7 +93,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/delete-vehicle-type', [VehicleTypeController::class, 'deleteVehicleType']);
         Route::get('/super-admin/vehicle-type-list', [VehicleTypeController::class, 'vehicleTypeList']);
         Route::get('/super-admin/all-vehicle-type-list', [VehicleTypeController::class, 'allVehicleTypeList']);
-
+        
         Route::get('/super-admin/subscription-cards', [SubscriptionController::class, 'subscriptionCards']);
         Route::post('/super-admin/create-subscription', [SubscriptionController::class, 'createSubscription']);
         Route::post('/super-admin/edit-subscription', [SubscriptionController::class, 'editSubscription']);
@@ -104,6 +104,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/delete-subscription', [SubscriptionController::class, 'deleteSubscription']);
         Route::get('/super-admin/stripe-keys', [SubscriptionController::class, 'getStripeKeys']);
         Route::post('/super-admin/stripe-keys', [SubscriptionController::class, 'storeStripeKeys']);
+        Route::post('/super-admin/extend-subscription', [SubscriptionController::class, 'extendSubscription']);
         
         Route::post('/super-admin/create-subadmin', [SubadminController::class, 'createSubadmin']);
         Route::post('/super-admin/edit-subadmin', [SubadminController::class, 'editSubadmin']);

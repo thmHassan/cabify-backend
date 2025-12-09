@@ -252,4 +252,26 @@ class SubscriptionController extends Controller
             ]);
         }
     }
+
+    public function extendSubscription(Request $request){
+        try{
+            $tenantId = $request->tenant_id;
+            $expiry_date = $request->expiry_date;
+
+            $tenant = Tenant::where("id", $tenantId)->first();
+            $tenant->expiry_date = $expiry_date;
+            $tenant->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Subscription extended successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
