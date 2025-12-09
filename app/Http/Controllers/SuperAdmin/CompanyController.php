@@ -487,7 +487,6 @@ class CompanyController extends Controller
             elseif($subscription->billing_cycle == "yearly"){
                 $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
             }
-            $userSubscription->subscription_start_date = date('Y-m-d');
             $userSubscription->save();
 
             return response()->json([
@@ -661,7 +660,6 @@ class CompanyController extends Controller
                     elseif($subscription->billing_cycle == "yearly"){
                         $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
                     }
-                    $userSubscription->subscription_start_date = date('Y-m-d');
                     $userSubscription->save();
 
                     $payment = new Transaction;
@@ -714,7 +712,6 @@ class CompanyController extends Controller
                     elseif($subscription->billing_cycle == "yearly"){
                         $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
                     }
-                    $userSubscription->subscription_start_date = date('Y-m-d');
                     $userSubscription->save();
 
                     $payment = new Transaction;
