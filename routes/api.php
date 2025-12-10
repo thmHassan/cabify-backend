@@ -21,6 +21,7 @@ use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use App\Http\Controllers\Company\SettingController;
 use App\Http\Controllers\Company\SubCompanyController;
 use App\Http\Controllers\Company\AccountController;
+use App\Http\Controllers\Company\TicketController;
 use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
@@ -191,6 +192,10 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/edit-account', [AccountController::class, 'getEditAccount']);
         Route::get('/company/delete-account', [AccountController::class, 'deleteAccount']);
         Route::get('/company/list-account', [AccountController::class, 'listAccount']);
+        
+        Route::get('/company/list-ticket', [TicketController::class, 'listTicket']);
+        Route::post('/company/change-ticket-status', [TicketController::class, 'changeTicketStatus']);
+        Route::post('/company/reply-ticket', [TicketController::class, 'replyTicket']);
 
     // });
 });
