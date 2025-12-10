@@ -22,6 +22,7 @@ use App\Http\Controllers\Company\SettingController;
 use App\Http\Controllers\Company\SubCompanyController;
 use App\Http\Controllers\Company\AccountController;
 use App\Http\Controllers\Company\TicketController;
+use App\Http\Controllers\Company\BookingController;
 use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
@@ -196,6 +197,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/list-ticket', [TicketController::class, 'listTicket']);
         Route::post('/company/change-ticket-status', [TicketController::class, 'changeTicketStatus']);
         Route::post('/company/reply-ticket', [TicketController::class, 'replyTicket']);
+        
+        Route::post('/company/get-plot', [BookingController::class, 'getPlot']);
 
     // });
 });
