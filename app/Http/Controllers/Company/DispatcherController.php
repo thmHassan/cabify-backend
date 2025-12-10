@@ -39,7 +39,7 @@ class DispatcherController extends Controller
 
             $request->validate([
                 'name' => 'required|max:255',
-                'email' => 'required|email|unique:dispatchers,email',
+                'email' => 'required|email|unique:dispatcher,email',
                 'password' => 'required|string|min:6',
                 'phone_no' => 'required|max:255',
                 'status' => 'required|max:255',
@@ -74,7 +74,7 @@ class DispatcherController extends Controller
                 'email' => [
                     'required',
                     'email',
-                    Rule::unique('dispatchers')->ignore($request->id),
+                    Rule::unique('dispatcher')->ignore($request->id),
                 ],
                 'password' => 'required|string|min:6',
                 'phone_no' => 'required|max:255',
