@@ -53,7 +53,6 @@ class CompanyController extends Controller
                 'sos_features' => 'required',
                 'notes' => 'required',
                 'stripe_enable' => 'required',
-                'stripe_enablement' => 'required',
                 'units' => 'required',
                 'country_of_use' => 'required',
                 'time_zone' => 'required',
