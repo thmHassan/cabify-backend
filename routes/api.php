@@ -20,6 +20,7 @@ use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeCont
 use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use App\Http\Controllers\Company\SettingController;
 use App\Http\Controllers\Company\SubCompanyController;
+use App\Http\Controllers\Company\AccountController;
 use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
@@ -184,6 +185,12 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/edit-sub-company', [SubCompanyController::class, 'getEditSubCompany']);
         Route::get('/company/list-sub-company', [SubCompanyController::class, 'listSubCompany']);
         Route::get('/company/delete-sub-company', [SubCompanyController::class, 'deleteSubCompany']);
+
+        Route::post('/company/create-account', [AccountController::class, 'createAccount']);
+        Route::post('/company/edit-account', [AccountController::class, 'editAccount']);
+        Route::get('/company/edit-account', [AccountController::class, 'getEditAccount']);
+        Route::get('/company/delete-account', [AccountController::class, 'deleteAccount']);
+        Route::get('/company/list-account', [AccountController::class, 'listAccount']);
 
     // });
 });
