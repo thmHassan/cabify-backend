@@ -89,7 +89,9 @@ class BookingController extends Controller
                 'booking_date' => 'required',
                 'booking_type' => 'required',
                 'pickup_point' => 'required',
+                'pickup_location' => 'required',
                 'destination_point' => 'required',
+                'destination_location' => 'required',
                 'name' => 'required',
                 'email' => 'required',
                 'phone_no' => 'required',
@@ -101,7 +103,7 @@ class BookingController extends Controller
             ]);
 
             $newBooking = new CompanyBooking;
-            $newBooking->booking_id = "TD". strtoupper(uniqid());
+            $newBooking->booking_id = "RD". strtoupper(uniqid());
             $newBooking->sub_company = $request->sub_company;
             $newBooking->multi_booking = $request->multi_booking;
             $newBooking->multi_days = $request->multi_days;
@@ -109,8 +111,11 @@ class BookingController extends Controller
             $newBooking->booking_date = $request->booking_date;
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
+            $newBooking->pickup_location = $request->pickup_location;
             $newBooking->destination_point = $request->destination_point;
+            $newBooking->destination_location = $request->destination_location;
             $newBooking->via_point = json_encode($request->via_point);
+            $newBooking->via_location = json_encode($request->via_location);
             $newBooking->user_id = $request->user_id;
             $newBooking->name = $request->name;
             $newBooking->email = $request->email;
@@ -135,6 +140,7 @@ class BookingController extends Controller
             $newBooking->extra_charge = $request->extra_charge;
             $newBooking->toll = $request->toll;
             $newBooking->booking_status = 'pending';
+            $newBooking->distance = $distance;
             $newBooking->booking_amount = $request->booking_amount;
             $newBooking->save();
 

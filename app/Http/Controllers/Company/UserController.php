@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyUser;
+use App\Models\CompanyBooking;
 use Hash;
 use Illuminate\Validation\Rule;
 
@@ -160,6 +161,23 @@ class UserController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'User status updated successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function rideHistory(Request $request){
+        try{
+            $data = CompanyBooking::where("user_id", $request->user_id)->with('driverDetail')->orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'rideHistory' => $data
             ]);
         }
         catch(\Exception $e){

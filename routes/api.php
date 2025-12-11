@@ -142,6 +142,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/list-user', [UserController::class, 'listUser']);
         Route::get('/company/delete-user', [UserController::class, 'deleteUser']);
         Route::get('/company/change-user-status', [UserController::class, 'changeUserStatus']);
+        Route::get('/company/ride-history', [UserController::class, 'rideHistory']);
 
         Route::post('/company/create-driver', [DriverController::class, 'createDriver']);
         Route::post('/company/edit-driver', [DriverController::class, 'editDriver']);
