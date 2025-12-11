@@ -23,6 +23,7 @@ use App\Http\Controllers\Company\SubCompanyController;
 use App\Http\Controllers\Company\AccountController;
 use App\Http\Controllers\Company\TicketController;
 use App\Http\Controllers\Company\BookingController;
+use App\Http\Controllers\Company\RatingController;
 use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
@@ -203,6 +204,9 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::post('/company/calculate-fares', [BookingController::class, 'calculateFares']);
         Route::get('/company/cancelled-booking', [BookingController::class, 'cancelledBooking']);
         Route::get('/company/booking-list', [BookingController::class, 'bookingList']);
+        
+        Route::get('/company/customer-ratings', [RatingController::class, 'customerRatings']);
+        Route::get('/company/driver-ratings', [RatingController::class, 'driverRatings']);
 
     // });
 });
