@@ -172,6 +172,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/delete-plot', [CompanyPlotController::class, 'deletePlot']);
         Route::get('/company/all-plot', [CompanyPlotController::class, 'allPlot']);
         Route::post('/company/store-backup-plot', [CompanyPlotController::class, 'storeBackupPlot']);
+        Route::get('/company/get-backup-plot', [CompanyPlotController::class, 'getBackupPlot']);
         
         Route::get('/company/get-company-profile', [SettingController::class, 'getCompanyProfile']);
         Route::post('/company/save-company-profile', [SettingController::class, 'saveCompanyProfile']);

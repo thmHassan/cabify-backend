@@ -162,4 +162,28 @@ class PlotController extends Controller
             ], 500);
         }
     }
+
+    public function getBackupPlot(Request $request){
+        try{
+            $plots = CompanyPlot::orderBy("id", "DESC")->get();
+
+            foreach($plots as $plot){
+                if(is_array($plot->backup_plots) && $plot->backup_plots != NULL){
+                    $backupPlots = CompanyPlot::whereIn("id", $plot->backup_plots)->get();
+                    $plot->backup_plots_data = $backupPlots;
+                }
+            }
+
+            return response()->json([
+                'success' => 1,
+                'list' => $plots
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
