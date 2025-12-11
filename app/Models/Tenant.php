@@ -71,6 +71,8 @@ class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase
     public $incrementing = false; 
     protected $keyType = 'string'; 
 
+    protected $appends = ['subscription_id'];
+
     public function database(): DatabaseConfig
     {
         return new DatabaseConfig($this, [
@@ -100,7 +102,7 @@ class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase
 
     public function getSubscriptionIdAttribute()
     {
-        return $this->data['subscription_type'] && is_int($this->data['subscription_type']) ?? null;
+        return $this->subscription_type ?? null;
     }
 
     public function subscription()
