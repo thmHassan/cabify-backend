@@ -97,4 +97,15 @@ class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase
     {
         $this->data = $info;
     }
+
+    public function getSubscriptionIdAttribute()
+    {
+        return $this->data['subscription_type'] && is_int($this->data['subscription_type']) ?? null;
+    }
+
+    public function subscription()
+    {
+        return $this->hasOne(Subscription::class, "id", 'subscription_id');
+    }
+
 }
