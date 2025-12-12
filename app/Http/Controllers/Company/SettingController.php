@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use App\Models\CompanySetting;
 use App\Models\TenantUser;
 use App\Models\Tenant;
+use App\Models\Subscription;
+use App\Models\UserSubscription;
 use App\Models\MobileAppSetting;
 use App\Models\PackageSetting;
 use Hash;
@@ -297,6 +299,98 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Package popup deleted successfully'
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function planDetail(Request $request){
+        try{
+            $user = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            $subscriptionData = (new Subscription)
+                ->setConnection('central')
+                ->where("id",$user->data['subscription_type'])
+                ->first();
+                
+            return response()->json([
+                'success' => 1,
+                'planDetail' => $subscriptionData
+            ]);
+        }   
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function paymentHistory(Request $request){
+        try{
+            $transactionHistory = (new UserSubscription)
+                ->setConnection('central')
+                ->where("user_id",$request->header('database'))
+                ->orderBy("id", "DESC")
+                ->get();
+
+            return response()->json([
+                'success' => 1,
+                'history' => $transactionHistory
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function stripeInformation(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'settings' => $settings
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function saveStripeInformation(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            if(!isset($settings) || $settings != NULL){
+                $settings = new CompanySetting;
+            }
+            $settings->stripe_payment = $request->stripe_payment;
+            $settings->driver_app = $request->driver_app;
+            $settings->customer_app = $request->customer_app;
+            $settings->stripe_secret_key = $request->stripe_secret_key;
+            $settings->stripe_key = $request->stripe_key;
+            $settings->stripe_webhook_secret = $request->stripe_webhook_secret;
+            $settings->stripe_country = $request->stripe_country;
+            $settings->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe information saved successfully'
             ]);
         }
         catch(Exception $e){

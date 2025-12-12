@@ -185,6 +185,10 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::post('/company/save-package-topup', [SettingController::class, 'savePackageTopup']);
         Route::post('/company/edit-package-topup', [SettingController::class, 'editPackageTopup']);
         Route::get('/company/delete-package-topup', [SettingController::class, 'deletePackageTopup']);
+        Route::get('/company/plan-detail', [SettingController::class, 'planDetail']);
+        Route::get('/company/payment-history', [SettingController::class, 'paymentHistory']);
+        Route::get('/company/stripe-information', [SettingController::class, 'stripeInformation']);
+        Route::post('/company/stripe-information', [SettingController::class, 'saveStripeInformation']);
         
         Route::post('/company/create-sub-company', [SubCompanyController::class, 'createSubCompany']);
         Route::post('/company/edit-sub-company', [SubCompanyController::class, 'editSubCompany']);
