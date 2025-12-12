@@ -24,6 +24,7 @@ use App\Http\Controllers\Company\AccountController;
 use App\Http\Controllers\Company\TicketController;
 use App\Http\Controllers\Company\BookingController;
 use App\Http\Controllers\Company\RatingController;
+use App\Http\Controllers\Company\LostFoundController;
 use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
@@ -209,6 +210,9 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         
         Route::get('/company/customer-ratings', [RatingController::class, 'customerRatings']);
         Route::get('/company/driver-ratings', [RatingController::class, 'driverRatings']);
+        
+        Route::get('/company/list-lost-found', [LostFoundController::class, 'listLostFound']);
+        Route::post('/company/change-status-lost-found', [LostFoundController::class, 'changeStatusLostFound']);
 
     // });
 });
