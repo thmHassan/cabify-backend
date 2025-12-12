@@ -189,6 +189,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/payment-history', [SettingController::class, 'paymentHistory']);
         Route::get('/company/stripe-information', [SettingController::class, 'stripeInformation']);
         Route::post('/company/stripe-information', [SettingController::class, 'saveStripeInformation']);
+        Route::get('/company/third-party-information', [SettingController::class, 'thirdPartyInformation']);
+        Route::post('/company/third-party-information', [SettingController::class, 'saveThirdPartyInformation']);
         
         Route::post('/company/create-sub-company', [SubCompanyController::class, 'createSubCompany']);
         Route::post('/company/edit-sub-company', [SubCompanyController::class, 'editSubCompany']);

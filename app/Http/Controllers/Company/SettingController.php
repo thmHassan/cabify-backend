@@ -400,4 +400,51 @@ class SettingController extends Controller
             ], 500);
         }
     }
+
+    public function thirdPartyInformation(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'settings' => $settings
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function saveThirdPartyInformation(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            if(!isset($settings) || $settings != NULL){
+                $settings = new CompanySetting;
+            }
+            $settings->google_api_keys = $request->google_api_keys;
+            $settings->barikoi_api_keys = $request->barikoi_api_keys;
+            $settings->map_settings = $request->map_settings;
+            $settings->mail_server = $request->mail_server;
+            $settings->mail_from = $request->mail_from;
+            $settings->mail_user_name = $request->mail_user_name;
+            $settings->mail_password = $request->mail_password;
+            $settings->mail_port = $request->mail_port;
+            $settings->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Third party information saved successfully'
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
