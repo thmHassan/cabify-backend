@@ -102,6 +102,7 @@ class BookingController extends Controller
                 'booking_amount' => 'required',
             ]);
 
+            $distance = 10;
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
             $newBooking->sub_company = $request->sub_company;
