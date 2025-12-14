@@ -35,6 +35,7 @@ class DriverController extends Controller
             $driver->joined_date = $request->joined_date;
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
+            $driver->dispatcher_id = $request->dispatcher_id;
             $driver->save();
 
             return response()->json([
@@ -78,6 +79,7 @@ class DriverController extends Controller
             $driver->joined_date = $request->joined_date;
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
+            $driver->dispatcher_id = $request->dispatcher_id;
             $driver->save();
 
             return response()->json([
@@ -125,6 +127,9 @@ class DriverController extends Controller
                     $query->where("name", "LIKE" ,"%".$request->search."%")
                             ->orWhere("email", "LIKE" ,"%".$request->search."%");
                 });
+            }
+            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+                $query->where("dispatcher_id", $request->dispatcher_id);
             }
             $list = $drivers->paginate($perPage);
             return response()->json([
