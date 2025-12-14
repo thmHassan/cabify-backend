@@ -5,11 +5,8 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
-use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 
-class TenantAuthenticate
+class DispatcherAuthenticate
 {
     /**
      * Handle an incoming request.
@@ -23,23 +20,14 @@ class TenantAuthenticate
             if (!$token) {
                 return response()->json(['message' => 'Token not provided'], 401);
             }
-            
-            $tenant = auth('tenant')->setToken($request->bearerToken())->user();
 
-            if (!$tenant) {
-                
-                $database = "tenant".$request->header('database');
-                Config::set('database.connections.tenant.database', $database);
-                DB::purge('tenant');
-                DB::reconnect('tenant');
-                DB::setDefaultConnection('tenant');
-                $dispatcher = auth('dispatcher')->setToken($request->bearerToken())->user();
-                if (!$dispatcher) {
-                    return response()->json(['message' => 'Unauthenticated'], 401);
-                }
+            $dispatcher = auth('dispatcher')->setToken($request->bearerToken())->userOrFail();
+
+            if (!$dispatcher) {
+                return response()->json(['message' => 'Unauthenticated'], 401);
             }
 
-            $request->attributes->set('tenant', $tenant);
+            $request->attributes->set('dispatcher', $dispatcher);
 
         } catch (\PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException $e) {
             return response()->json(['message' => 'Token expired'], 401);
@@ -48,7 +36,6 @@ class TenantAuthenticate
         } catch (\Exception $e) {
             return response()->json(['message' => 'Unauthenticated', 'error' => $e->getMessage()], 401);
         }
-
         return $next($request);
     }
 }

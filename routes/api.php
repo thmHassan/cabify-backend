@@ -224,6 +224,9 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
 });
 
 Route::group(['middleware' => ['tenant.db']], function () {
+    
+    Route::post('/dispatcher/login', [CompanyController::class, 'dispatcherLogin']);
+    
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
 

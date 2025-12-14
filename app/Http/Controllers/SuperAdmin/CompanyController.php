@@ -23,6 +23,7 @@ use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Validation\Rule;
 use App\Models\Transaction;
 use Carbon\Carbon;
+use App\Models\Dispatcher;
 
 class CompanyController extends Controller
 {
@@ -860,6 +861,41 @@ class CompanyController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ], 500); 
+        }
+    }
+
+    public function dispatcherLogin(Request $request){
+        try{
+            $request->validate([
+                'email' => 'required',
+                'password' => 'required'
+            ]);
+
+            $user = Dispatcher::where('email', $request->email)->first();
+            
+            if (!$user) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Dispatcher not found'
+                ], 404);
+            }
+
+            if (!Hash::check($request->password, $user->password)) {
+                return response()->json(['message' => 'Invalid credentials'], 401);
+            }
+            
+            $token = JWTAuth::fromUser($user);
+
+            return response()->json([
+                'message' => 'Dispatcher login successful',
+                'token' => $token,
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
         }
     }
 }
