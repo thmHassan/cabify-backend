@@ -55,6 +55,11 @@ return [
             'provider' => 'drivers',
             'hash' => false,
         ],
+        'dispatcher' => [
+            'driver' => 'jwt',
+            'provider' => 'dispatchers',
+            'hash' => false,
+        ],
         'rider' => [
             'driver' => 'jwt',
             'provider' => 'riders',
@@ -87,6 +92,11 @@ return [
         'tenant_users' => [
             'driver' => 'eloquent',
             'model' => App\Models\TenantUser::class,
+        ],
+        'dispatchers' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\Dispatcher::class,
+            'connection' => 'tenant',
         ],
         'drivers' => [
             'driver' => 'eloquent',
