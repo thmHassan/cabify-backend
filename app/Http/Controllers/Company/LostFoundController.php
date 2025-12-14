@@ -15,6 +15,11 @@ class LostFoundController extends Controller
             if(isset($request->status) && $request->status != NULL){
                 $query->where("status", $request->status);
             }
+            if(!empty($request->dispatcher_id)) {
+                $query->whereHas('bookingDetails', function ($q) use ($request) {
+                    $q->where('dispatcher_id', $request->dispatcher_id);
+                });
+            }
             if(isset($request->search) && $request->search != NULL){
                 $query->where(function($q) use ($request){
                     $q->where("created_at", "LIKE", "%".$request->search."%");

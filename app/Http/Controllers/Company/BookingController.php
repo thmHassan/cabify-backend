@@ -143,6 +143,7 @@ class BookingController extends Controller
             $newBooking->booking_status = 'pending';
             $newBooking->distance = $distance;
             $newBooking->booking_amount = $request->booking_amount;
+            $newBooking->dispatcher_id = $request->dispatcher_id;
             $newBooking->save();
 
             return response()->json([
@@ -185,6 +186,11 @@ class BookingController extends Controller
                       ->orWhere("name", "LIKE", "%".$request->search."%");
                 });
             }
+
+            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+                $query->where("dispatcher_id", $request->dispatcher_id);
+            }
+
             $bookings = $query->paginate(10);
 
             return response()->json([
@@ -209,6 +215,9 @@ class BookingController extends Controller
             }
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("created_at", $request->date);
+            }
+            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+                $query->where("dispatcher_id", $request->dispatcher_id);
             }
             $rides = $query->paginate(10);
 

@@ -29,6 +29,7 @@ class UserController extends Controller
             $newUser->password = Hash::make($request->password); 
             $newUser->address = $request->address; 
             $newUser->city = $request->city; 
+            $newUser->dispatcher_id = $request->dispatcher_id; 
             $newUser->save();
 
             return response()->json([
@@ -65,6 +66,7 @@ class UserController extends Controller
             $editUser->phone_no = $request->phone_no; 
             $editUser->address = $request->address; 
             $editUser->city = $request->city; 
+            $editUser->dispatcher_id = $request->dispatcher_id; 
             $editUser->save();
 
             return response()->json([
@@ -92,6 +94,9 @@ class UserController extends Controller
                     $query->where("name", "LIKE" ,"%".$request->search."%")
                             ->orWhere("email", "LIKE" ,"%".$request->search."%");
                 });
+            }
+            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+                $users->where("dispatcher_id", $request->dispatcher_id);
             }
             $data = $users->paginate($perPage);
 
