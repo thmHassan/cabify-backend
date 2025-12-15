@@ -521,7 +521,8 @@ class CompanyController extends Controller
 
     public function createStripePaymentUrl(Request $request){
         try{
-            Stripe::setApiKey(env('STRIPE_SECRET'));
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            Stripe::setApiKey($setting->stripe_secret_key);
             $YOUR_DOMAIN = "http://localhost:5173/";
             // $YOUR_DOMAIN = env('FRONTEND_URL');
             
@@ -609,7 +610,8 @@ class CompanyController extends Controller
         try{
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
-            $endpoint_secret = env('STRIPE_WEBHOOK_SECRET');
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $endpoint_secret = $settings->stripe_webhook_secret;
 
             try {
                 $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
