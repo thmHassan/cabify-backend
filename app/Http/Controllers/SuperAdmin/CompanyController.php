@@ -810,6 +810,7 @@ class CompanyController extends Controller
                 'message' => 'Tenant login successful',
                 'token' => $token,
                 'tenant_id' => $tenant->id,
+                'tenant_data' => $tenant->data,
             ]);
         }
         catch(\Exception $e){
