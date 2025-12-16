@@ -214,7 +214,6 @@ class BookingController extends Controller
                         $polyline = $route['geometry'];
                         $distance = $route['distance'];
                     }
-    
                     curl_close($ch);
                 }
                 else{
@@ -258,10 +257,44 @@ class BookingController extends Controller
                         curl_close($ch);
                     }
                 }
-
             }
             else if(isset($map_api) && $map_api == "google"){  
+                if(!isset($request->via_point) || count($request->via_point) == 0){
+                    
+                    $origin = "{$request->pickup_point['latitude']},{$request->pickup_point['longitude']}";
+                    $destination = "{$request->destination_point['latitude']},{$request->destination_point['longitude']}";
+                    
+                    $url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=$origin&destinations=$destination&mode=driving&units=metric&key=$google_map_key";
 
+                    $response = file_get_contents($url);
+                    $data = json_decode($response, true);
+
+                    $distance = $data['rows'][0]['elements'][0]['distance']['value'];
+                }
+                else{
+                    $distance = 0;
+                    for($i = 0; $i <= count($request->via_point); $i++){
+                        if($i == 0){
+                            $origin = "{$request->pickup_point['latitude']},{$request->pickup_point['longitude']}";
+                            $destination = "{$request->via_point[$i]['latitude']},{$request->via_point[$i]['longitude']}";
+                        }
+                        else if($i == count($request->via_point)){
+                            $origin = "{$request->via_point[$i - 1]['latitude']},{$request->via_point[$i - 1]['longitude']}";
+                            $destination = "{$request->destination_point['latitude']},{$request->destination_point['longitude']}";
+                        }
+                        else{
+                            $origin = "{$request->via_point[$i - 1]['latitude']},{$request->via_point[$i - 1]['longitude']}";
+                            $destination = "{$request->via_point[$i]['latitude']},{$request->via_point[$i]['longitude']}";
+                        }
+
+                        $url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=$origin&destinations=$destination&mode=driving&units=metric&key=$google_map_key";
+
+                        $response = file_get_contents($url);
+                        $data = json_decode($response, true);
+                        $cDistance = $data['rows'][0]['elements'][0]['distance']['value'];
+                        $distance += $cDistance;
+                    }
+                }
             }
             else if(isset($map_api) && $map_api == "both"){  
 
