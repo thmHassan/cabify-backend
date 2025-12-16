@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyPlot;
 use App\Models\CompanyBooking;
+use App\Models\CompanyVehicleType;
 
 class BookingController extends Controller
 {
@@ -22,7 +23,7 @@ class BookingController extends Controller
             $records = CompanyPlot::orderBy("id", "DESC")->get();
             $matched = null;
             foreach ($records as $rec) {
-                $polygon = json_decode(json_decode($rec->features, true), true);
+                $polygon = json_decode($rec->features, true);
                 $array = $polygon['geometry']['coordinates'][0];
                 if ($this->pointInPolygon($lat, $lng, $array)) {
                     $matched = $rec;
@@ -163,10 +164,112 @@ class BookingController extends Controller
         try{
             $request->validate([
                 'pickup_point' => 'required',
-                'destination_point' => 'required'
+                'destination_point' => 'required',
+                'vehicle_id' => 'required'
             ]);
 
+            $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
+            $map_api = json_decode($data->data)->maps_api;
+            $map = json_decode($data->data)->map;
 
+            if(isset($map) && $map == "enable"){
+                if(isset($map_api) && $map_api != NULL){
+                    $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();   
+                    $google_map_key = $data->google_map_key;
+                    $barikoi_key = $data->barikoi_key;
+                }
+            }
+            else{
+                $data = CompanySetting::orderBy("id", "DESC")->first();
+                $google_map_key = $data->google_api_keys;
+                $barikoi_key = $data->barikoi_api_keys;
+            }
+            
+            if(isset($map_api) && $map_api == "barikoi"){  
+                
+                if(!isset($request->via_point) || count($request->via_point) == 0){
+                    $points = "{$request->pickup_point['longitude']},{$request->pickup_point['latitude']};{$request->destination_point['longitude']},{$request->destination_point['latitude']}";
+
+                    $url = "https://barikoi.xyz/v2/api/route/{$points}?api_key={$barikoi_key}&geometries=geojson&profile=car";
+    
+                    $ch = curl_init();
+    
+                    curl_setopt_array($ch, [
+                        CURLOPT_URL => $url,
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_CUSTOMREQUEST => "GET",
+                        CURLOPT_TIMEOUT => 30,
+                        CURLOPT_HTTPHEADER => [
+                            "Accept: application/json"
+                        ],
+                    ]);
+    
+                    $response = curl_exec($ch);
+    
+                    if (curl_errno($ch)) {
+                        echo 'cURL Error: ' . curl_error($ch);
+                    } else {
+                        $data = json_decode($response, true);
+                        $route = $data['routes'][0];
+                        $polyline = $route['geometry'];
+                        $distance = $route['distance'];
+                    }
+    
+                    curl_close($ch);
+                }
+                else{
+                    $distance = 0;
+                    for($i = 0; $i <= count($request->via_point); $i++){
+                        if($i == 0){
+                            $points = "{$request->pickup_point['longitude']},{$request->pickup_point['latitude']};{$request->via_point[$i]['longitude']},{$request->via_point[$i]['latitude']}";
+                        }
+                        else if($i == count($request->via_point)){
+                            $points = "{$request->via_point[$i - 1]['longitude']},{$request->via_point[$i - 1]['latitude']};{$request->destination_point['longitude']},{$request->destination_point['latitude']}";
+                        }
+                        else{
+                            $points = "{$request->via_point[$i - 1]['longitude']},{$request->via_point[$i - 1]['latitude']};{$request->via_point[$i]['longitude']},{$request->via_point[$i]['latitude']}";
+                        }
+    
+                        $url = "https://barikoi.xyz/v2/api/route/{$points}?api_key={$barikoi_key}&geometries=geojson&profile=car";
+        
+                        $ch = curl_init();
+        
+                        curl_setopt_array($ch, [
+                            CURLOPT_URL => $url,
+                            CURLOPT_RETURNTRANSFER => true,
+                            CURLOPT_CUSTOMREQUEST => "GET",
+                            CURLOPT_TIMEOUT => 30,
+                            CURLOPT_HTTPHEADER => [
+                                "Accept: application/json"
+                            ],
+                        ]);
+        
+                        $response = curl_exec($ch);
+        
+                        if (curl_errno($ch)) {
+                            echo 'cURL Error: ' . curl_error($ch);
+                        } else {
+                            $data = json_decode($response, true);
+                            $route = $data['routes'][0];
+                            $polyline = $route['geometry'];
+                            $api_distance = $route['distance'];
+                            $distance += $api_distance;
+                        }
+                        curl_close($ch);
+                    }
+                }
+
+            }
+            else if(isset($map_api) && $map_api == "google"){  
+
+            }
+            else if(isset($map_api) && $map_api == "both"){  
+
+            }
+
+            $vehicle = CompanyVehicleType::where("id", $request->vehicle_id)->first();
+            dd(auth('tenant')->user());
+            
         }
         catch(\Exception $e){
             return response()->json([
