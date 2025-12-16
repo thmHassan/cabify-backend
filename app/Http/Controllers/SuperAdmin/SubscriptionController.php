@@ -145,7 +145,7 @@ class SubscriptionController extends Controller
 
     public function subscriptionManagement(Request $request){
         try{
-            $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->orderBy('created_at','DESC')->paginate(10);
+            $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->orderBy('created_at','DESC')->with('subscription')->paginate(10);
             return response()->json([
                 'success' => 1,
                 'list' => $activeSubscription
