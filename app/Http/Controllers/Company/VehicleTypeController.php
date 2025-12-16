@@ -46,7 +46,7 @@ class VehicleTypeController extends Controller
                 $file->move(public_path('vehicle_image'), $filename);
                 $vehicleType->vehicle_image = 'pictures/'.$filename;
             }
-            $vehicleType->backup_bid_vehicle_type = implode(",",$request->backup_bid_vehicle_type);
+            $vehicleType->backup_bid_vehicle_type = (isset($request->backup_bid_vehicle_type) && $request->backup_bid_vehicle_type != NULL ) ? implode(",",$request->backup_bid_vehicle_type) : NULL;
             $vehicleType->base_fare_system_status = $request->base_fare_system_status;
             $vehicleType->base_fare_less_than_x_miles = $request->base_fare_less_than_x_miles;
             $vehicleType->base_fare_less_than_x_price = $request->base_fare_less_than_x_price;
@@ -58,9 +58,9 @@ class VehicleTypeController extends Controller
             $vehicleType->mileage_system = $request->mileage_system;
             $vehicleType->first_mile_km = $request->first_mile_km;
             $vehicleType->second_mile_km = $request->second_mile_km;
-            $vehicleType->from_array = implode(",",$request->from_array);
-            $vehicleType->to_array = implode(",",$request->to_array);
-            $vehicleType->price_array = implode(",",$request->price_array);
+            $vehicleType->from_array = (isset($request->from_array) && $request->from_array != NULL) ? implode(",",$request->from_array) : NULL;
+            $vehicleType->to_array = (isset($request->to_array) && $request->to_array != NULL) ? implode(",",$request->to_array) : NULL;
+            $vehicleType->price_array = (isset($request->price_array) && $request->price_array != NULL) ? implode(",",$request->price_array) : NULL;
             $vehicleType->attributes = $request->attribute_array;
             $vehicleType->save();
 
@@ -114,7 +114,7 @@ class VehicleTypeController extends Controller
                 $file->move(public_path('vehicle_image'), $filename);
                 $vehicleType->vehicle_image = 'pictures/'.$filename;
             }
-            $vehicleType->backup_bid_vehicle_type = implode(",",$request->backup_bid_vehicle_type);
+            $vehicleType->backup_bid_vehicle_type = (isset($request->backup_bid_vehicle_type) && $request->backup_bid_vehicle_type != NULL) ? implode(",",$request->backup_bid_vehicle_type) : NULL;
             $vehicleType->base_fare_system_status = $request->base_fare_system_status;
             $vehicleType->base_fare_less_than_x_miles = $request->base_fare_less_than_x_miles;
             $vehicleType->base_fare_less_than_x_price = $request->base_fare_less_than_x_price;
@@ -126,9 +126,9 @@ class VehicleTypeController extends Controller
             $vehicleType->mileage_system = $request->mileage_system;
             $vehicleType->first_mile_km = $request->first_mile_km;
             $vehicleType->second_mile_km = $request->second_mile_km;
-            $vehicleType->from_array = implode(",",$request->from_array);
-            $vehicleType->to_array = implode(",",$request->to_array);
-            $vehicleType->price_array = implode(",",$request->price_array);
+            $vehicleType->from_array = (isset($request->from_array) && $request->from_array != NULL) ? implode(",",$request->from_array) : NULL;
+            $vehicleType->to_array = (isset($request->to_array) && $request->to_array != NULL) ? implode(",",$request->to_array) : NULL;
+            $vehicleType->price_array = (isset($request->price_array) && $request->price_array != NULL) ? implode(",",$request->price_array) : NULL;
             $vehicleType->attributes = $request->attribute_array;
             $vehicleType->save();
 
