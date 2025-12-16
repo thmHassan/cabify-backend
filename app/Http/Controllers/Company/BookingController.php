@@ -268,7 +268,31 @@ class BookingController extends Controller
             }
 
             $vehicle = CompanyVehicleType::where("id", $request->vehicle_id)->first();
-            dd(auth('tenant')->user());
+            if(auth('tenant')->user()->data['units'] == "miles"){
+                $cdistance = ($distance / 1609.344);
+            }
+            else{
+                $cdistance = ($distance / 1000);
+            }
+            if($vehicle->mileage_system == "fixed"){
+                $firstDistance = 1;
+                $secondDistance = $cdistance - $firstDistance;
+                $firstAmount = $vehicle->first_mile_km;
+                $secondAmount = $secondDistance * $vehicle->second_mile_km;
+
+                $amount = $firstAmount + $secondAmount;
+            }   
+            else{
+                $fromArray = $request->fromArray;
+                $toArray = $request->toArray;
+                $priceArray = $request->priceArray;
+                $amount = 0;
+                for($i = 0; $i < count($fromArray); $i++){
+                    if($cdistance > $toArray[$i]){
+                        
+                    }
+                }
+            }         
             
         }
         catch(\Exception $e){
