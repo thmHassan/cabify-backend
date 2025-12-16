@@ -25,7 +25,6 @@ class BookingController extends Controller
             foreach ($records as $rec) {
                 $polygon = json_decode($rec->features, true);
                 $array = json_decode($polygon['geometry']['coordinates'], true)[0];
-                dd($polygon, $array);
                 if ($this->pointInPolygon($lat, $lng, $array)) {
                     $matched = $rec;
                     break;
