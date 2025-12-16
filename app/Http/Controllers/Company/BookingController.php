@@ -279,21 +279,47 @@ class BookingController extends Controller
                 $secondDistance = $cdistance - $firstDistance;
                 $firstAmount = $vehicle->first_mile_km;
                 $secondAmount = $secondDistance * $vehicle->second_mile_km;
-
                 $amount = $firstAmount + $secondAmount;
             }   
             else{
-                $fromArray = $request->fromArray;
-                $toArray = $request->toArray;
-                $priceArray = $request->priceArray;
+                $fromArray = $vehicle->from_array;
+                $toArray = $vehicle->to_array;
+                $priceArray = $vehicle->price_array;
                 $amount = 0;
+                $remainDistance = $cdistance;
                 for($i = 0; $i < count($fromArray); $i++){
-                    if($cdistance > $toArray[$i]){
-                        
+                    if($cdistance > $toArray[$i] && $remainDistance != 0){
+                        $tempDistance = (float) $toArray[$i] - (float) $fromArray[$i];
+                        $cAmount = (float) $tempDistance * (float) $priceArray[$i];
+                        $amount += (float) $cAmount;
+                        $remainDistance = (float) $cdistance - (float) $toArray[$i];
+                    }
+                    else{
+                        $cAmount = (float) $remainDistance * (float) $priceArray[$i];
+                        $amount += (float) $cAmount;
+                        $remainDistance = 0;
                     }
                 }
+                if($remainDistance != 0){
+                    $cAmount = (float) $remainDistance * (float) $priceArray[$i-1];
+                    $amount += (float) $cAmount;
+                }
             }         
-            
+            if($vehicle->base_fare_system_status == "yes"){
+                if($cdistance <= $vehicle->base_fare_less_than_x_miles){
+                    $amount = $amount + $vehicle->base_fare_less_than_x_price;
+                }
+                else if($vehicle->base_fare_from_x_miles <= $cdistance && $cdistance <= $vehicle->base_fare_to_x_miles){
+                    $amount = $amount + $vehicle->base_fare_from_to_price;
+                }
+                else if($cdistance >= $vehicle->base_fare_greater_than_x_miles){
+                    $amount = $amount + $vehicle->base_fare_greater_than_x_price;
+                }
+            }
+            return response()->json([
+                'success' => 1,
+                'calculate_fare' => $amount
+            ]);
         }
         catch(\Exception $e){
             return response()->json([
