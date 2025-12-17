@@ -13,6 +13,7 @@ use App\Models\MobileAppSetting;
 use App\Models\PackageSetting;
 use Hash;
 use App\Models\CompanyUser; 
+use App\Models\CompanyDriver; 
 use Illuminate\Support\Facades\Artisan;
 
 class SettingController extends Controller
