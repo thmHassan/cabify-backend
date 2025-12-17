@@ -453,7 +453,7 @@ class SettingController extends Controller
     public function sendNotification(Request $request){
         try{
             if($request->user_type == "users"){
-                $users = CompanyUser::get();
+                $users = CompanyUser::whereNotNUll("device_token")->get();
             }
             else{
                 $query = CompanyDriver::whereNotNUll("device_token");
