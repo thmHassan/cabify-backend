@@ -29,6 +29,8 @@ use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
 use App\Http\Controllers\Driver\TicketController as DriverTicketController;
+use App\Http\Controllers\Driver\BookingController as DriverBookingController;
+use App\Http\Controllers\Driver\VehicleController as DriverVehicleController;
 use App\Http\Controllers\Rider\AuthController as RiderAuthController;
 use App\Http\Controllers\Rider\EmergencyContactController as RiderEmergencyContactController;
 use App\Http\Controllers\Rider\SettingController as RiderSettingController;
@@ -152,6 +154,11 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/delete-driver', [DriverController::class, 'deleteDriver']);
         Route::get('/company/change-driver-status', [DriverController::class, 'changeDriverStatus']);
         Route::post('/company/add-wallet-balance', [DriverController::class, 'addWalletBalance']);
+        Route::post('/company/approv-vehicle-details', [DriverController::class, 'approvVehicleDetails']);
+        Route::get('/company/driver-document-list', [DriverController::class, 'driverDocumentList']);
+        Route::post('/company/change-status-document', [DriverController::class, 'changeStatusDocument']);
+        Route::get('/company/driver-document', [DriverController::class, 'getDriverDocument']);
+        Route::get('/company/delete-driver-document', [DriverController::class, 'deleteDriverDocument']);
         
         Route::post('/company/create-document-type', [DocumentTypeController::class, 'createDocumentType']);
         Route::post('/company/edit-document-type', [DocumentTypeController::class, 'editDocumentType']);
@@ -238,12 +245,21 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
-        
+        Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
+
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
 
         Route::post('/driver/create-ticket', [DriverTicketController::class, 'createTicket']);
         Route::get('/driver/ticket-list', [DriverTicketController::class, 'ticketList']);
+   
+        Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
+        Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
+        Route::get('/driver/upcoming-ride', [DriverBookingController::class, 'upcomingRide']);
+        
+        Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
+        Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
+        Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
         
         Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
         Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);

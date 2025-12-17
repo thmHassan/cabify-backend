@@ -9,6 +9,7 @@ use App\Models\CompanyContactUs;
 use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
 use App\Models\CompanyFAQ;
+use App\Models\PackageSetting;
 
 class SettingController extends Controller
 {
@@ -124,6 +125,35 @@ class SettingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function getCommissionData(Request $request){
+        try{
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            $data['package_type'] = $settings->package_type;
+            $data['package_days'] = $settings->package_days;
+            $data['package_amount'] = $settings->package_amount;
+            $data['package_percentage'] = $settings->package_percentage;
+            $data['cancellation_per_day'] = $settings->cancellation_per_day;
+            $data['waiting_time_charge'] = $settings->waiting_time_charge;
+
+            $packageTopups = PackageSetting::orderBy("id", "DESC")->get();
+            
+            return response()->json([
+                'success' => 1,
+                'data' => [
+                    'main_commission' => (object) $data,
+                    'packageTopups' => $packageTopups
+                ]
+                ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 }
