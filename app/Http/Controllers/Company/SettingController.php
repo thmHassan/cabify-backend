@@ -12,6 +12,8 @@ use App\Models\UserSubscription;
 use App\Models\MobileAppSetting;
 use App\Models\PackageSetting;
 use Hash;
+use App\Models\CompanyUser; 
+use Illuminate\Support\Facades\Artisan;
 
 class SettingController extends Controller
 {
@@ -445,6 +447,45 @@ class SettingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    public function sendNotification(Request $request){
+        try{
+            if($request->user_type == "users"){
+                $users = CompanyUser::whereNotNUll("device_token")->get();
+            }
+            else{
+                $query = CompanyDriver::whereNotNUll("device_token");
+                if($request->user_type == "pending_drivers"){
+                        $query->where("status", "pending");
+                }
+                else if($request->user_type == "approved_drivers"){
+                        $query->where("status", "accepted");
+                }
+                else if($request->user_type == "rejected_drivers"){
+                        $query->where("status", "rejected");
+                }   
+                if($request->vehicle_id != NULL){
+                    $query->where('vehicle_type', $request->vehicle_id);
+                }
+                $users = $query->get();
+            }
+            Artisan::call('report:generate', [
+                'title' => $request->title,
+                'body' => $request->body,
+                'users' => $request->users,
+            ]);
+            return response()->json([
+                'success' => 1,
+                'message' => "Notification process started successfully"
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
         }
     }
 }
