@@ -405,7 +405,7 @@ class BookingController extends Controller
             if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
                 $query->where("dispatcher_id", $request->dispatcher_id);
             }
-            $rides = $query->paginate(10);
+            $rides = $query->with('driverDetail')->paginate(10);
 
             return response()->json([
                 'success' => 1,
