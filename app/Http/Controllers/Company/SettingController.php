@@ -453,7 +453,7 @@ class SettingController extends Controller
     public function sendNotification(Request $request){
         try{
             if($request->user_type == "users"){
-                $users = CompanyUser::whereNotNUll("device_token")->get();
+                $users = CompanyUser::get();
             }
             else{
                 $query = CompanyDriver::whereNotNUll("device_token");
@@ -471,10 +471,10 @@ class SettingController extends Controller
                 }
                 $users = $query->get();
             }
-            Artisan::call('report:generate', [
+            Artisan::call('app:send-notification', [
                 'title' => $request->title,
                 'body' => $request->body,
-                'users' => $request->users,
+                'users' => $users,
             ]);
             return response()->json([
                 'success' => 1,

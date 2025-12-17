@@ -12,7 +12,7 @@ class SendNotification extends Command
      *
      * @var string
      */
-    protected $signature = 'app:send-notification {$title} {$body} {$users}';
+    protected $signature = 'app:send-notification {title} {body} {users}';
 
     /**
      * The console command description.
@@ -31,13 +31,15 @@ class SendNotification extends Command
         $body = $this->argument('body');
         $users = $this->argument('users');
 
-        foreach($users as $key => $user){
-            \Log::info("UserId for notification--------". $user->id);
-            FCMService::sendToDevice(
-                $user->device_token,
-                $title,
-                $body
-            );        
+        if(isset($users) && $users != NULL){
+            foreach($users as $key => $user){
+                \Log::info("UserId for notification--------". $user->id);
+                FCMService::sendToDevice(
+                    $user->device_token,
+                    $title,
+                    $body
+                );        
+            }
         }
         \Log::info("notifiication cron completed successfully");
     }

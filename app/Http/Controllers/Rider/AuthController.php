@@ -96,6 +96,8 @@ class AuthController extends Controller
 
             $user->otp = null;
             $user->otp_expires_at = null;
+            $user->device_token = $request->device_token;
+            $user->fcm_token = $request->fcm_token;
             $user->save();
 
             $token = JWTAuth::fromUser($user);
