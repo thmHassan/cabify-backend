@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyDriver;
 use Illuminate\Validation\Rule;
+use App\Models\DriverDocument;
 
 class DriverController extends Controller
 {
@@ -206,6 +207,123 @@ class DriverController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Balance added successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function approvVehicleDetails(Request $request){
+        try{
+            $request->validate([
+                'driver_id' => 'required'
+            ]);
+
+            $driver = CompanyDriver::where("id", $request->driver_id)->first();
+            $driver->vehicle_change_request = 0;
+            $driver->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Vehicle information approved successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function driverDocumentList(Request $request){
+        try{
+            $documentList = DriverDocument::where("driver_id", $request->driver_id)->with("documentDetail")->orderBy("id","DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'documentList' => $documentList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function changeStatusDocument(Request $request){
+        try{
+            if(isset($request->approve_all) && $request->approve_all == 1){
+                $documentList = DriverDocument::where("driver_id", $request->driver_id)->where("status", "pending")->get();
+                foreach($documentList as $document){
+                    $document->status = 'verified';
+                    $document->save();
+                }
+            }
+            else if(isset($request->reject_all) && $request->reject_all == 1){
+                $documentList = DriverDocument::where("driver_id", $request->driver_id)->where("status", "pending")->get();
+                foreach($documentList as $document){
+                    $document->status = 'failed';
+                    $document->save();
+                }
+            }
+            else if(isset($request->driver_document_id) && $request->driver_document_id != NULL){
+                $document = DriverDocument::where("id", $request->driver_document_id)->first();
+                $document->status = $request->status;
+                $document->save();
+            }
+            else if(isset($request->document_approved_office) && $request->document_approved_office == 1){
+                $driver = CompanyDriver::where("id", $request->driver_id)->first();
+                $driver->document_approved_office = 1;
+                $driver->save();
+            }
+            return response()->json([
+                'success' => 1,
+                'message' => 'Document status updated successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function getDriverDocument(Request $request){
+        try{
+            $document = DriverDocument::where("id", $request->id)->first();
+
+            return response()->json([
+                'success' => 1,
+                'document' => $document
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function deleteDriverDocument(Request $request){
+        try{
+            $document = DriverDocument::where("id", $request->id)->first();
+
+            if(isset($document) && $document != NULL){
+                $document->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Document deleted successfully'
             ]);
         }
         catch(\Exception $e){

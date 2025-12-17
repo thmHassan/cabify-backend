@@ -10,4 +10,8 @@ class DriverDocument extends Model
     use HasFactory;
 
     protected $table = "drivers_documents";
+
+    public function documentDetail(){
+        return $this->hasOne(CompanyDocumentType::class, 'id', 'document_id');
+    }
 }
