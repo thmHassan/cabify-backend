@@ -12,6 +12,7 @@
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
         "php-open-source-saver/jwt-auth": "^2.3",
+        "pusher/pusher-php-server": "^7.2",
         "stancl/tenancy": "^3.9",
         "stripe/stripe-php": "^18.0"
     },

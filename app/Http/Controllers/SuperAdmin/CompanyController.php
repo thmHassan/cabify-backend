@@ -24,6 +24,7 @@ use Illuminate\Validation\Rule;
 use App\Models\Transaction;
 use Carbon\Carbon;
 use App\Models\Dispatcher;
+use App\Events\NewNotification;
 
 class CompanyController extends Controller
 {
@@ -903,5 +904,14 @@ class CompanyController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    public function sendNotification(){
+        $userId = 1;
+        event(new UserNotification(
+            $userId,
+            "Hello User {$userId}, you have a new notification!"
+        ));
+        return response()->json(['status' => 'sent']);
     }
 }
