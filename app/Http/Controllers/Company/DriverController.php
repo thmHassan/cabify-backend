@@ -8,6 +8,7 @@ use App\Models\CompanyDriver;
 use Illuminate\Validation\Rule;
 use App\Models\DriverDocument;
 use App\Models\CompanyBooking;
+use App\Services\FCMService;
 
 class DriverController extends Controller
 {
@@ -365,6 +366,42 @@ class DriverController extends Controller
             return response()->json([
                 'success' => 1,
                 'rideHistory' => $rideHistory
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function sendDriverNotification(Request $request){
+        try{
+            $request->validate([
+                'driver_id' => 'required',
+                'title' => 'required',
+                'body' => 'required'
+            ]);
+
+            $driver = CompanyDriver::where("id", $request->driver_id)->first();
+
+            if(!isset($driver->device_token) || $driver->device_token == NULL){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver is not logged in to App'
+                ], 400);
+            }
+
+            FCMService::sendToDevice(
+                $driver->device_token,
+                $request->title,
+                $request->body
+            );
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Notification sent successfully'
             ]);
         }
         catch(\Exception $e){
