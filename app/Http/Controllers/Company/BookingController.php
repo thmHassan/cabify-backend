@@ -103,7 +103,20 @@ class BookingController extends Controller
                 'booking_amount' => 'required',
             ]);
 
-            $distance = 10;
+            $distance = $request->distance;
+
+            if(isset($request->driver) && $request->driver != NULL){
+                if(isset($request->pickup_time) && $request->pickup_time == "asap"){
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->where('date', $request->booking_date)->where("booking_status", "ongoing")->first();
+                }
+                elseif(isset($request->pickup_time) && $request->pickup_time != "asap"){
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->where('date', $request->booking_date)->where("pickup_time", $request->pickup_time)->first();
+                }
+                elseif(isset($request->multi_booking) && $request->multi_booking == "yes"){
+                    
+                }
+            }
+
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
             $newBooking->sub_company = $request->sub_company;
@@ -145,6 +158,9 @@ class BookingController extends Controller
             $newBooking->distance = $distance;
             $newBooking->booking_amount = $request->booking_amount;
             $newBooking->dispatcher_id = $request->dispatcher_id;
+            $newBooking->week = $request->week;
+            $newBooking->start_at = $request->start_at;
+            $newBooking->end_at = $request->end_at;
             $newBooking->save();
 
             return response()->json([
@@ -351,6 +367,7 @@ class BookingController extends Controller
             }
             return response()->json([
                 'success' => 1,
+                'distance' => $distance,
                 'calculate_fare' => $amount
             ]);
         }
