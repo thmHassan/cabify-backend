@@ -35,7 +35,8 @@ class AuthController extends Controller
         if (! $token = auth('api')->attempt($credentials)) {
             return response()->json(['error' => 1, 'message' => 'Invalid credentials'], 401);
         }
-
+        $user->fcm_token = $request->fcm_token;
+        $user->device_token = $request->device_token;
         return $this->respondWithToken($token, $user);
     }
 
