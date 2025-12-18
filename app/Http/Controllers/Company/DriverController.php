@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyDriver;
 use Illuminate\Validation\Rule;
 use App\Models\DriverDocument;
+use App\Models\CompanyBooking;
 
 class DriverController extends Controller
 {
@@ -224,12 +225,35 @@ class DriverController extends Controller
             ]);
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
-            $driver->vehicle_change_request = 0;
+            $driver->vehicle_change_request = 2;
             $driver->save();
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Vehicle information approved successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function rejectVehicleDetails(Request $request){
+        try{
+            $request->validate([
+                'driver_id' => 'required'
+            ]);
+
+            $driver = CompanyDriver::where("id", $request->driver_id)->first();
+            $driver->vehicle_change_request = 3;
+            $driver->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Vehicle information rejected successfully'
             ]);
         }
         catch(\Exception $e){
@@ -324,6 +348,23 @@ class DriverController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Document deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function driverRideHistory(Request $request){
+        try{
+            $rideHistory = CompanyBooking::where('driver', $request->driver_id)->orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'rideHistory' => $rideHistory
             ]);
         }
         catch(\Exception $e){
