@@ -804,8 +804,8 @@ class CompanyController extends Controller
             // if (!$token = Auth::guard('tenant')->attempt($credentials)) {
             //     return response()->json(['error' => 'Unauthorized'], 401);
             // }
-            $tenant->device_token = $request->device_token;
-            $tenant->fcm_token = $request->fcm_token;
+            // $tenant->device_token = $request->device_token;
+            // $tenant->fcm_token = $request->fcm_token;
             $tenant->save();
             $token = JWTAuth::fromUser($tenant);
 
