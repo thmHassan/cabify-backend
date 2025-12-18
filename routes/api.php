@@ -36,6 +36,7 @@ use App\Http\Controllers\Rider\EmergencyContactController as RiderEmergencyConta
 use App\Http\Controllers\Rider\SettingController as RiderSettingController;
 use App\Http\Controllers\Rider\TicketController as RiderTicketController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
+use Illuminate\Support\Facades\Broadcast;
 
 /*
 |--------------------------------------------------------------------------
@@ -52,6 +53,11 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
+Broadcast::routes([
+    'middleware' => ['jwt.auth'], // VERY IMPORTANT
+]);
+
+Route::get('/test-notification', [CompanyController::class, 'sendNotification']);
 Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 Route::post('login', [AuthController::class, 'login']);
 Route::post('/company/login', [CompanyController::class, 'companyLogin']);
