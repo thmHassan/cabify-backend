@@ -332,20 +332,19 @@ class CompanyController extends Controller
                             ->orWhere("data->email", "LIKE" ,"%".$request->search."%");
                 });
             }
-            if(isset($request->upcoming_subscription) && $request->upcoming_subscription != NULL){
+            if (!empty($request->upcoming_subscription)) {
                 $tenants->whereBetween(
-                    DB::raw("DATE(data->expiry_date)"),
+                    DB::raw("DATE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.expiry_date')))"),
                     [
-                        Carbon::today(),
-                        Carbon::today()->addDays($request->upcoming_subscription)
+                        Carbon::today()->toDateString(),
+                        Carbon::today()->addDays($request->upcoming_subscription)->toDateString()
                     ]
                 );
             }
-            if (isset($request->expired_subscription) && $request->expired_subscription == 1) {
-                $tenants->whereDate(
-                    DB::raw("data->expiry_date"),
-                    '<',
-                    Carbon::today()
+            if (!empty($request->expired_subscription) && $request->expired_subscription == 1) {
+                $tenants->whereRaw(
+                    "DATE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.expiry_date'))) < ?",
+                    [Carbon::today()->toDateString()]
                 );
             }
             $data = $tenants->paginate($perPage);
