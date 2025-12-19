@@ -911,6 +911,7 @@ class CompanyController extends Controller
             return response()->json([
                 'message' => 'Dispatcher login successful',
                 'token' => $token,
+                'user' => $user
             ]);
         }
         catch(\Exception $e){
