@@ -222,6 +222,35 @@ class CompanyController extends Controller
 
             $tenant = Tenant::where("id", $request->id)->first();
 
+            if($tenant->subscription_type != $request->subscription_type){
+                $existingSubscription = Subscription::where("id", $tenant->subscription_type)->first();
+                $newSubscription = SUbscription::where("id", $request->subscription_type)->first();
+
+                if($newSubscription->deduct_type == "cash"){
+                    if($existingSubscription->deduct_type == "card"){
+                        $setting = CompanySetting::orderBy("id", "DESC")->first();
+                        Stripe::setApiKey($setting->stripe_secret_key);
+
+                        StripeSubscription::update(
+                            $tenant->stripe_subscription_id,
+                            ['cancel_at_period_end' => true]
+                        );
+                    }
+                }
+                elseif($newSubscription->deduct_type == "card"){
+                    if($existingSubscription->deduct_type == "card"){
+                        $setting = CompanySetting::orderBy("id", "DESC")->first();
+                        Stripe::setApiKey($setting->stripe_secret_key);
+
+                        StripeSubscription::update(
+                            $tenant->stripe_subscription_id,
+                            ['cancel_at_period_end' => true]
+                        );
+                    }
+                    // Create New subscription in stripe
+                }
+            }
+
             $tenant->company_name = isset($request->company_name) ? $request->company_name : $tenant->company_name;
             $tenant->company_admin_name = isset($request->company_admin_name) ? $request->company_admin_name : $tenant->company_admin_name;
             $tenant->user_name = isset($request->user_name) ? $request->user_name : $tenant->user_name;
@@ -640,12 +669,16 @@ class CompanyController extends Controller
                     $session = $event->data->object;
                     $userId = $session->metadata->user_id ?? null;
                     $subscriptionId = $session->metadata->subscription_id ?? null;
+                    $stripeSubscriptionId = $session->subscription;
+                    $stripeCustomerId = $session->customer;
                     
                     $tenant = Tenant::where("id", $userId)->first();
                     $subscription = Subscription::where("id", $subscriptionId)->first();
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
+                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
+                    $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
                     $tenant->save();
 
@@ -692,12 +725,16 @@ class CompanyController extends Controller
                     $session = $event->data->object;
                     $userId = $session->subscription_details->metadata->user_id ?? null;
                     $subscriptionId = $session->subscription_details->metadata->subscription_id ?? null;
-                    
+                    $stripeSubscriptionId = $session->subscription;
+                    $stripeCustomerId = $session->customer;
+
                     $tenant = Tenant::where("id", $userId)->first();
                     $subscription = Subscription::where("id", $subscriptionId)->first();
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
+                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
+                    $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
                     $tenant->save();
 
