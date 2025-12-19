@@ -246,6 +246,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/dispatcher/login', [CompanyController::class, 'dispatcherLogin']);
     
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
+    Route::post('/driver/register', [DriverAuthController::class, 'register']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
 
     Route::group(['middleware' => ['auth.driver.jwt']], function () {
@@ -278,6 +279,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
 Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/login', [RiderAuthController::class, 'login']);
+    Route::post('/rider/register', [RiderAuthController::class, 'register']);
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
 
     Route::group(['middleware' => ['auth.rider.jwt']], function () {
