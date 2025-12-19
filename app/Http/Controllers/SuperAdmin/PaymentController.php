@@ -23,7 +23,7 @@ class PaymentController extends Controller
 
             if(isset($request->date) && $request->date != NULL){
                 $search = $request->date;
-                $q->whereDate("created_at", $request->date);
+                $query->whereDate("created_at", $request->date);
             }
             $list = $query->paginate(10);
             
