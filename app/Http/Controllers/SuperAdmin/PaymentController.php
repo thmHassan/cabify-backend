@@ -16,8 +16,7 @@ class PaymentController extends Controller
                 $search = $request->search;
                 $query->whereHas('companyDetail', function ($q) use ($search) {
                     $q->where('company_name', 'LIKE', "%{$search}%")
-                    ->orWhere('email', 'LIKE', "%{$search}%")
-                    ->orWhere('phone', 'LIKE', "%{$search}%");
+                    ->orWhere('email', 'LIKE', "%{$search}%");
                 });
             }
 
