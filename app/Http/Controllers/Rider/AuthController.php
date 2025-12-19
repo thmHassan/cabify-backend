@@ -10,40 +10,28 @@ use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
-    public function login(Request $request){
+    public function register(Request $request){
         try{
             $request->validate([
                 'email' => 'required',
-                'phone' => 'required'
+                'phone' => 'required',
+                'name' => 'required',
             ]);
 
-            $existUser = CompanyRider::where('phone_no', $request->phone)->first();
+            $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->first();
             
-            if(isset($existUser) && $existUser->email != $request->email){
+            if(isset($existUser) && $existUser != NULL){
                 return response()->json([
                     'error' => 1,
-                    'message' => 'This phone no already registered with othe email id'
-                ]);
+                    'message' => 'User already exists with this Email or Phone No.'
+                ], 400);
             }
 
-            $existUser = CompanyRider::where('email', $request->email)->first();
-            
-            if(isset($existUser) && $existUser->phone_no != $request->phone){
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'This email id is already registered with other phone no'
-                ]);
-            }
-
-            $user = CompanyRider::where('phone_no', $request->phone)->where('email', $request->email)->first();
-            $new = 1;
-            if(!isset($user) || $user == NULL){
-                $user = new CompanyRider;
-                $user->phone_no = $request->phone;
-                $user->email = $request->email;
-                $user->save();
-                $new = 2;
-            }
+            $user = new CompanyRider;
+            $user->phone_no = $request->phone;
+            $user->email = $request->email;
+            $user->name = $request->name;
+            $user->save();
 
             $otp = rand(1000, 9999);
             $expiresAt = Carbon::now()->addMinutes(5);
@@ -51,14 +39,44 @@ class AuthController extends Controller
             $user->otp_expires_at = $expiresAt;
             $user->save();
 
-            $message = "User sign in successfully and OTP sent";
-            if($new == 2){
-                $message = "User sign up successfully and OTP sent";
+            return response()->json([
+                'success' => 1,
+                'message' => "User sign up successfully and OTP sent",
+            ], 200);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function login(Request $request){
+        try{
+            $request->validate([
+                'email' => 'required',
+                'phone' => 'required'
+            ]);
+
+            $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->first();
+            
+            if(!isset($existUser) || $existUser != NULL){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User not exists with this Email and Phone No.'
+                ]);
             }
+
+            $otp = rand(1000, 9999);
+            $expiresAt = Carbon::now()->addMinutes(5);
+            $existUser->otp = $otp;
+            $existUser->otp_expires_at = $expiresAt;
+            $existUser->save();
 
             return response()->json([
                 'success' => 1,
-                'message' => $message,
+                'message' => "User sign in successfully and OTP sent",
             ], 200);
         }
         catch(\Exception $e){
