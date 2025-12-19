@@ -230,6 +230,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::post('/company/calculate-fares', [BookingController::class, 'calculateFares']);
         Route::get('/company/cancelled-booking', [BookingController::class, 'cancelledBooking']);
         Route::get('/company/booking-list', [BookingController::class, 'bookingList']);
+        Route::get('/company/ride-detail', [BookingController::class, 'rideDetail']);
         
         Route::get('/company/customer-ratings', [RatingController::class, 'customerRatings']);
         Route::get('/company/driver-ratings', [RatingController::class, 'driverRatings']);
