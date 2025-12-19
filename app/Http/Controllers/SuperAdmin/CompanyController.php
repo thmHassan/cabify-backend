@@ -332,6 +332,22 @@ class CompanyController extends Controller
                             ->orWhere("data->email", "LIKE" ,"%".$request->search."%");
                 });
             }
+            if(isset($request->upcoming_subscription) && $request->upcoming_subscription != NULL){
+                $tenants->whereBetween(
+                    DB::raw("DATE(data->expiry_date)"),
+                    [
+                        Carbon::today(),
+                        Carbon::today()->addDays($request->upcoming_subscription)
+                    ]
+                );
+            }
+            if (isset($request->expired_subscription) && $request->expired_subscription == 1) {
+                $tenants->whereDate(
+                    DB::raw("data->expiry_date"),
+                    '<',
+                    Carbon::today()
+                );
+            }
             $data = $tenants->paginate($perPage);
             return response()->json([
                 'success' => 1,
