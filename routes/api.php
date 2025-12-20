@@ -35,6 +35,7 @@ use App\Http\Controllers\Rider\AuthController as RiderAuthController;
 use App\Http\Controllers\Rider\EmergencyContactController as RiderEmergencyContactController;
 use App\Http\Controllers\Rider\SettingController as RiderSettingController;
 use App\Http\Controllers\Rider\TicketController as RiderTicketController;
+use App\Http\Controllers\Rider\BookingController as RiderBookingController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Broadcast;
 
@@ -300,6 +301,10 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
         Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
+
+        Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
+        Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
+        Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
     });
 });
 

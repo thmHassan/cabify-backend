@@ -61,7 +61,7 @@ class AuthController extends Controller
 
             $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->first();
             
-            if(!isset($existUser) || $existUser != NULL){
+            if(!isset($existUser) || $existUser == NULL){
                 return response()->json([
                     'error' => 1,
                     'message' => 'User not exists with this Email and Phone No.'
