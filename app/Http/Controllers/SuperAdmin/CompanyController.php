@@ -293,7 +293,7 @@ class CompanyController extends Controller
             $tenant->lost_found = isset($request->lost_found) ? $request->lost_found : $tenant->lost_found;
             $tenant->accounts = isset($request->accounts) ? $request->accounts : $tenant->accounts;
             $tenant->status = isset($request->status) ? $request->status : $tenant->status;
-            $tenant->password = Hash::make($request->password);
+            $tenant->password = (isset($request->password) && $request->password != NULL) ? Hash::make($request->password) : $tenant->password;
             $tenant->save();
 
             if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
