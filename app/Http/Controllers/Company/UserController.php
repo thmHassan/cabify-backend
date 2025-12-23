@@ -192,4 +192,40 @@ class UserController extends Controller
             ]);
         }
     }
+
+    public function sendUserNotification(Request $request){
+        try{
+            $request->validate([
+                'user_id' => 'required',
+                'title' => 'required',
+                'body' => 'required'
+            ]);
+
+            $user = CompanyUser::where("id", $request->user_id)->first();
+
+            if(!isset($user->device_token) || $user->device_token == NULL){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User is not logged in to App'
+                ], 400);
+            }
+
+            FCMService::sendToDevice(
+                $user->device_token,
+                $request->title,
+                $request->body
+            );
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Notification sent successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
