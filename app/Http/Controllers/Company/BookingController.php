@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyPlot;
 use App\Models\CompanyBooking;
 use App\Models\CompanyVehicleType;
+use Carbon\Carbon;
 
 class BookingController extends Controller
 {
@@ -104,68 +105,143 @@ class BookingController extends Controller
             ]);
 
             $distance = $request->distance;
+            $nearBooking = 0;
+            $alertMessage = NULL;
 
-            if(isset($request->driver) && $request->driver != NULL){
-                if(isset($request->pickup_time) && $request->pickup_time == "asap"){
-                    $existingBooking = CompanyBooking::where("driver", $request->driver)->where('date', $request->booking_date)->where("booking_status", "ongoing")->first();
-                }
-                elseif(isset($request->pickup_time) && $request->pickup_time != "asap"){
-                    $existingBooking = CompanyBooking::where("driver", $request->driver)->where('date', $request->booking_date)->where("pickup_time", $request->pickup_time)->first();
-                }
-                elseif(isset($request->multi_booking) && $request->multi_booking == "yes"){
+            if(isset($request->multi_booking) && $request->multi_booking == "yes"){
+                $dayArray = array_map('trim', explode(',', $request->multi_days));
+                $startDate = Carbon::parse($request->start_at);
+                $endDate   = Carbon::parse($request->end_at);
+                for ($date = $startDate; $date->lte($endDate); $date->addDay()) {
                     
+                    if (in_array($date->format('D'), $dayArray)) {
+
+                        if(isset($request->driver) && $request->driver != NULL && $alertMessage == NULL){
+                            $bookingTime = Carbon::parse($request->pickup_time);
+                            $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
+                            $endTime   = $bookingTime->copy()->addHour()->format('H:i:s');
+                            $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
+    
+                            if ($existingBooking && $alertMessage == NULL) {
+                                $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
+                            }
+                        }
+
+                        $newBooking = new CompanyBooking;
+                        $newBooking->booking_id = "RD". strtoupper(uniqid());
+                        $newBooking->sub_company = $request->sub_company;
+                        $newBooking->pickup_time = $request->pickup_time;
+                        $newBooking->booking_date = $date;
+                        $newBooking->booking_type = $request->booking_type;
+                        $newBooking->pickup_point = $request->pickup_point;
+                        $newBooking->pickup_location = $request->pickup_location;
+                        $newBooking->destination_point = $request->destination_point;
+                        $newBooking->destination_location = $request->destination_location;
+                        $newBooking->via_point = json_encode($request->via_point);
+                        $newBooking->via_location = json_encode($request->via_location);
+                        $newBooking->user_id = $request->user_id;
+                        $newBooking->name = $request->name;
+                        $newBooking->email = $request->email;
+                        $newBooking->phone_no = $request->phone_no;
+                        $newBooking->tel_no = $request->tel_no;
+                        $newBooking->journey_type = $request->journey_type;
+                        $newBooking->account = $request->account;
+                        $newBooking->vehicle = $request->vehicle;
+                        $newBooking->driver = $request->driver;
+                        $newBooking->passenger = $request->passenger;
+                        $newBooking->luggage = $request->luggage;
+                        $newBooking->hand_luggage = $request->hand_luggage;
+                        $newBooking->special_request = $request->special_request;
+                        $newBooking->payment_reference = $request->payment_reference;
+                        $newBooking->booking_system = $request->booking_system;
+                        $newBooking->parking_charge = $request->parking_charge;
+                        $newBooking->waiting_charge = $request->waiting_charge;
+                        $newBooking->ac_fares = $request->ac_fares;
+                        $newBooking->return_ac_fares = $request->return_ac_fares;
+                        $newBooking->ac_parking_charge = $request->ac_parking_charge;
+                        $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
+                        $newBooking->extra_charge = $request->extra_charge;
+                        $newBooking->toll = $request->toll;
+                        $newBooking->booking_status = 'pending';
+                        $newBooking->distance = $distance;
+                        $newBooking->booking_amount = $request->booking_amount;
+                        $newBooking->dispatcher_id = $request->dispatcher_id;
+                        $newBooking->start_at = $request->start_at;
+                        $newBooking->end_at = $request->end_at;
+                        $newBooking->save();    
+                    }
                 }
             }
+            else{
+                if($request->pickup_time != 'asap' && $request->driver != NULL){
+                    $date = $request->booking_date;
+                    $bookingTime = Carbon::parse($request->pickup_time);
+                    $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
+                    $endTime   = $bookingTime->copy()->addHour()->format('H:i:s');
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
+                    if ($existingBooking && $alertMessage == NULL) {
+                        $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
+                    }
+                }
+                else if($request->driver != NULL){
+                    $date = $request->booking_date;
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('date', $date)->where('status', 'ongoing')->first();
+                    if ($existingBooking && $alertMessage == NULL) {
+                        $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
+                    }
+                }
 
-            $newBooking = new CompanyBooking;
-            $newBooking->booking_id = "RD". strtoupper(uniqid());
-            $newBooking->sub_company = $request->sub_company;
-            $newBooking->multi_booking = $request->multi_booking;
-            $newBooking->multi_days = $request->multi_days;
-            $newBooking->pickup_time = $request->pickup_time;
-            $newBooking->booking_date = $request->booking_date;
-            $newBooking->booking_type = $request->booking_type;
-            $newBooking->pickup_point = $request->pickup_point;
-            $newBooking->pickup_location = $request->pickup_location;
-            $newBooking->destination_point = $request->destination_point;
-            $newBooking->destination_location = $request->destination_location;
-            $newBooking->via_point = json_encode($request->via_point);
-            $newBooking->via_location = json_encode($request->via_location);
-            $newBooking->user_id = $request->user_id;
-            $newBooking->name = $request->name;
-            $newBooking->email = $request->email;
-            $newBooking->phone_no = $request->phone_no;
-            $newBooking->tel_no = $request->tel_no;
-            $newBooking->journey_type = $request->journey_type;
-            $newBooking->account = $request->account;
-            $newBooking->vehicle = $request->vehicle;
-            $newBooking->driver = $request->driver;
-            $newBooking->passenger = $request->passenger;
-            $newBooking->luggage = $request->luggage;
-            $newBooking->hand_luggage = $request->hand_luggage;
-            $newBooking->special_request = $request->special_request;
-            $newBooking->payment_reference = $request->payment_reference;
-            $newBooking->booking_system = $request->booking_system;
-            $newBooking->parking_charge = $request->parking_charge;
-            $newBooking->waiting_charge = $request->waiting_charge;
-            $newBooking->ac_fares = $request->ac_fares;
-            $newBooking->return_ac_fares = $request->return_ac_fares;
-            $newBooking->ac_parking_charge = $request->ac_parking_charge;
-            $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
-            $newBooking->extra_charge = $request->extra_charge;
-            $newBooking->toll = $request->toll;
-            $newBooking->booking_status = 'pending';
-            $newBooking->distance = $distance;
-            $newBooking->booking_amount = $request->booking_amount;
-            $newBooking->dispatcher_id = $request->dispatcher_id;
-            $newBooking->week = $request->week;
-            $newBooking->start_at = $request->start_at;
-            $newBooking->end_at = $request->end_at;
-            $newBooking->save();
+                $newBooking = new CompanyBooking;
+                $newBooking->booking_id = "RD". strtoupper(uniqid());
+                $newBooking->sub_company = $request->sub_company;
+                $newBooking->multi_booking = $request->multi_booking;
+                $newBooking->multi_days = $request->multi_days;
+                $newBooking->pickup_time = $request->pickup_time;
+                $newBooking->booking_date = $request->booking_date;
+                $newBooking->booking_type = $request->booking_type;
+                $newBooking->pickup_point = $request->pickup_point;
+                $newBooking->pickup_location = $request->pickup_location;
+                $newBooking->destination_point = $request->destination_point;
+                $newBooking->destination_location = $request->destination_location;
+                $newBooking->via_point = json_encode($request->via_point);
+                $newBooking->via_location = json_encode($request->via_location);
+                $newBooking->user_id = $request->user_id;
+                $newBooking->name = $request->name;
+                $newBooking->email = $request->email;
+                $newBooking->phone_no = $request->phone_no;
+                $newBooking->tel_no = $request->tel_no;
+                $newBooking->journey_type = $request->journey_type;
+                $newBooking->account = $request->account;
+                $newBooking->vehicle = $request->vehicle;
+                $newBooking->driver = $request->driver;
+                $newBooking->passenger = $request->passenger;
+                $newBooking->luggage = $request->luggage;
+                $newBooking->hand_luggage = $request->hand_luggage;
+                $newBooking->special_request = $request->special_request;
+                $newBooking->payment_reference = $request->payment_reference;
+                $newBooking->booking_system = $request->booking_system;
+                $newBooking->parking_charge = $request->parking_charge;
+                $newBooking->waiting_charge = $request->waiting_charge;
+                $newBooking->ac_fares = $request->ac_fares;
+                $newBooking->return_ac_fares = $request->return_ac_fares;
+                $newBooking->ac_parking_charge = $request->ac_parking_charge;
+                $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
+                $newBooking->extra_charge = $request->extra_charge;
+                $newBooking->toll = $request->toll;
+                $newBooking->booking_status = 'pending';
+                $newBooking->distance = $distance;
+                $newBooking->booking_amount = $request->booking_amount;
+                $newBooking->dispatcher_id = $request->dispatcher_id;
+                $newBooking->week = $request->week;
+                $newBooking->start_at = $request->start_at;
+                $newBooking->end_at = $request->end_at;
+                $newBooking->save();
+            }
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Booking created successfully'
+                'message' => 'Booking created successfully',
+                'alertMessage' => $alertMessage
             ]);
         }
         catch(\Exception $e){
