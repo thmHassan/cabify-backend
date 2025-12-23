@@ -16,6 +16,7 @@ class AuthController extends Controller
                 'email' => 'required',
                 'phone' => 'required',
                 'name' => 'required',
+                'country_code' => 'required',
             ]);
 
             $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->first();
@@ -31,6 +32,7 @@ class AuthController extends Controller
             $user->phone_no = $request->phone;
             $user->email = $request->email;
             $user->name = $request->name;
+            $user->country_code = $request->country_code;
             $user->save();
 
             $otp = rand(1000, 9999);
@@ -55,16 +57,16 @@ class AuthController extends Controller
     public function login(Request $request){
         try{
             $request->validate([
-                'email' => 'required',
+                'country_code' => 'required',
                 'phone' => 'required'
             ]);
 
-            $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->first();
+            $existUser = CompanyRider::where('phone_no', $request->phone)->where("country_code", $request->country_code)->first();
             
             if(!isset($existUser) || $existUser == NULL){
                 return response()->json([
                     'error' => 1,
-                    'message' => 'User not exists with this Email and Phone No.'
+                    'message' => 'User not exists with this Phone No.'
                 ]);
             }
 
@@ -90,12 +92,12 @@ class AuthController extends Controller
     public function verifyOTP(Request $request){
         try{
             $request->validate([
-                'email' => 'required',
+                'country_code' => 'required',
                 'phone' => 'required',
                 'otp' => 'required'
             ]);   
 
-            $user = CompanyRider::where('phone_no', $request->phone)->where('email', $request->email)->first();
+            $user = CompanyRider::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
 
             if(!isset($user) || $user == NULL){
                 return response()->json([

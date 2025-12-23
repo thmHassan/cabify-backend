@@ -16,7 +16,8 @@ class AuthController extends Controller
             $request->validate([
                 'email' => 'required',
                 'phone' => 'required',
-                'name' => 'required'
+                'name' => 'required',
+                'country_code' => 'required',
             ]);
 
             $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->first();
@@ -31,6 +32,7 @@ class AuthController extends Controller
             $user->phone_no = $request->phone;
             $user->email = $request->email;
             $user->name = $request->name;
+            $user->country_code = $request->country_code;
             $user->save();
 
             $otp = rand(1000, 9999);
@@ -55,16 +57,16 @@ class AuthController extends Controller
     public function login(Request $request){
         try{
             $request->validate([
-                'email' => 'required',
-                'phone' => 'required'
+                'phone' => 'required',
+                'country_code' => 'required'
             ]);
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->where('email', $request->email)->first();
+            $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
 
             if(!isset($user) || $user == NULL){
                 return response()->jsono([
                     'error' => 1,
-                    'message' => 'User does not exist with this Email and Phone No.'
+                    'message' => 'User does not exist with this Phone No.'
                 ], 400);
             }
 
@@ -90,12 +92,12 @@ class AuthController extends Controller
     public function verifyOTP(Request $request){
         try{
             $request->validate([
-                'email' => 'required',
                 'phone' => 'required',
+                'country_code' => 'required',
                 'otp' => 'required'
             ]);   
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->where('email', $request->email)->first();
+            $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
 
             if(!isset($user) || $user == NULL){
                 return response()->json([
