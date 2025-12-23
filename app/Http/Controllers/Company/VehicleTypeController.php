@@ -44,7 +44,7 @@ class VehicleTypeController extends Controller
                 $file = $request->file('vehicle_image');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('vehicle_image'), $filename);
-                $vehicleType->vehicle_image = 'pictures/'.$filename;
+                $vehicleType->vehicle_image = 'vehicle_image/'.$filename;
             }
             $vehicleType->backup_bid_vehicle_type = (isset($request->backup_bid_vehicle_type) && $request->backup_bid_vehicle_type != NULL ) ? implode(",",$request->backup_bid_vehicle_type) : NULL;
             $vehicleType->base_fare_system_status = $request->base_fare_system_status;
@@ -112,7 +112,7 @@ class VehicleTypeController extends Controller
                 $file = $request->file('vehicle_image');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('vehicle_image'), $filename);
-                $vehicleType->vehicle_image = 'pictures/'.$filename;
+                $vehicleType->vehicle_image = 'vehicle_image/'.$filename;
             }
             $vehicleType->backup_bid_vehicle_type = (isset($request->backup_bid_vehicle_type) && $request->backup_bid_vehicle_type != NULL) ? implode(",",$request->backup_bid_vehicle_type) : NULL;
             $vehicleType->base_fare_system_status = $request->base_fare_system_status;
