@@ -131,9 +131,9 @@ class DriverController extends Controller
                             ->orWhere("email", "LIKE" ,"%".$request->search."%");
                 });
             }
-            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
-                $query->where("dispatcher_id", $request->dispatcher_id);
-            }
+            // if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+            //     $query->where("dispatcher_id", $request->dispatcher_id);
+            // }
             $list = $drivers->paginate($perPage);
             return response()->json([
                 'success' => 1,
