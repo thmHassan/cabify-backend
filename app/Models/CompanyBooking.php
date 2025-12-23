@@ -18,4 +18,16 @@ class CompanyBooking extends Model
     public function driverDetail(){
         return $this->hasOne(CompanyDriver::class, "id", "driver");
     }
+
+    public function vehicleDetail(){
+        return $this->hasOne(CompanyVehicleType::class, "id", "vehicle");
+    }
+
+    public function subCompanyDetail(){
+        return $this->hasOne(SubCompany::class, "id", "sub_company");
+    }
+
+    public function accountDetail(){
+        return $this->hasOne(CompanyAccount::class, "id", "account");
+    }
 }

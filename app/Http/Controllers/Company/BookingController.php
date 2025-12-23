@@ -439,7 +439,7 @@ class BookingController extends Controller
 
     public function rideDetail(Request $request){
         try{
-            $rideDetail = CompanyBooking::where("id", $request->ride_id)->first();
+            $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['driverDetail', 'vehicleDetail', 'subCompanyDetail', 'accountDetail'])->first();
 
             return response()->json([
                 'success' => 1,
