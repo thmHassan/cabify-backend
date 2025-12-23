@@ -489,4 +489,46 @@ class SettingController extends Controller
             ]);
         }
     }
+
+    public function saveAppContent(Request $request){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            if(!isset($setting) || $setting == NULL){
+                $setting = new CompanySetting;
+            }
+            $setting->terms_conditions = $request->terms_conditions;
+            $setting->privacy_policy = $request->privacy_policy;
+            $setting->about_us = $request->about_us;
+            $setting->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'App sontent saved successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function getAppContent(Request $request){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'data' => $setting
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }

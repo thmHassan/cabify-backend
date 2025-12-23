@@ -153,6 +153,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/delete-user', [UserController::class, 'deleteUser']);
         Route::get('/company/change-user-status', [UserController::class, 'changeUserStatus']);
         Route::get('/company/ride-history', [UserController::class, 'rideHistory']);
+        Route::post('/company/send-user-notification', [UserController::class, 'sendUserNotification']);
 
         Route::post('/company/create-driver', [DriverController::class, 'createDriver']);
         Route::post('/company/edit-driver', [DriverController::class, 'editDriver']);
@@ -209,6 +210,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/third-party-information', [SettingController::class, 'thirdPartyInformation']);
         Route::post('/company/third-party-information', [SettingController::class, 'saveThirdPartyInformation']);
         Route::post('/company/send-notification', [SettingController::class, 'sendNotification']);
+        Route::post('/company/save-app-content', [SettingController::class, 'saveAppContent']);
+        Route::get('/company/get-app-content', [SettingController::class, 'getAppContent']);
         
         Route::post('/company/create-sub-company', [SubCompanyController::class, 'createSubCompany']);
         Route::post('/company/edit-sub-company', [SubCompanyController::class, 'editSubCompany']);
