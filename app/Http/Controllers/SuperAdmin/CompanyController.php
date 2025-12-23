@@ -849,6 +849,13 @@ class CompanyController extends Controller
             if (!Hash::check($request->password, $tenant->data['password'])) {
                 return response()->json(['message' => 'Invalid credentials'], 401);
             }
+
+            if($tenant->data['payment_status'] == "pending" || !isset($tenant->data['expiry_date']) || $tenant->data['expiry_date'] < Carbon::now()->format('Y-m-d')){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'You have inactive subscription. Please contact to Admin'
+                ]);
+            }
             
             // $token = JWTAuth::fromUser($tenant);
             // $token = auth('tenant')->login($tenant);
