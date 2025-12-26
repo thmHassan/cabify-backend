@@ -297,7 +297,6 @@ class CompanyController extends Controller
 
                         $tenant->stripe_subscription_id = $newStripeSubscription->id;
                         $tenant->save();
-
                     }
                     elseif($existingSubscription->deduct_type == "cash"){
                         $newSubscriptionCreate = 1;                        

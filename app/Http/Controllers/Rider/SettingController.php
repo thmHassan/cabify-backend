@@ -126,4 +126,21 @@ class SettingController extends Controller
             ]);
         }
     }
+
+    public function getApiKeys(){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'setting' => $setting
+            ], 200);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

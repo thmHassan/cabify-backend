@@ -261,6 +261,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
+        Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
 
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
@@ -295,6 +296,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/create-contact-us', [RiderSettingController::class, 'createContactUs']);
         Route::get('/rider/faqs', [RiderSettingController::class, 'faqs']);
         Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
+        Route::get('/rider/get-api-keys', [RiderSettingController::class, 'getApiKeys']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);

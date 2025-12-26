@@ -64,7 +64,7 @@ class AuthController extends Controller
             $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
 
             if(!isset($user) || $user == NULL){
-                return response()->jsono([
+                return response()->json([
                     'error' => 1,
                     'message' => 'User does not exist with this Phone No.'
                 ], 400);
