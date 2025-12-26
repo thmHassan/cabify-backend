@@ -221,6 +221,7 @@ class CompanyController extends Controller
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
+            $newSubscriptionCreate = 0;
 
             if($tenant->subscription_type != $request->subscription_type){
                 $existingSubscription = Subscription::where("id", $tenant->subscription_type)->first();
@@ -246,8 +247,61 @@ class CompanyController extends Controller
                             $tenant->stripe_subscription_id,
                             ['cancel_at_period_end' => true]
                         );
+
+                        $currentSubscription = Stripe\Subscription::retrieve(
+                            $tenant->stripe_subscription_id
+                        );
+
+                        $products = Product::all(['limit' => 100]);
+                        $existing = collect($products->data)->firstWhere('name', $subscription->id);
+
+                        if($existing){
+                            $productId = $existing->id;
+                        }
+                        else{
+                            $product = Product::create([
+                                'name' => $subscription->id,
+                                'description' => $subscription->plan_name . ", ". $subscription->billing_cycle. ", ". $subscription->amount .", ". $subscription->features,
+                            ]);
+                            $productId = $product->id;
+                        }
+
+                        $existingPrice = Price::all([
+                            'limit' => 100,
+                            'product' => $productId,
+                        ]);
+
+                        $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
+                            $p->unit_amount == $amount && $p->recurring->interval == $interval
+                        );
+
+                        if ($matching) {
+                            $priceId = $matching->id;
+                        } else {
+                            $price = Price::create([
+                                'unit_amount' => $amount,
+                                'currency' => 'usd',
+                                'recurring' => ['interval' => $interval],
+                                'product' => $productId,
+                            ]);
+                            $priceId = $price->id;
+                        }
+
+                        $newStripeSubscription = Stripe\Subscription::create([
+                            'customer' => $tenant->stripe_customer_id,
+                            'items' => [
+                                ['price' => $priceId],
+                            ],
+                            'trial_end' => $currentSubscription->current_period_end,
+                        ]);
+
+                        $tenant->stripe_subscription_id = $newStripeSubscription->id;
+                        $tenant->save();
+
                     }
-                    // Create New subscription in stripe
+                    elseif($existingSubscription->deduct_type == "cash"){
+                        $newSubscriptionCreate = 1;                        
+                    }
                 }
             }
 
@@ -312,7 +366,8 @@ class CompanyController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => "Client {$tenant->id} updated successfully!",
-                'tenant' => $tenant
+                'tenant' => $tenant,
+                'newSubscriptionCreate' => $newSubscriptionCreate
             ]);
         }
         catch(\Exception $e){
