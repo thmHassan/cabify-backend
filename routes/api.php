@@ -272,6 +272,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
         Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
         Route::get('/driver/upcoming-ride', [DriverBookingController::class, 'upcomingRide']);
+        Route::post('/driver/rate-ride', [DriverBookingController::class, 'rateRide']);
         
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
@@ -310,6 +311,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
+        Route::post('/rider/rate-ride', [RiderBookingController::class, 'rateRide']);
+        Route::post('/rider/calculate-fare', [RiderBookingController::class, 'calculateFare']);
+        Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);
     });
 });
 
