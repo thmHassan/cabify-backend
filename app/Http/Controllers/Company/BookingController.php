@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyPlot;
 use App\Models\CompanyBooking;
 use App\Models\CompanyVehicleType;
+use App\Models\CompanySetting;
 use Carbon\Carbon;
 
 class BookingController extends Controller
