@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Driver;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyBooking;
+use App\Models\CompanyRating;
 
 class BookingController extends Controller
 {
@@ -61,6 +62,32 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'list' => $pendingRides
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function rateRide(Request $request){
+        try{
+            $request->validate([
+                'booking_id' => 'required',
+                'rating' => 'required'
+            ]);
+
+            $rating = new CompanyRating;
+            $rating->booking_id = $request->booking_id;
+            $rating->user_type = "driver";
+            $rating->rating = $request->rating;
+            $rating->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Customer ratings given successfully'
             ]);
         }
         catch(\Exception $e){

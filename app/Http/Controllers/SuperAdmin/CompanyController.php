@@ -253,15 +253,15 @@ class CompanyController extends Controller
                         );
 
                         $products = Product::all(['limit' => 100]);
-                        $existing = collect($products->data)->firstWhere('name', $subscription->id);
+                        $existing = collect($products->data)->firstWhere('name', $newSubscription->id);
 
                         if($existing){
                             $productId = $existing->id;
                         }
                         else{
                             $product = Product::create([
-                                'name' => $subscription->id,
-                                'description' => $subscription->plan_name . ", ". $subscription->billing_cycle. ", ". $subscription->amount .", ". $subscription->features,
+                                'name' => $newSubscription->id,
+                                'description' => $newSubscription->plan_name . ", ". $newSubscription->billing_cycle. ", ". $newSubscription->amount .", ". $newSubscription->features,
                             ]);
                             $productId = $product->id;
                         }
@@ -297,7 +297,6 @@ class CompanyController extends Controller
 
                         $tenant->stripe_subscription_id = $newStripeSubscription->id;
                         $tenant->save();
-
                     }
                     elseif($existingSubscription->deduct_type == "cash"){
                         $newSubscriptionCreate = 1;                        

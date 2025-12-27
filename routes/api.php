@@ -261,6 +261,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
+        Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
 
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
@@ -271,6 +272,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
         Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
         Route::get('/driver/upcoming-ride', [DriverBookingController::class, 'upcomingRide']);
+        Route::post('/driver/rate-ride', [DriverBookingController::class, 'rateRide']);
         
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
@@ -295,6 +297,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/create-contact-us', [RiderSettingController::class, 'createContactUs']);
         Route::get('/rider/faqs', [RiderSettingController::class, 'faqs']);
         Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
+        Route::get('/rider/get-api-keys', [RiderSettingController::class, 'getApiKeys']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
@@ -308,6 +311,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
+        Route::post('/rider/rate-ride', [RiderBookingController::class, 'rateRide']);
+        Route::post('/rider/calculate-fare', [RiderBookingController::class, 'calculateFare']);
+        Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);
     });
 });
 
