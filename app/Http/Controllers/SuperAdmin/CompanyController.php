@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\Subscription;
 use App\Models\TenantUser;
 use App\Models\CompanySetting;
+use App\Models\Setting;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
 use Stripe\Price;
@@ -621,8 +622,8 @@ class CompanyController extends Controller
 
     public function createStripePaymentUrl(Request $request){
         try{
-            $setting = CompanySetting::orderBy("id", "DESC")->first();
-            Stripe::setApiKey($setting->stripe_secret_key);
+            $setting = Setting::orderBy("id", "DESC")->first();
+            Stripe::setApiKey($setting->stripe_secret);
             $YOUR_DOMAIN = "http://localhost:5173/";
             // $YOUR_DOMAIN = env('FRONTEND_URL');
             
