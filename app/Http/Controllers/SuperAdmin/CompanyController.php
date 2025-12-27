@@ -10,6 +10,7 @@ use DB;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Subscription;
 use App\Models\TenantUser;
+use App\Models\CompanySetting;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
 use Stripe\Price;
