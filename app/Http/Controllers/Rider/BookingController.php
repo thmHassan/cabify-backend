@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyBooking;
 use App\Models\CompanyRating;
 use App\Models\CompanyVehicleType;
+use App\Models\CompanySetting;
 
 class BookingController extends Controller
 {
