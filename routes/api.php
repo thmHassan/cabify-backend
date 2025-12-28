@@ -272,6 +272,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
         Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
         Route::get('/driver/upcoming-ride', [DriverBookingController::class, 'upcomingRide']);
+        Route::get('/driver/list-ride-for-bidding', [DriverBookingController::class, 'listRideForBidding']);
+        Route::get('/driver/ride-detail', [DriverBookingController::class, 'rideDetail']);
+        Route::post('/driver/place-bid', [DriverBookingController::class, 'placeBid']);
         Route::post('/driver/rate-ride', [DriverBookingController::class, 'rateRide']);
         
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
@@ -314,6 +317,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/rate-ride', [RiderBookingController::class, 'rateRide']);
         Route::post('/rider/calculate-fare', [RiderBookingController::class, 'calculateFare']);
         Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);
+        Route::get('/rider/list-bids', [RiderBookingController::class, 'listBids']);
+        Route::post('/rider/change-bid-status', [RiderBookingController::class, 'changeBidStatus']);
     });
 });
 

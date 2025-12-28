@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyBooking;
 use App\Models\CompanyRating;
+use App\Models\CompanyBid;
 
 class BookingController extends Controller
 {
@@ -88,6 +89,67 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Customer ratings given successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function listRideForBidding(Request $request){
+        try{
+            $rideList = CompanyBooking::whereNull("driver")->where("pickup_time", "asap")->where("booking_status", "pending")->orderBy("id", "DESC")->with("userDetail")->get();
+
+            return response()->json([
+                'success' => 1,
+                'list' => $rideList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function rideDetail(Request $request){
+        try{
+            $rideDetail = COmpanyBooking::where("id", $request->ride_id)->first();
+
+            return response()->json([
+                'success' => 1,
+                'rideDetail' => $rideDetail
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function placeBid(Request $request){
+        try{
+
+            $request->validate([
+                'booking_id' => 'required',
+                'amount' => 'required'
+            ]);
+
+            $newBid = new CompanyBid;
+            $newBid->booking_id = $request->booking_id;
+            $newBid->driver_id = auth("driver")->user()->id;
+            $newBid->amount = $request->amount;
+            $newBid->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Bid placed succesfully'
             ]);
         }
         catch(\Exception $e){
