@@ -8,6 +8,7 @@ use App\Models\CompanyBooking;
 use App\Models\CompanyRating;
 use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
+use App\Models\CompanyBid;
 
 class BookingController extends Controller
 {
@@ -334,6 +335,58 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Booking created successfully',
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function listBids(Request $request){
+        try{
+            $listBid = CompanyBid::where("booking_id", $request->booking_id)->orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'bids' => $listBid
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function changeBidStatus(Request $request){
+        try{
+            $request->validate([
+                'bid_id' => 'required',
+                'status' => 'required',
+            ]);
+
+            $bid = CompanyBid::where("id", $request->bid_id)->first();
+            $booking = CompanyBooking::where("id", $bid->booking_id)->first();
+
+            $bid->status = $request->status;
+            $bid->save();
+            $message = "Bid rejected successfully";
+
+            if($bid->status == "accepted"){
+                $booking->booking_amount = $bid->amount;
+                $booking->booking_status = "ongoing";
+                $booking->driver = $bid->driver_id;
+                $booking->save();
+                $message = "Bid accepted successfully";
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => $message
             ]);
         }
         catch(\Exception $e){
