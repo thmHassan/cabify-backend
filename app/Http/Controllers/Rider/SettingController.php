@@ -9,6 +9,7 @@ use App\Models\CompanyFAQ;
 use App\Models\CompanySetting;
 use App\Models\CompanyRider;
 use App\Models\WalletTransaction;
+use App\Models\CompanyVehicleType;
 
 class SettingController extends Controller
 {
@@ -131,10 +132,60 @@ class SettingController extends Controller
         try{
             $setting = CompanySetting::orderBy("id", "DESC")->first();
 
+            $stripe_key = $setting->stripe_key;
+            $stripe_secret_key = $setting->stripe_secret_key;
+            $google_api_keys = $setting->google_api_keys;
+            $barikoi_api_keys = $setting->barikoi_api_keys;
+            $company_timezone = $setting->company_timezone;
+            $company_currency = $setting->company_currency;
+
+            $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+            $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
+            if(!isset($google_api_keys) || $google_api_keys == NULL){
+                $google_map_key = $data->google_map_key;
+            }
+            if(!isset($barikoi_api_keys) || $barikoi_api_keys == NULL){
+                $google_map_key = $data->barikoi_key;
+            }
+            if(!isset($company_timezone) || $company_timezone == NULL){
+                $company_timezone = json_decode($tenant->data)->time_zone;
+            }
+            if(!isset($company_currency) || $company_currency == NULL){
+                $company_currency = json_decode($tenant->data)->currency;
+            }
+            $enable_map = json_decode($tenant->data)->maps_api;
+
+            $data = [
+                'stripe_key' => $stripe_key,
+                'stripe_secret_key' => $stripe_secret_key,
+                'google_api_keys' => $google_api_keys,
+                'barikoi_api_keys' => $barikoi_api_keys,
+                'company_timezone' => $company_timezone,
+                'company_currency' => $company_currency,
+                'enable_map' => $enable_map,
+            ];
+
             return response()->json([
                 'success' => 1,
-                'setting' => $setting
+                'setting' => $data
             ], 200);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function vehicleList(Request $request){
+        try{
+            $vehicleList = CompanyVehicleType::orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'list' => $vehicleList
+            ]);
         }
         catch(Exception $e){
             return response()->json([

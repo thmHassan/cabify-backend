@@ -145,8 +145,8 @@ class AuthController extends Controller
     public function deleteAccount(Request $request){
         try{
             $request->validate([
-                'reason' => 'required',
-                'description' => 'required',
+                // 'reason' => 'required',
+                // 'description' => 'required',
             ]);
 
             $userId = auth('rider')->user()->id;
@@ -162,6 +162,50 @@ class AuthController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Your account deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function getProfile(Request $request){
+        try{
+            $user = auth("rider")->user();
+
+            return response()->json([
+                'success' => 1,
+                'data' => $user
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function updateProfile(Request $request){
+        try{
+            $user = CompanyRider::where("id",auth("rider")->user()->id)->first();
+
+            $user->name = (isset($request->name) && $request->name != NULL) ? $request->name : $user->name;
+            $user->email = (isset($request->email) && $request->email != NULL) ? $request->email : $user->email;
+            $user->phone_no = (isset($request->phone_no) && $request->phone_no != NULL) ? $request->phone_no : $user->phone_no;
+            $user->address = (isset($request->address) && $request->address != NULL) ? $request->address : $user->address;
+            $user->city = (isset($request->city) && $request->city != NULL) ? $request->city : $user->city;
+            $user->device_token = (isset($request->device_token) && $request->device_token != NULL) ? $request->device_token : $user->device_token;
+            $user->fcm_token = (isset($request->fcm_token) && $request->fcm_token != NULL) ? $request->fcm_token : $user->fcm_token;
+            $user->country_code = (isset($request->country_code) && $request->country_code != NULL) ? $request->country_code : $user->country_code;
+            $user->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'User profile update successfully'
             ]);
         }
         catch(\Exception $e){
