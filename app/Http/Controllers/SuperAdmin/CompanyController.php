@@ -626,8 +626,8 @@ class CompanyController extends Controller
         try{
             $setting = Setting::orderBy("id", "DESC")->first();
             Stripe::setApiKey($setting->stripe_secret);
-            $YOUR_DOMAIN = "http://localhost:5173/";
-            // $YOUR_DOMAIN = env('FRONTEND_URL');
+            // $YOUR_DOMAIN = "http://localhost:5173/";
+            $YOUR_DOMAIN = env('FRONTEND_URL');
             
             $tenantId = $request->id;
             $tenant = Tenant::where("id", $tenantId)->first();
