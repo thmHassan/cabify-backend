@@ -106,6 +106,10 @@ return [
             'driver' => 'eloquent',
             'model' => App\Models\CompanyRider::class,
         ],
+        'tenants' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\Tenant::class,
+        ],
         // 'users' => [
         //     'driver' => 'database',
         //     'table' => 'users',
@@ -137,6 +141,11 @@ return [
             'table' => 'password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
+        ],
+        'tenants' => [
+            'provider' => 'tenants',
+            'table' => 'password_reset_tokens',
+            'expire' => 60,
         ],
     ],
 

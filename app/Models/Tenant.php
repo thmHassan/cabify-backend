@@ -9,10 +9,12 @@ use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 use Illuminate\Database\Eloquent\Model;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\DatabaseConfig;
+use Illuminate\Contracts\Auth\CanResetPassword;
+use Illuminate\Auth\Passwords\CanResetPassword as CanResetPasswordTrait;
 
-class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase
+class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase, CanResetPassword
 {
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, CanResetPasswordTrait;
 
     protected $guarded = ['id'];
 

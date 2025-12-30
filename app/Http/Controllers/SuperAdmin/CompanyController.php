@@ -27,6 +27,8 @@ use App\Models\Transaction;
 use Carbon\Carbon;
 use App\Models\Dispatcher;
 use App\Events\NewNotification;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Mail;
 
 class CompanyController extends Controller
 {
@@ -1019,6 +1021,90 @@ class CompanyController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        try {
+            $request->validate([
+                'email' => 'required|email'
+            ]);
+
+            $tenant = Tenant::where("data->email", $request->email)->first();
+
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Tenant not found'
+                ], 404);
+            }
+            
+            $token = Password::broker('tenants')->createToken($tenant);
+            
+            $resetLink = env('CLIENT_FRONTEND_URL') .
+                "/reset-password?token={$token}&email={$tenant->email}";
+            
+            Mail::send('emails.reset-password', [
+                'name' => $tenant->company_name ?? 'User',
+                'resetLink' => $resetLink
+            ], function ($message) use ($tenant) {
+                $message->to($tenant->email)
+                        ->subject('Reset Your Password');
+            });
+
+            return response()->json([
+                'error' => 0,
+                'message' => 'Reset password link sent successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function resetPassword(Request $request){
+        try{
+            $request->validate([
+                'email' => 'required|email',
+                'token' => 'required',
+                'password' => 'required|confirmed',
+            ]);
+
+            $status = Password::broker('tenant_users')->reset(
+                [
+                    'email' => $request->email,
+                    'password' => $request->password,
+                    'password_confirmation' => $request->password_confirmation,
+                    'token' => $request->token,
+                ],
+                function (TenantUser $user, string $password) {
+
+                    $user->password = Hash::make($password);
+                    $user->save();
+                }
+            );
+
+            if ($status === Password::PASSWORD_RESET) {
+                return response()->json([
+                    'error' => 0,
+                    'message' => 'Password reset successfully'
+                ]);
+            }
+
+            return response()->json([
+                'error' => 1,
+                'message' => __($status)
+            ], 400);
+        }
+        catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 
