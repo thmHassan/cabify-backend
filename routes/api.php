@@ -301,15 +301,17 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/faqs', [RiderSettingController::class, 'faqs']);
         Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
         Route::get('/rider/get-api-keys', [RiderSettingController::class, 'getApiKeys']);
+        Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
+        Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
+        Route::get('/rider/vehicle-list', [RiderSettingController::class, 'vehicleList']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
 
         Route::get('rider/logout', [RiderAuthController::class, 'logout']);
         Route::post('/rider/delete-account', [RiderAuthController::class, 'deleteAccount']);
-
-        Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
-        Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
+        Route::get('/rider/get-profile', [RiderAuthController::class, 'getProfile']);
+        Route::post('/rider/update-profile', [RiderAuthController::class, 'updateProfile']);
 
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);

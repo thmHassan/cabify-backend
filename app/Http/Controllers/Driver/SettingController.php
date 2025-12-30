@@ -166,6 +166,7 @@ class SettingController extends Controller
             $google_api_keys = $setting->google_api_keys;
             $barikoi_api_keys = $setting->barikoi_api_keys;
             $company_timezone = $setting->company_timezone;
+            $company_currency = $setting->company_currency;
 
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
@@ -176,15 +177,21 @@ class SettingController extends Controller
                 $google_map_key = $data->barikoi_key;
             }
             if(!isset($company_timezone) || $company_timezone == NULL){
-                $companyData = json_decode($tenant->data)->time_zone;
+                $company_timezone = json_decode($tenant->data)->time_zone;
             }
+            if(!isset($company_currency) || $company_currency == NULL){
+                $company_currency = json_decode($tenant->data)->currency;
+            }
+            $enable_map = json_decode($tenant->data)->maps_api;
 
             $data = [
                 'stripe_key' => $stripe_key,
                 'stripe_secret_key' => $stripe_secret_key,
                 'google_api_keys' => $google_api_keys,
                 'barikoi_api_keys' => $barikoi_api_keys,
-                'company_timezone' => $company_timezone
+                'company_timezone' => $company_timezone,
+                'company_currency' => $company_currency,
+                'enable_map' => $enable_map,
             ];
 
             return response()->json([
