@@ -714,7 +714,7 @@ class CompanyController extends Controller
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
             $setting = CompanySetting::orderBy("id", "DESC")->first();
-            $endpoint_secret = $settings->stripe_webhook_secret;
+            $endpoint_secret = $setting->stripe_webhook_secret;
 
             try {
                 $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
