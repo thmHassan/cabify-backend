@@ -62,6 +62,8 @@ Route::get('/test-notification', [CompanyController::class, 'sendNotification'])
 Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 Route::post('login', [AuthController::class, 'login']);
 Route::post('/company/login', [CompanyController::class, 'companyLogin']);
+Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);
+Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
 
 Route::group(['middleware' => ['auth:api']], function () {
     Route::post('logout', [AuthController::class, 'logout']);
