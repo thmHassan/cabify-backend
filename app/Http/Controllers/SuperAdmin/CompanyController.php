@@ -714,7 +714,7 @@ class CompanyController extends Controller
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
             $setting = CompanySetting::orderBy("id", "DESC")->first();
-            $endpoint_secret = $settings->stripe_webhook_secret;
+            $endpoint_secret = $setting->stripe_webhook_secret;
 
             try {
                 $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
@@ -835,44 +835,44 @@ class CompanyController extends Controller
                     $payment->save();
                     break;
 
-                case 'invoice.payment_failed':
-                    $invoice = $event->data->object;
-                    $subscriptionId = $invoice->subscription;
-                    \Log::info($invoice);
-                    // Extend expiry date
-                    // \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
-                    //     ->update([
-                    //         'status' => 'active',
-                    //         'expiry_date' => now()->addMonth(),
-                    //     ]);
-                    $userId = $session->subscription_details->metadata->user_id ?? null;
-                    $payment = new Transaction;
-                    $payment->user_id = $userId;
-                    $payment->amount = $subscription->amount;
-                    $payment->status = 'failed';
-                    $payment->method = 'card';
-                    $payment->save();
-                    break;
+                // case 'invoice.payment_failed':
+                //     $invoice = $event->data->object;
+                //     $subscriptionId = $invoice->subscription;
+                //     \Log::info($invoice);
+                //     // Extend expiry date
+                //     // \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                //     //     ->update([
+                //     //         'status' => 'active',
+                //     //         'expiry_date' => now()->addMonth(),
+                //     //     ]);
+                //     $userId = $session->subscription_details->metadata->user_id ?? null;
+                //     $payment = new Transaction;
+                //     $payment->user_id = $userId;
+                //     $payment->amount = $subscription->amount;
+                //     $payment->status = 'failed';
+                //     $payment->method = 'card';
+                //     $payment->save();
+                //     break;
 
-                case 'payment_intent.payment_failed':
-                    $invoice = $event->data->object;
-                    $subscriptionId = $invoice->subscription;
-                    \Log::info($invoice);
-                    // Extend expiry date
-                    // \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
-                    //     ->update([
-                    //         'status' => 'active',
-                    //         'expiry_date' => now()->addMonth(),
-                    //     ]);
+                // case 'payment_intent.payment_failed':
+                //     $invoice = $event->data->object;
+                //     $subscriptionId = $invoice->subscription;
+                //     \Log::info($invoice);
+                //     // Extend expiry date
+                //     // \DB::table('subscriptions')->where('stripe_subscription_id', $subscriptionId)
+                //     //     ->update([
+                //     //         'status' => 'active',
+                //     //         'expiry_date' => now()->addMonth(),
+                //     //     ]);
 
-                    $userId = $session->subscription_details->metadata->user_id ?? null;
-                    $payment = new Transaction;
-                    $payment->user_id = $userId;
-                    $payment->amount = $subscription->amount;
-                    $payment->status = 'failed';
-                    $payment->method = 'card';
-                    $payment->save();
-                    break;
+                //     $userId = $session->subscription_details->metadata->user_id ?? null;
+                //     $payment = new Transaction;
+                //     $payment->user_id = $userId;
+                //     $payment->amount = $subscription->amount;
+                //     $payment->status = 'failed';
+                //     $payment->method = 'card';
+                //     $payment->save();
+                //     break;
             }
             return response()->json([
                 'success' => 1,
