@@ -76,7 +76,7 @@ class DispatcherController extends Controller
                     'email',
                     Rule::unique('dispatcher')->ignore($request->id),
                 ],
-                'password' => 'required|string|min:6',
+                'password' => 'string|min:6',
                 'phone_no' => 'required|max:255',
                 'status' => 'required|max:255',
             ]);
@@ -86,7 +86,7 @@ class DispatcherController extends Controller
             $dispatcher->email = $request->email;
             $dispatcher->phone_no = $request->phone_no;
             $dispatcher->status = $request->status;
-            $dispatcher->password = Hash::make($request->password);
+            $dispatcher->password = (isset($request->password) && $request->password != NULL) ? Hash::make($request->password) : $dispatcher->password;
             $dispatcher->save();
 
             return response()->json([
