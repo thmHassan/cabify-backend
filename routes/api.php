@@ -242,6 +242,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/driver-ratings', [RatingController::class, 'driverRatings']);
         
         Route::get('/company/list-lost-found', [LostFoundController::class, 'listLostFound']);
+        Route::get('/company/single-lost-found', [LostFoundController::class, 'listLostFound']);
         Route::post('/company/change-status-lost-found', [LostFoundController::class, 'changeStatusLostFound']);
 
     // });
@@ -256,6 +257,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
 
     Route::group(['middleware' => ['auth.driver.jwt']], function () {
+        Route::get('/driver/get-profile', [DriverAuthController::class, 'getProfile']);
+        Route::post('/driver/update-profile', [DriverAuthController::class, 'updateProfile']);
+
         Route::post('/driver/add-wallet-amount', [DriverSettingController::class, 'addWalletAmount']);
         Route::get('/driver/balance-transaction', [DriverSettingController::class, 'balanceTransaction']);
    
@@ -318,6 +322,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
+        Route::get('/rider/current-ride', [RiderBookingController::class, 'currentRide']);
         Route::post('/rider/rate-ride', [RiderBookingController::class, 'rateRide']);
         Route::post('/rider/calculate-fare', [RiderBookingController::class, 'calculateFare']);
         Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);

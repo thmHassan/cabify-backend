@@ -138,6 +138,9 @@ class SettingController extends Controller
             $barikoi_api_keys = $setting->barikoi_api_keys;
             $company_timezone = $setting->company_timezone;
             $company_currency = $setting->company_currency;
+            $support_contact_no = $setting->support_contact_no;
+            $support_emergency_no = $setting->support_emergency_no;
+            $support_rescue_number = $setting->support_rescue_number;
 
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
@@ -163,6 +166,9 @@ class SettingController extends Controller
                 'company_timezone' => $company_timezone,
                 'company_currency' => $company_currency,
                 'enable_map' => $enable_map,
+                'support_contact_no' => $support_contact_no,
+                'support_emergency_no' => $support_emergency_no,
+                'support_rescue_number' => $support_rescue_number,
             ];
 
             return response()->json([

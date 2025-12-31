@@ -396,4 +396,21 @@ class BookingController extends Controller
             ]);
         }
     }
+
+    public function currentRide(Request $request){
+        try{
+            $currentBooking = CompanyBooking::where("user_id", auth("rider")->user()->id)->where("booking_status", "ongoing")->orderBy("id", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'currentBooking' => $currentBooking
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
