@@ -266,7 +266,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/add-wallet-amount', [DriverSettingController::class, 'addWalletAmount']);
         Route::get('/driver/balance-transaction', [DriverSettingController::class, 'balanceTransaction']);
    
-        Route::post('/driver/contact-us', [DriverSettingController::class, 'contactUs']);
+        Route::post('/driver/create-contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
@@ -275,7 +275,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
 
         Route::post('/driver/create-ticket', [DriverTicketController::class, 'createTicket']);
-        Route::get('/driver/ticket-list', [DriverTicketController::class, 'ticketList']);
+        Route::get('/driver/list-ticket', [DriverTicketController::class, 'ticketList']);
    
         Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
         Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
@@ -300,7 +300,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/register', [RiderAuthController::class, 'register']);
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
     Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
-    
+
     Route::group(['middleware' => ['auth.rider.jwt']], function () {
         Route::post('/rider/add-emergency-contact', [RiderEmergencyContactController::class, 'addEmergencyContact']);
         Route::post('/rider/edit-emergency-contact', [RiderEmergencyContactController::class, 'editEmergencyContact']);
