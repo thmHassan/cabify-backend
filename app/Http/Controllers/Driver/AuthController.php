@@ -8,6 +8,7 @@ use App\Models\CompanyDriver;
 use Carbon\Carbon;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Validator;
+use App\Models\CompanyToken;
 
 class AuthController extends Controller
 {
@@ -145,8 +146,8 @@ class AuthController extends Controller
     public function deleteAccount(Request $request){
         try{
             $request->validate([
-                'reason' => 'required',
-                'description' => 'required',
+                // 'reason' => 'required',
+                // 'description' => 'required',
             ]);
 
             $userId = auth('driver')->user()->id;
@@ -193,6 +194,13 @@ class AuthController extends Controller
         try{
             $user = CompanyDriver::where("id",auth("driver")->user()->id)->first();
 
+            if(isset($request->profile_image) && $request->profile_image != NULL){
+                $file = $request->file('profile_image');
+                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->move(public_path('profile_image'), $filename);
+                $user->profile_image = 'profile_image/'.$filename;
+            }
+
             $user->name = (isset($request->name) && $request->name != NULL) ? $request->name : $user->name;
             $user->email = (isset($request->email) && $request->email != NULL) ? $request->email : $user->email;
             $user->phone_no = (isset($request->phone_no) && $request->phone_no != NULL) ? $request->phone_no : $user->phone_no;
@@ -205,6 +213,37 @@ class AuthController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Driver profile update successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function storeToken(Request $request){
+        try{
+            $request->validate([
+                'device_token' => 'required',
+                'fcm_token' => 'required'
+            ]);
+
+            $record = CompanyToken::where("device_token", $request->device_token)->first();
+
+            if(!isset($record) || $record == NULL){
+                $record = new CompanyToken;
+                $record->device_token = $request->device_token;
+            }
+            $record->user_id = auth("driver")->user()->id;
+            $record->user_type = "driver";
+            $record->fcm_token = $request->fcm_token;
+            $record->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Device token updated successfully'
             ]);
         }
         catch(\Exception $e){

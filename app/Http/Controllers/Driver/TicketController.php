@@ -37,9 +37,9 @@ class TicketController extends Controller
         }
     }
 
-    public function ticketList(){
+    public function ticketList(Request $request){
         try{
-            $list = CompanyTicket::where('user_id', auth('driver')->user()->id)->orderBy("id", "DESC")->get();
+            $list = CompanyTicket::where('user_id', auth('driver')->user()->id)->orderBy("id", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,

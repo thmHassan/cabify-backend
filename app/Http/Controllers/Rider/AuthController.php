@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyRider;
 use Carbon\Carbon;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
+use App\Models\CompanyToken;
 
 class AuthController extends Controller
 {
@@ -193,6 +194,13 @@ class AuthController extends Controller
         try{
             $user = CompanyRider::where("id",auth("rider")->user()->id)->first();
 
+            if(isset($request->profile_image) && $request->profile_image != NULL){
+                $file = $request->file('profile_image');
+                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->move(public_path('profile_image'), $filename);
+                $user->profile_image = 'profile_image/'.$filename;
+            }
+
             $user->name = (isset($request->name) && $request->name != NULL) ? $request->name : $user->name;
             $user->email = (isset($request->email) && $request->email != NULL) ? $request->email : $user->email;
             $user->phone_no = (isset($request->phone_no) && $request->phone_no != NULL) ? $request->phone_no : $user->phone_no;
@@ -206,6 +214,37 @@ class AuthController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'User profile update successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function storeToken(Request $request){
+        try{
+            $request->validate([
+                'device_token' => 'required',
+                'fcm_token' => 'required'
+            ]);
+
+            $record = CompanyToken::where("device_token", $request->device_token)->first();
+
+            if(!isset($record) || $record == NULL){
+                $record = new CompanyToken;
+                $record->device_token = $request->device_token;
+            }
+            $record->user_id = auth("rider")->user()->id;
+            $record->user_type = "rider";
+            $record->fcm_token = $request->fcm_token;
+            $record->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Device token updated successfully'
             ]);
         }
         catch(\Exception $e){
