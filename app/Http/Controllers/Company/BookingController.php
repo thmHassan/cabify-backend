@@ -458,7 +458,7 @@ class BookingController extends Controller
 
     public function cancelledBooking(Request $request){
         try{
-            $query = CompanyBooking::where("booking_status", 'cancelled')->orderBy("id", "DESC");
+            $query = CompanyBooking::where("booking_status", 'cancelled')->with("driverDetail")->orderBy("id", "DESC");
 
             if(isset($request->search) && $request->search != NULL){
                 $query->where(function($q) use ($request){
