@@ -197,6 +197,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         
         Route::get('/company/get-company-profile', [SettingController::class, 'getCompanyProfile']);
         Route::post('/company/save-company-profile', [SettingController::class, 'saveCompanyProfile']);
+        Route::get('/company/get-company-booking-system', [SettingController::class, 'getCompanyBookingSystem']);
+        Route::post('/company/update-company-booking-system', [SettingController::class, 'updateCompanyBookingSystem']);
         Route::post('/company/update-password', [SettingController::class, 'updatePassword']);
         Route::post('/company/update-mobile-setting', [SettingController::class, 'updateMobileSetting']);
         Route::get('/company/get-mobile-setting', [SettingController::class, 'getMobileSetting']);

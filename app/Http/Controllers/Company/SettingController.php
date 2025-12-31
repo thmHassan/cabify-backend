@@ -329,7 +329,7 @@ class SettingController extends Controller
                 ->setConnection('central')
                 ->where("id",$user->data['subscription_type'])
                 ->first();
-                
+
             return response()->json([
                 'success' => 1,
                 'planDetail' => $subscriptionData
@@ -528,6 +528,44 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'data' => $setting
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function getCompanyBookingSystem(){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            $company_booking_system = $setting->company_booking_system;
+
+            return response()->json([
+                'success' => 1,
+                'company_booking_system' => $company_booking_system
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function updateCompanyBookingSystem(Request $request){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $setting->company_booking_system = $request->company_booking_system;
+            $setting->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => "Booking system updated successfully"
             ]);
         }
         catch(\Exception $e){
