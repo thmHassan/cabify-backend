@@ -257,6 +257,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
     Route::post('/driver/register', [DriverAuthController::class, 'register']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
+    Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
 
     Route::group(['middleware' => ['auth.driver.jwt']], function () {
         Route::get('/driver/get-profile', [DriverAuthController::class, 'getProfile']);
@@ -267,7 +268,6 @@ Route::group(['middleware' => ['tenant.db']], function () {
    
         Route::post('/driver/contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
-        Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
 
@@ -289,6 +289,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
         Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
         
+        Route::post('/driver/store-token', [DriverAuthController::class, 'storeToken']);
         Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
         Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);
     });
@@ -298,7 +299,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/login', [RiderAuthController::class, 'login']);
     Route::post('/rider/register', [RiderAuthController::class, 'register']);
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
-
+    Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
+    
     Route::group(['middleware' => ['auth.rider.jwt']], function () {
         Route::post('/rider/add-emergency-contact', [RiderEmergencyContactController::class, 'addEmergencyContact']);
         Route::post('/rider/edit-emergency-contact', [RiderEmergencyContactController::class, 'editEmergencyContact']);
@@ -307,7 +309,6 @@ Route::group(['middleware' => ['tenant.db']], function () {
         
         Route::post('/rider/create-contact-us', [RiderSettingController::class, 'createContactUs']);
         Route::get('/rider/faqs', [RiderSettingController::class, 'faqs']);
-        Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
         Route::get('/rider/get-api-keys', [RiderSettingController::class, 'getApiKeys']);
         Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
         Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
@@ -320,6 +321,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/delete-account', [RiderAuthController::class, 'deleteAccount']);
         Route::get('/rider/get-profile', [RiderAuthController::class, 'getProfile']);
         Route::post('/rider/update-profile', [RiderAuthController::class, 'updateProfile']);
+        Route::post('/rider/store-token', [RiderAuthController::class, 'storeToken']);
 
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);

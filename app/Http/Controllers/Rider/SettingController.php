@@ -128,7 +128,7 @@ class SettingController extends Controller
         }
     }
 
-    public function getApiKeys(){
+    public function getApiKeys(Request $request){
         try{
             $setting = CompanySetting::orderBy("id", "DESC")->first();
 
