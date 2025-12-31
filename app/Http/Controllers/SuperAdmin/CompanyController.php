@@ -146,6 +146,19 @@ class CompanyController extends Controller
                     '--force' => true,
                 ]);
 
+                \DB::table('settings')->insert([
+                    'company_name' => $tenant->company_name,
+                    'company_email' => $tenant->email,
+                    'company_phone_no' => $tenant->phone,
+                    'company_timezone' => $tenant->time_zone,
+                    'google_api_keys' => $tenant->google_api_key,
+                    'barikoi_api_keys' => $tenant->barikoi_api_key,
+                    'company_currency' => $tenant->currency,
+                    'company_booking_system' => $tenant->uber_plot_hybrid,
+                    'map_settings' => $tenant->enable_smtp,
+                    'stripe_payment' => $tenant->stripe_enable,
+                ]);
+
                 $centralDocuments = \DB::connection('central')->table('document_types')->get();
 
                 foreach ($centralDocuments as $doc) {
@@ -191,6 +204,8 @@ class CompanyController extends Controller
                         'updated_at' => now()
                     ]);
                 }
+
+
             });
 
             return response()->json([

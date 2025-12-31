@@ -60,6 +60,9 @@ class SettingController extends Controller
                 'company_business_license' => 'required|max:255',
                 'company_business_address' => 'required|max:255',
                 'company_timezone' => 'required|max:255',
+                'support_contact_no' => 'required|max:255',
+                'support_emergency_no' => 'required|max:255',
+                'support_rescue_number' => 'required|max:255',
             ]);
             
             $settings = CompanySetting::orderBy("id", "DESC")->first();
@@ -75,6 +78,9 @@ class SettingController extends Controller
             $settings->company_business_address = $request->company_business_address;
             $settings->company_timezone = $request->company_timezone;
             $settings->company_description = $request->company_description;
+            $settings->support_contact_no = $request->support_contact_no;
+            $settings->support_emergency_no = $request->support_emergency_no;
+            $settings->support_rescue_number = $request->support_rescue_number;
             $settings->save();
             
             return response()->json([
@@ -323,7 +329,7 @@ class SettingController extends Controller
                 ->setConnection('central')
                 ->where("id",$user->data['subscription_type'])
                 ->first();
-                
+
             return response()->json([
                 'success' => 1,
                 'planDetail' => $subscriptionData
@@ -522,6 +528,44 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'data' => $setting
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function getCompanyBookingSystem(){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            $company_booking_system = $setting->company_booking_system;
+
+            return response()->json([
+                'success' => 1,
+                'company_booking_system' => $company_booking_system
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function updateCompanyBookingSystem(Request $request){
+        try{
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $setting->company_booking_system = $request->company_booking_system;
+            $setting->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => "Booking system updated successfully"
             ]);
         }
         catch(\Exception $e){
