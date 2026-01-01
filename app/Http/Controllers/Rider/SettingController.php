@@ -141,6 +141,7 @@ class SettingController extends Controller
             $support_contact_no = $setting->support_contact_no;
             $support_emergency_no = $setting->support_emergency_no;
             $support_rescue_number = $setting->support_rescue_number;
+            $company_booking_system = $setting->company_booking_system;
 
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
@@ -158,6 +159,14 @@ class SettingController extends Controller
             }
             $enable_map = json_decode($companyData->data)->maps_api;
             $country_of_user = json_decode($companyData->data)->country_of_use;
+            $company_booking_system = json_decode($companyData->data)->uber_plot_hybrid;
+
+            if($company_booking_system == "auto"){
+                $company_booking_system = "auto_dispatch";
+            }
+            else{
+                $company_booking_system = "bidding";
+            }
 
             $data = [
                 'stripe_key' => $stripe_key,
@@ -171,6 +180,7 @@ class SettingController extends Controller
                 'support_emergency_no' => $support_emergency_no,
                 'support_rescue_number' => $support_rescue_number,
                 'country_of_user' => $country_of_user,
+                'company_booking_system' => $company_booking_system,
             ];
 
             return response()->json([

@@ -330,11 +330,13 @@ class BookingController extends Controller
             $newBooking->distance = $distance;
             $newBooking->offered_amount = $request->offered_amount;
             $newBooking->recommended_amount = $request->recommended_amount;
+            $newBooking->note = $request->note;
             $newBooking->save();
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Booking created successfully',
+                'newBooking' => $newBooking
             ]);
         }
         catch(\Exception $e){
@@ -404,6 +406,61 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'currentBooking' => $currentBooking
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function cancelRide(Request $request){
+        try{
+            $request->validate([
+                'booking_id' => 'required'
+            ]);
+
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+
+            if(isset($booking) && $booking != NULL){
+                $booking->booking_status = "cancelled";
+                $booking->save();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride cancelled succesfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function cancelConfirmRide(Request $request){
+        try{
+            $request->validate([
+                'booking_id' => 'required',
+                'cancel_reason' => 'required',
+            ]);
+
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+
+            if(isset($booking) && $booking != NULL){
+                $booking->booking_status = "cancelled";
+                $booking->cancel_reason = $request->cancel_reason;
+                $booking->cancelled_by = 'user';
+                $booking->save();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride cancelled succesfully'
             ]);
         }
         catch(\Exception $e){

@@ -159,4 +159,33 @@ class BookingController extends Controller
             ], 400);
         }
     }
+
+    public function cancelConfirmRide(Request $request){
+        try{
+            $request->validate([
+                'booking_id' => 'required',
+                'cancel_reason' => 'required',
+            ]);
+
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+
+            if(isset($booking) && $booking != NULL){
+                $booking->booking_status = "cancelled";
+                $booking->cancel_reason = $request->cancel_reason;
+                $booking->cancelled_by = 'driver';
+                $booking->save();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride cancelled succesfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
