@@ -251,10 +251,10 @@ class CompanyController extends Controller
                         $setting = CompanySetting::orderBy("id", "DESC")->first();
                         Stripe::setApiKey($setting->stripe_secret_key);
 
-                        StripeSubscription::update(
-                            $tenant->stripe_subscription_id,
-                            ['cancel_at_period_end' => true]
-                        );
+                        // StripeSubscription::update(
+                        //     $tenant->stripe_subscription_id,
+                        //     ['cancel_at_period_end' => true]
+                        // );
                     }
                 }
                 elseif($newSubscription->deduct_type == "card"){
@@ -262,14 +262,14 @@ class CompanyController extends Controller
                         $setting = CompanySetting::orderBy("id", "DESC")->first();
                         Stripe::setApiKey($setting->stripe_secret_key);
 
-                        StripeSubscription::update(
-                            $tenant->stripe_subscription_id,
-                            ['cancel_at_period_end' => true]
-                        );
+                        // StripeSubscription::update(
+                        //     $tenant->stripe_subscription_id,
+                        //     ['cancel_at_period_end' => true]
+                        // );
 
-                        $currentSubscription = Stripe\Subscription::retrieve(
-                            $tenant->stripe_subscription_id
-                        );
+                        // $currentSubscription = Stripe\Subscription::retrieve(
+                        //     $tenant->stripe_subscription_id
+                        // );
 
                         $products = Product::all(['limit' => 100]);
                         $existing = collect($products->data)->firstWhere('name', $newSubscription->id);
@@ -311,7 +311,7 @@ class CompanyController extends Controller
                             'items' => [
                                 ['price' => $priceId],
                             ],
-                            'trial_end' => $currentSubscription->current_period_end,
+                            // 'trial_end' => $currentSubscription->current_period_end,
                         ]);
 
                         $tenant->stripe_subscription_id = $newStripeSubscription->id;
@@ -742,16 +742,16 @@ class CompanyController extends Controller
                     $session = $event->data->object;
                     $userId = $session->metadata->user_id ?? null;
                     $subscriptionId = $session->metadata->subscription_id ?? null;
-                    $stripeSubscriptionId = $session->subscription;
-                    $stripeCustomerId = $session->customer;
+                    // $stripeSubscriptionId = $session->subscription;
+                    // $stripeCustomerId = $session->customer;
                     
                     $tenant = Tenant::where("id", $userId)->first();
                     $subscription = Subscription::where("id", $subscriptionId)->first();
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
-                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
-                    $tenant->stripe_customer_id  = $stripeCustomerId;
+                    // $tenant->stripe_subscription_id  = $stripeSubscriptionId;
+                    // $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
                     $tenant->save();
 
@@ -798,16 +798,16 @@ class CompanyController extends Controller
                     $session = $event->data->object;
                     $userId = $session->subscription_details->metadata->user_id ?? null;
                     $subscriptionId = $session->subscription_details->metadata->subscription_id ?? null;
-                    $stripeSubscriptionId = $session->subscription;
-                    $stripeCustomerId = $session->customer;
+                    // $stripeSubscriptionId = $session->subscription;
+                    // $stripeCustomerId = $session->customer;
 
                     $tenant = Tenant::where("id", $userId)->first();
                     $subscription = Subscription::where("id", $subscriptionId)->first();
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
-                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
-                    $tenant->stripe_customer_id  = $stripeCustomerId;
+                    // $tenant->stripe_subscription_id  = $stripeSubscriptionId;
+                    // $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
                     $tenant->save();
 
