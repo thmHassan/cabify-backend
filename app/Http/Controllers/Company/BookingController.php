@@ -101,8 +101,9 @@ class BookingController extends Controller
                 'journey_type' => 'required',
                 'vehicle' => 'required',
                 'passenger' => 'required',
-                'booking_system' => 'required',
                 'booking_amount' => 'required',
+                'driver' => 'required_without:booking_system',
+                'booking_system' => 'required_without:driver',
             ]);
 
             $distance = $request->distance;
