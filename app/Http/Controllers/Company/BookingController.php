@@ -121,7 +121,7 @@ class BookingController extends Controller
                             $bookingTime = Carbon::parse($request->pickup_time);
                             $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
                             $endTime   = $bookingTime->copy()->addHour()->format('H:i:s');
-                            $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
+                            $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
     
                             if ($existingBooking && $alertMessage == NULL) {
                                 $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
@@ -179,14 +179,14 @@ class BookingController extends Controller
                     $bookingTime = Carbon::parse($request->pickup_time);
                     $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
                     $endTime   = $bookingTime->copy()->addHour()->format('H:i:s');
-                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
                     if ($existingBooking && $alertMessage == NULL) {
                         $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
                     }
                 }
                 else if($request->driver != NULL){
                     $date = $request->booking_date;
-                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('date', $date)->where('status', 'ongoing')->first();
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->where('status', 'ongoing')->first();
                     if ($existingBooking && $alertMessage == NULL) {
                         $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
                     }
