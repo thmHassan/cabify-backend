@@ -157,6 +157,7 @@ class SettingController extends Controller
                 $company_currency = json_decode($companyData->data)->currency;
             }
             $enable_map = json_decode($companyData->data)->maps_api;
+            $country_of_user = json_decode($companyData->data)->country_of_use;
 
             $data = [
                 'stripe_key' => $stripe_key,
