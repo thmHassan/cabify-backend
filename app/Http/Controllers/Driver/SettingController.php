@@ -187,7 +187,7 @@ class SettingController extends Controller
             }
             $enable_map = json_decode($companyData->data)->maps_api;
             $country_of_user = json_decode($companyData->data)->country_of_use;
-            
+
             $data = [
                 'stripe_key' => $stripe_key,
                 'stripe_secret_key' => $stripe_secret_key,
@@ -199,6 +199,7 @@ class SettingController extends Controller
                 'support_contact_no' => $support_contact_no,
                 'support_emergency_no' => $support_emergency_no,
                 'support_rescue_number' => $support_rescue_number,
+                'country_of_user' => $country_of_user
             ];
 
             return response()->json([
