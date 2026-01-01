@@ -151,12 +151,12 @@ class SettingController extends Controller
                 $google_map_key = $data->barikoi_key;
             }
             if(!isset($company_timezone) || $company_timezone == NULL){
-                $company_timezone = json_decode($tenant->data)->time_zone;
+                $company_timezone = json_decode($companyData->data)->time_zone;
             }
             if(!isset($company_currency) || $company_currency == NULL){
-                $company_currency = json_decode($tenant->data)->currency;
+                $company_currency = json_decode($companyData->data)->currency;
             }
-            $enable_map = json_decode($tenant->data)->maps_api;
+            $enable_map = json_decode($companyData->data)->maps_api;
 
             $data = [
                 'stripe_key' => $stripe_key,
