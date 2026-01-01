@@ -169,6 +169,10 @@ class SubscriptionController extends Controller
                     $query1->where('data->company_name', 'LIKE', "%". $request->search ."%")
                             ->orWhere('data->email', 'LIKE', "%". $request->search ."%");
                 }
+            })->when($request->payment_type, function ($query) use ($request) {
+                $query->whereHas('subscription', function ($q) use ($request) {
+                    $q->where('deduct_type', $request->payment_type);
+                });
             })->orderBy('created_at','DESC')->with("subscription")->paginate(10);
             return response()->json([
                 'success' => 1,
