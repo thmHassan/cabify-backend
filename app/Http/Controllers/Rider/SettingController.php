@@ -170,6 +170,7 @@ class SettingController extends Controller
                 'support_contact_no' => $support_contact_no,
                 'support_emergency_no' => $support_emergency_no,
                 'support_rescue_number' => $support_rescue_number,
+                'country_of_user' => $country_of_user,
             ];
 
             return response()->json([
