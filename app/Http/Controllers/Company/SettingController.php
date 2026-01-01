@@ -385,7 +385,7 @@ class SettingController extends Controller
         try{
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($settings) || $settings != NULL){
+            if(!isset($settings) || $settings == NULL){
                 $settings = new CompanySetting;
             }
             $settings->stripe_payment = $request->stripe_payment;
@@ -431,7 +431,7 @@ class SettingController extends Controller
         try{
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($settings) || $settings != NULL){
+            if(!isset($settings) || $settings == NULL){
                 $settings = new CompanySetting;
             }
             $settings->google_api_keys = $request->google_api_keys;
