@@ -161,7 +161,15 @@ class SubscriptionController extends Controller
 
     public function pendingSubscription(Request $request){
         try{
-            $pendingSubscription = Tenant::where('data->expiry_date', '<', Carbon::now()->format('Y-m-d'))->orWhere("data->payment_status","!=", "success")->orderBy('created_at','DESC')->with("subscription")->paginate(10);
+            $pendingSubscription = Tenant::where(function($query) use ($request){
+                    $query->where('data->expiry_date', '<', Carbon::now()->format('Y-m-d'))
+                    ->orWhere("data->payment_status","!=", "success");
+            })->where(function($query1) use ($request){
+                if(isset($request->search)){
+                    $query1->where('data->company_name', 'LIKE', "%". $request->search ."%")
+                            ->orWhere('data->email', 'LIKE', "%". $request->search ."%");
+                }
+            })->orderBy('created_at','DESC')->with("subscription")->paginate(10);
             return response()->json([
                 'success' => 1,
                 'list' => $pendingSubscription
