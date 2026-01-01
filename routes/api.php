@@ -284,7 +284,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/ride-detail', [DriverBookingController::class, 'rideDetail']);
         Route::post('/driver/place-bid', [DriverBookingController::class, 'placeBid']);
         Route::post('/driver/rate-ride', [DriverBookingController::class, 'rateRide']);
-        
+        Route::post('/driver/cancel-confirm-ride', [DriverBookingController::class, 'cancelConfirmRide']);
+
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
         Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
@@ -332,6 +333,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);
         Route::get('/rider/list-bids', [RiderBookingController::class, 'listBids']);
         Route::post('/rider/change-bid-status', [RiderBookingController::class, 'changeBidStatus']);
+        Route::post('/rider/cancel-ride', [RiderBookingController::class, 'cancelRide']);
+        Route::post('/rider/cancel-confirm-ride', [RiderBookingController::class, 'cancelConfirmRide']);
     });
 });
 
