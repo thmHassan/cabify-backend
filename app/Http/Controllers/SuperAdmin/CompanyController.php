@@ -299,7 +299,7 @@ class CompanyController extends Controller
                         ]);
 
                         $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
-                            $p->unit_amount == $amount && $p->recurring->interval == $interval
+                            $p->unit_amount == $newSubscription->amount && $p->recurring->interval == $interval
                         );
 
                         if ($matching) {
