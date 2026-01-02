@@ -758,10 +758,6 @@ class CompanyController extends Controller
             switch ($event->type) {
                 case 'checkout.session.completed':
 
-                    if (Transaction::where('stripe_event_id', $event->id)->exists()) {
-                        return response()->json(['duplicate' => true], 200);
-                    }
-
                     $session = $event->data->object;
                     $userId = $session->metadata->user_id ?? null;
                     $subscriptionId = $session->metadata->subscription_id ?? null;
