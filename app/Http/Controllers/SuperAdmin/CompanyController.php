@@ -757,6 +757,11 @@ class CompanyController extends Controller
 
             switch ($event->type) {
                 case 'checkout.session.completed':
+
+                    if (Transaction::where('stripe_event_id', $event->id)->exists()) {
+                        return response()->json(['duplicate' => true], 200);
+                    }
+
                     $session = $event->data->object;
                     $userId = $session->metadata->user_id ?? null;
                     $subscriptionId = $session->metadata->subscription_id ?? null;
@@ -810,6 +815,37 @@ class CompanyController extends Controller
                     $payment->status = 'paid';
                     $payment->method = 'card';
                     $payment->save();
+
+                    $paymentMethodId = null;
+
+                    // Case 1: payment_intent exists (one-time or first subscription)
+                    if (!empty($session->payment_intent)) {
+                        $paymentIntent = \Stripe\PaymentIntent::retrieve($session->payment_intent);
+                        $paymentMethodId = $paymentIntent->payment_method;
+                    }
+
+                    // Case 2: subscription Checkout (payment method via invoice)
+                    elseif (!empty($session->subscription)) {
+                        $subscriptionObj = \Stripe\Subscription::retrieve($session->subscription);
+                        $paymentMethodId = $subscriptionObj->default_payment_method;
+                    }
+
+                    // Attach & set default only if exists
+                    if ($paymentMethodId) {
+                        try {
+                            \Stripe\PaymentMethod::attach($paymentMethodId, [
+                                'customer' => $session->customer,
+                            ]);
+                        } catch (\Stripe\Exception\InvalidRequestException $e) {
+                            // already attached – ignore
+                        }
+
+                        \Stripe\Customer::update($session->customer, [
+                            'invoice_settings' => [
+                                'default_payment_method' => $paymentMethodId,
+                            ],
+                        ]);
+                    }
                     break;
 
                 case 'invoice.payment_succeeded':
