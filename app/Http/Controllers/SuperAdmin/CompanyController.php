@@ -306,7 +306,7 @@ class CompanyController extends Controller
                             $priceId = $matching->id;
                         } else {
                             $price = Price::create([
-                                'unit_amount' => $amount,
+                                'unit_amount' => $newSubscription->amount,
                                 'currency' => 'usd',
                                 'recurring' => ['interval' => $interval],
                                 'product' => $productId,
