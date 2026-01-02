@@ -831,12 +831,14 @@ class CompanyController extends Controller
 
                     // Attach & set default only if exists
                     if ($paymentMethodId) {
+                        $paymentMethod = \Stripe\PaymentMethod::retrieve($paymentMethodId);
+
                         try {
-                            \Stripe\PaymentMethod::attach($paymentMethodId, [
+                            $paymentMethod->attach([
                                 'customer' => $session->customer,
                             ]);
                         } catch (\Stripe\Exception\InvalidRequestException $e) {
-                            // already attached – ignore
+                            // Already attached → ignore
                         }
 
                         \Stripe\Customer::update($session->customer, [
