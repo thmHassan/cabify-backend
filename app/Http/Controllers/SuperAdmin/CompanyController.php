@@ -275,7 +275,7 @@ class CompanyController extends Controller
                             ['cancel_at_period_end' => true]
                         );
 
-                        $currentSubscription = Stripe\Subscription::retrieve(
+                        $currentSubscription = \Stripe\Subscription::retrieve(
                             $tenant->stripe_subscription_id
                         );
 
@@ -314,7 +314,7 @@ class CompanyController extends Controller
                             $priceId = $price->id;
                         }
 
-                        $newStripeSubscription = Stripe\Subscription::create([
+                        $newStripeSubscription = \Stripe\Subscription::create([
                             'customer' => $tenant->stripe_customer_id,
                             'items' => [
                                 ['price' => $priceId],
