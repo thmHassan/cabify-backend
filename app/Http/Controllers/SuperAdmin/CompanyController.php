@@ -742,6 +742,9 @@ class CompanyController extends Controller
 
     public function stripeWebhook(Request $request){
         try{
+            $setting = Setting::orderBy("id", "DESC")->first();
+            Stripe::setApiKey($setting->stripe_secret);
+            
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
             $setting = Setting::orderBy("id", "DESC")->first();
