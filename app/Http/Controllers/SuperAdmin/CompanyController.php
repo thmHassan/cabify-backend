@@ -731,6 +731,8 @@ class CompanyController extends Controller
             $setting = CompanySetting::orderBy("id", "DESC")->first();
             $endpoint_secret = $setting->stripe_webhook_secret;
 
+            \Log::info("enter to webhook");
+
             try {
                 $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
             } catch (\Exception $e) {
