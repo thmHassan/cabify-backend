@@ -164,7 +164,7 @@ class CompanyController extends Controller
                     'company_currency' => $tenant->currency,
                     'company_booking_system' => $system,
                     'map_settings' => $tenant->enable_smtp == "yes" ? 'default' : 'custom',
-                    'stripe_payment' => $tenant->stripe_enable,
+                    'stripe_payment' => $tenant->stripe_enable == "yes" ? "enable" : "disable",
                 ]);
 
                 $centralDocuments = \DB::connection('central')->table('document_types')->get();
