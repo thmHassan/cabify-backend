@@ -307,14 +307,14 @@ class CompanyController extends Controller
                         }
 
                         $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
-                            $p->unit_amount == $newSubscription->amount && $p->recurring->interval == $interval
+                            $p->unit_amount == ($newSubscription->amount * 100) && $p->recurring->interval == $interval
                         );
 
                         if ($matching) {
                             $priceId = $matching->id;
                         } else {
                             $price = Price::create([
-                                'unit_amount' => $newSubscription->amount,
+                                'unit_amount' => ($newSubscription->amount * 100),
                                 'currency' => 'usd',
                                 'recurring' => ['interval' => $interval],
                                 'product' => $productId,
