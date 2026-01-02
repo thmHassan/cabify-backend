@@ -298,6 +298,14 @@ class CompanyController extends Controller
                             'product' => $productId,
                         ]);
 
+                        $interval = "month";
+                        if($newSubscription->billing_cycle == "monthly"){
+                            $interval = "month";
+                        }
+                        elseif($newSubscription->billing_cycle == "yearly"){
+                            $interval = "year";
+                        }
+
                         $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
                             $p->unit_amount == $newSubscription->amount && $p->recurring->interval == $interval
                         );
