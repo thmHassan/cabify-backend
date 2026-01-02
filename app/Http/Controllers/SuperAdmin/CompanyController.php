@@ -163,8 +163,8 @@ class CompanyController extends Controller
                     'barikoi_api_keys' => $tenant->barikoi_api_key,
                     'company_currency' => $tenant->currency,
                     'company_booking_system' => $system,
-                    'map_settings' => $tenant->enable_smtp,
-                    'stripe_payment' => $tenant->stripe_enable,
+                    'map_settings' => $tenant->enable_smtp == "yes" ? 'default' : 'custom',
+                    'stripe_payment' => $tenant->stripe_enable == "yes" ? "enable" : "disable",
                 ]);
 
                 $centralDocuments = \DB::connection('central')->table('document_types')->get();
