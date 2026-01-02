@@ -257,7 +257,7 @@ class CompanyController extends Controller
                 if($newSubscription->deduct_type == "cash"){
                     if($existingSubscription->deduct_type == "card"){
                         $setting = Setting::orderBy("id", "DESC")->first();
-                        Stripe::setApiKey($setting->stripe_secret_key);
+                        Stripe::setApiKey($setting->stripe_secret);
 
                         StripeSubscription::update(
                             $tenant->stripe_subscription_id,
@@ -268,7 +268,7 @@ class CompanyController extends Controller
                 elseif($newSubscription->deduct_type == "card"){
                     if($existingSubscription->deduct_type == "card"){
                         $setting = Setting::orderBy("id", "DESC")->first();
-                        Stripe::setApiKey($setting->stripe_secret_key);
+                        Stripe::setApiKey($setting->stripe_secret);
 
                         StripeSubscription::update(
                             $tenant->stripe_subscription_id,
