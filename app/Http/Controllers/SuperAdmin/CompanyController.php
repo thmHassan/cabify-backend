@@ -248,7 +248,7 @@ class CompanyController extends Controller
 
                 if($newSubscription->deduct_type == "cash"){
                     if($existingSubscription->deduct_type == "card"){
-                        $setting = CompanySetting::orderBy("id", "DESC")->first();
+                        $setting = Setting::orderBy("id", "DESC")->first();
                         Stripe::setApiKey($setting->stripe_secret_key);
 
                         // StripeSubscription::update(
@@ -259,7 +259,7 @@ class CompanyController extends Controller
                 }
                 elseif($newSubscription->deduct_type == "card"){
                     if($existingSubscription->deduct_type == "card"){
-                        $setting = CompanySetting::orderBy("id", "DESC")->first();
+                        $setting = Setting::orderBy("id", "DESC")->first();
                         Stripe::setApiKey($setting->stripe_secret_key);
 
                         // StripeSubscription::update(
@@ -728,8 +728,10 @@ class CompanyController extends Controller
         try{
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
-            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $setting = Setting::orderBy("id", "DESC")->first();
             $endpoint_secret = $setting->stripe_webhook_secret;
+
+            \Log::info("enter to webhook");
 
             try {
                 $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
