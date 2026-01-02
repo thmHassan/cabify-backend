@@ -140,11 +140,19 @@ class CompanyController extends Controller
             // $tenant->database()->manager()->createDatabase($tenant);
             // $tenant->createDatabase();
 
-            $tenant->run(function () {
+            $tenant->run(function () use ($tenant) {
                 \Artisan::call('migrate', [
                     '--path' => 'database/migrations/tenant',
                     '--force' => true,
                 ]);
+
+                $system = "bidding";
+                if($tenant->uber_plot_hybrid == "auto"){
+                    $system = "auto_dispatch";
+                }
+                else if($tenant->uber_plot_hybrid == "both"){
+                    $system = "bidding";
+                }
 
                 \DB::table('settings')->insert([
                     'company_name' => $tenant->company_name,
@@ -154,7 +162,7 @@ class CompanyController extends Controller
                     'google_api_keys' => $tenant->google_api_key,
                     'barikoi_api_keys' => $tenant->barikoi_api_key,
                     'company_currency' => $tenant->currency,
-                    'company_booking_system' => $tenant->uber_plot_hybrid,
+                    'company_booking_system' => $system,
                     'map_settings' => $tenant->enable_smtp,
                     'stripe_payment' => $tenant->stripe_enable,
                 ]);
