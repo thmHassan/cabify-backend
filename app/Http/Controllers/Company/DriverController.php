@@ -124,7 +124,15 @@ class DriverController extends Controller
             if(isset($request->perPage) && $request->perPage != NULL){
                 $perPage = $request->perPage;
             }
-            $drivers = CompanyDriver::where("status", $request->status)->orderBy("id", "DESC");
+            $drivers = CompanyDriver::orderBy("id", "DESC");
+            if(isset($request->status) && $request->status == "pending"){
+                $drivers->where(function($query) use ($request){
+                    $query->where("status", $request->status)->orWhereNULL("status");
+                });
+            }
+            else{
+                $drivers->where("status", $request->status);
+            }
             if(isset($request->search) && $request->search != NULL){
                 $drivers->where(function($query) use ($request){
                     $query->where("name", "LIKE" ,"%".$request->search."%")
