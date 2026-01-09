@@ -9,6 +9,7 @@ use Hash;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use App\Notifications\CompanyNotification;
 
 class DispatcherController extends Controller
 {
