@@ -53,6 +53,13 @@ class DispatcherController extends Controller
             $dispatcher->password = Hash::make($request->password);
             $dispatcher->save();
 
+            $tenant = auth('tenant')->user();
+
+            $tenant->notify(new CompanyNotification([
+                'title' => 'Dispatcher Added',
+                'message' => 'You have added new dispatcher '.$dispatcher->name
+            ]));
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Dispatcher saved successfully'

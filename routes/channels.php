@@ -23,3 +23,8 @@ Broadcast::channel('users.{id}', function ($user, $id) {
     return $user instanceof \App\Models\User
         && (int) $user->id === (int) $id;
 });
+
+
+Broadcast::channel('App.Models.Tenant.{id}', function ($tenant, $id) {
+    return (int) $tenant->id === (int) $id;
+});
