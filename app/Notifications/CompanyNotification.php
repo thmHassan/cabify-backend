@@ -30,7 +30,7 @@ class CompanyNotification extends Notification implements ShouldBroadcast
      */
     public function via(object $notifiable): array
     {
-        return ['database', 'broadcast'];
+        return [ 'broadcast'];
     }
 
     /**
@@ -56,13 +56,13 @@ class CompanyNotification extends Notification implements ShouldBroadcast
     //     ];
     // }
 
-     public function toDatabase($notifiable)
-    {
-        return [
-            'title' => $this->data['title'],
-            'message' => $this->data['message'],
-        ];
-    }
+    // public function toDatabase($notifiable)
+    // {
+    //     // return [
+    //     //     'title' => $this->data['title'],
+    //     //     'message' => $this->data['message'],
+    //     // ];
+    // }
 
     public function toBroadcast($notifiable)
     {

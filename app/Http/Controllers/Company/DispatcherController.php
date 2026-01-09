@@ -10,34 +10,12 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use App\Notifications\CompanyNotification; 
+use App\Models\CompanyNotification as CompanyNotificationTable;
 
 class DispatcherController extends Controller
 {
     public function createDispatcher(Request $request){
         try{
-            // $database = request()->header('database');
-            
-            // if(!$database) {
-            //     return response()->json(['error' => 1, 'message' => 'Database header missing'], 400);
-            // }
-
-            // Config::set('database.connections.tenant', [
-            //     'driver' => 'mysql',
-            //     'host' => env('DB_HOST', '127.0.0.1'),
-            //     'port' => env('DB_PORT', '3306'),
-            //     'database' => "tenant".$database,
-            //     'username' => env('DB_USERNAME', 'root'),
-            //     'password' => env('DB_PASSWORD', ''),
-            //     'charset' => 'utf8mb4',
-            //     'collation' => 'utf8mb4_unicode_ci',
-            //     'prefix' => '',
-            //     'strict' => false,
-            // ]);
-
-            // DB::purge('tenant');
-            // DB::reconnect('tenant');
-            // Config::set('database.default', 'tenant');
-
             $request->validate([
                 'name' => 'required|max:255',
                 'email' => 'required|email|unique:dispatcher,email',
@@ -54,12 +32,19 @@ class DispatcherController extends Controller
             $dispatcher->password = Hash::make($request->password);
             $dispatcher->save();
 
-            $tenant = auth('tenant')->user();
+            $notification = new CompanyNotificationTable;
+            $notification->user_type = "company";
+            $notification->user_id = auth("tenant")->user()->id;
+            $notification->title = "Dispatcher Added";
+            $notification->message = 'You have added new dispatcher '.$dispatcher->name;
+            $notification->save();
 
-            $tenant->notify(new CompanyNotification([
-                'title' => 'Dispatcher Added',
-                'message' => 'You have added new dispatcher '.$dispatcher->name
-            ]));
+            auth('tenant')->user()->notify(
+                new CompanyNotification([
+                    'title' => 'Dispatcher Added',
+                    'message' => 'You have added new dispatcher ' . $dispatcher->name,
+                ])
+            );
 
             return response()->json([
                 'success' => 1,
