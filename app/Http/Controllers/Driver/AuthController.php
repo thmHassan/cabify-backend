@@ -253,4 +253,24 @@ class AuthController extends Controller
             ]);
         }
     }
+
+    public function updateLocation(Request $request)
+    {
+        $driver = CompanyDriver::where("id", $request->driver_id)->first();
+
+        $driver->latitude = $request->lat;
+        $driver->longitude = $request->lng;
+        $driver->save();
+
+        event(new DriverLocationUpdated(
+            $driver->id,
+            $driver->latitude,
+            $driver->longitude
+        ));
+
+        return response()->json([
+            'success' => 1,
+            'message' => "Driver location updated"
+        ]);
+    }
 }

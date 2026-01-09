@@ -12,7 +12,7 @@ use Laravel\Sanctum\HasApiTokens;
 
 class TenantUser extends Authenticatable implements JWTSubject
 {
-    use HasFactory;
+    use HasFactory, Notifiable;
 
     protected $table = 'tenants';
 
