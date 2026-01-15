@@ -216,6 +216,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::post('/company/send-notification', [SettingController::class, 'sendNotification']);
         Route::post('/company/save-app-content', [SettingController::class, 'saveAppContent']);
         Route::get('/company/get-app-content', [SettingController::class, 'getAppContent']);
+        Route::post('/company/set-dispatch-system', [SettingController::class, 'setDispatchSystem']);
+        Route::get('/company/get-dispatch-system', [SettingController::class, 'getDispatchSystem']);
         
         Route::post('/company/create-sub-company', [SubCompanyController::class, 'createSubCompany']);
         Route::post('/company/edit-sub-company', [SubCompanyController::class, 'editSubCompany']);
