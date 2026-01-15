@@ -648,8 +648,8 @@ class SettingController extends Controller
                 elseif($setting->dispatch_system == "bidding_fixed_fare_nearest_driver" && $setting->steps == "shows_up_after_first_rejection_or_wait_time_elapsed" && isset($request->bidding_fixed_fare_nearest_driver['shows_up_after_first_rejection_or_wait_time_elapsed'])){
                     $setting->status = $request->bidding_fixed_fare_nearest_driver['shows_up_after_first_rejection_or_wait_time_elapsed'];
                 }
+                $setting->save();
             }
-            $setting->save();
             return response()->json([
                 'success' => 1,
                 'message' => 'Data saved successfully'
