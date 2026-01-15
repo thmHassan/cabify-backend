@@ -238,6 +238,8 @@ class BookingController extends Controller
                 $newBooking->start_at = $request->start_at;
                 $newBooking->end_at = $request->end_at;
                 $newBooking->save();
+
+                
             }
 
             return response()->json([
