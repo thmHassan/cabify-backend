@@ -164,27 +164,6 @@ class DispatchSystemCompanySeeder extends Seeder
                 'sub_priority' => "5",
                 'status' => "disable",
             ],
-            [
-                'dispatch_system' => 'bidding_fixed_fare_nearest_driver',
-                'priority' => '6',
-                'steps' => "wait_time_seconds",
-                'sub_priority' => "1",
-                'status' => "disable",
-            ],
-            [
-                'dispatch_system' => 'bidding_fixed_fare_nearest_driver',
-                'priority' => '6',
-                'steps' => "immediately_show_on_dispatcher_panel",
-                'sub_priority' => "2",
-                'status' => "disable",
-            ],
-            [
-                'dispatch_system' => 'bidding_fixed_fare_nearest_driver',
-                'priority' => '6',
-                'steps' => "shows_up_after_first_rejection_or_wait_time_elapsed",
-                'sub_priority' => "3",
-                'status' => "disable",
-            ],
         ];
     }
 }

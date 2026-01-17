@@ -296,6 +296,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/store-token', [DriverAuthController::class, 'storeToken']);
         Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
         Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);
+        Route::post('/driver/set-plot-priority', [DriverAuthController::class, 'setPlotPriority']);
     });
 });
 

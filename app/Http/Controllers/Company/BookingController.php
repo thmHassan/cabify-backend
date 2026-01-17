@@ -8,7 +8,11 @@ use App\Models\CompanyPlot;
 use App\Models\CompanyBooking;
 use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
+use App\Models\CompanyDispatchSystem;
 use Carbon\Carbon;
+use App\Jobs\AutoDispatchPlotJob;
+use App\Jobs\SendBiddingFixedFareNotificationJob;
+use App\Jobs\AutoDispatchNearestDriverJob;
 
 class BookingController extends Controller
 {
@@ -203,8 +207,10 @@ class BookingController extends Controller
                 $newBooking->booking_type = $request->booking_type;
                 $newBooking->pickup_point = $request->pickup_point;
                 $newBooking->pickup_location = $request->pickup_location;
+                $newBooking->pickup_plot_id = $request->pickup_plot_id;
                 $newBooking->destination_point = $request->destination_point;
                 $newBooking->destination_location = $request->destination_location;
+                $newBooking->destination_plot_id = $request->destination_plot_id;
                 $newBooking->via_point = json_encode($request->via_point);
                 $newBooking->via_location = json_encode($request->via_location);
                 $newBooking->user_id = $request->user_id;
@@ -239,7 +245,17 @@ class BookingController extends Controller
                 $newBooking->end_at = $request->end_at;
                 $newBooking->save();
 
+                $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 
+                if($dispatchSystems->first()->dispatch_system == "auto_dispatch_plot_base"){
+                    AutoDispatchPlotJob::dispatch($newBooking->id, 0);
+                }
+                elseif($dispatchSystems->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                    SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, 0);
+                }
+                elseif($dispatchSystems->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                    AutoDispatchNearestDriverJob::dispatch($newBooking->id);
+                }
             }
 
             return response()->json([

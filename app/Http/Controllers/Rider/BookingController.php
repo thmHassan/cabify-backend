@@ -9,6 +9,10 @@ use App\Models\CompanyRating;
 use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
 use App\Models\CompanyBid;
+use App\Models\CompanyDispatchSystem;
+use App\Jobs\AutoDispatchPlotJob;
+use App\Jobs\SendBiddingFixedFareNotificationJob;
+use App\Jobs\AutoDispatchNearestDriverJob;
 
 class BookingController extends Controller
 {
@@ -332,6 +336,21 @@ class BookingController extends Controller
             $newBooking->recommended_amount = $request->recommended_amount;
             $newBooking->note = $request->note;
             $newBooking->save();
+
+            $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
+                
+            if($dispatchSystems->first()->dispatch_system == "auto_dispatch_plot_base"){
+                AutoDispatchPlotJob::dispatch($newBooking->id, 0);
+            }
+            elseif($dispatchSystems->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, 0);
+            }
+            elseif($dispatchSystems->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                AutoDispatchNearestDriverJob::dispatch($newBooking->id);
+            }
+            elseif($dispatchSystems->first()->dispatch_system == "bidding"){
+                SendBiddingNotificationJob::dispatch($newBooking->id);
+            }
 
             return response()->json([
                 'success' => 1,
