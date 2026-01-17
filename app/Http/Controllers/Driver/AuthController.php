@@ -273,4 +273,36 @@ class AuthController extends Controller
             'message' => "Driver location updated"
         ]);
     }
+
+    public function setPlotPriority(Request $request){
+        try{
+            $request->validate([
+                'plot_id' => 'required'
+            ]);
+
+            $drivers = CompanyDriver::where("plot_id", $request->plot_id)->orderBy("priority_plot")->where("id", "!=", auth("driver")->user()->id)->get();
+            $key = -1;
+
+            foreach($drivers as $key => $driver){
+                $driver->priority_plot = $key + 1;
+                $driver->save();
+            }
+
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $driver->plot_id = $request->plot_id;
+            $driver->priority_plot = $key + 2;
+            $driver->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => "Plot and Priority updated successfully"
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
