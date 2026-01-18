@@ -13,6 +13,7 @@ use App\Models\CompanyPlot;
 use App\Jobs\AutoDispatchRetryJob;
 use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanyDispatchSystem;
+use Illuminate\Support\Facades\Http;
 
 class AutoDispatchPlotJob implements ShouldQueue
 {
@@ -124,6 +125,21 @@ class AutoDispatchPlotJob implements ShouldQueue
                 'booking_id' => $booking->id,
             ]
         );
+
+        Http::withHeaders([
+            'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+        ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+            'drivers' => [$driver->id],
+            'booking' => [
+                'id' => $booking->id,
+                'booking_id' => $booking->booking_id,
+                'pickup_point' => $booking->pickup_point,
+                'destination_point' => $booking->destination_point,
+                'offered_amount' => $booking->offered_amount,
+                'distance' => $booking->distance,
+                'type' => 'auto_dispatch_plot'
+            ]
+        ]);
 
         AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $plotId)
             ->delay(now()->addSeconds(30));

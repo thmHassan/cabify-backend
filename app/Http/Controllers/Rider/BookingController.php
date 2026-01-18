@@ -13,6 +13,8 @@ use App\Models\CompanyDispatchSystem;
 use App\Jobs\AutoDispatchPlotJob;
 use App\Jobs\SendBiddingFixedFareNotificationJob;
 use App\Jobs\AutoDispatchNearestDriverJob;
+use Illuminate\Support\Facades\Http;
+use App\Services\AutoDispatchPlotSocketService;
 
 class BookingController extends Controller
 {
@@ -319,17 +321,7 @@ class BookingController extends Controller
             $newBooking->phone_no = auth("rider")->user()->phone_no;
             $newBooking->tel_no = auth("rider")->user()->tel_no;
             $newBooking->journey_type = "one_way";
-            // $newBooking->account = $request->account;
             $newBooking->vehicle = $request->vehicle;
-            // $newBooking->booking_system = $request->booking_system;
-            // $newBooking->parking_charge = $request->parking_charge;
-            // $newBooking->waiting_charge = $request->waiting_charge;
-            // $newBooking->ac_fares = $request->ac_fares;
-            // $newBooking->return_ac_fares = $request->return_ac_fares;
-            // $newBooking->ac_parking_charge = $request->ac_parking_charge;
-            // $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
-            // $newBooking->extra_charge = $request->extra_charge;
-            // $newBooking->toll = $request->toll;
             $newBooking->booking_status = 'pending';
             $newBooking->distance = $distance;
             $newBooking->offered_amount = $request->offered_amount;
@@ -339,17 +331,32 @@ class BookingController extends Controller
 
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 
-            if($dispatchSystems->first()->dispatch_system == "auto_dispatch_plot_base"){
+            if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                 AutoDispatchPlotJob::dispatch($newBooking->id, 0);
+                // AutoDispatchPlotSocketService::dispatch($newBooking, 0);
             }
-            elseif($dispatchSystems->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+            elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, 0);
             }
-            elseif($dispatchSystems->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+            elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
                 AutoDispatchNearestDriverJob::dispatch($newBooking->id);
             }
-            elseif($dispatchSystems->first()->dispatch_system == "bidding"){
+            elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);
+                // $companyDrivers = CompanyDriver::where('driving_status', 'idle')->pluck('id')->toArray(); 
+                // Http::withHeaders([
+                //     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                // ])->post('https://backend.cabifyit.com:3001/send-new-ride', [
+                //     'drivers' => $companyDrivers,
+                //     'booking' => [
+                //         'id' => $newBooking->id,
+                //         'booking_id' => $newBooking->booking_id,
+                //         'pickup_point' => $newBooking->pickup_point,
+                //         'destination_point' => $newBooking->destination_point,
+                //         'offered_amount' => $newBooking->offered_amount,
+                //         'distance' => $newBooking->distance,
+                //     ]
+                // ]);
             }
 
             return response()->json([
@@ -403,6 +410,21 @@ class BookingController extends Controller
                 $booking->driver = $bid->driver_id;
                 $booking->save();
                 $message = "Bid accepted successfully";
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/bid-accept', [
+                    'drivers' => $bid->driver_id,
+                    'booking' => [
+                        'id' => $booking->id,
+                        'booking_id' => $booking->booking_id,
+                        'pickup_point' => $booking->pickup_point,
+                        'destination_point' => $booking->destination_point,
+                        'offered_amount' => $booking->offered_amount,
+                        'distance' => $booking->distance,
+                        'type' => 'auto_dispatch_plot'
+                    ]
+                ]);
             }
 
             return response()->json([
@@ -475,6 +497,22 @@ class BookingController extends Controller
                 $booking->cancel_reason = $request->cancel_reason;
                 $booking->cancelled_by = 'user';
                 $booking->save();
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/change-driver-ride-status', [
+                    'drivers' => $booking->driver,
+                    'status' => "cancel_confirm_ride",
+                    'booking' => [
+                        'id' => $booking->id,
+                        'booking_id' => $booking->booking_id,
+                        'pickup_point' => $booking->pickup_point,
+                        'destination_point' => $booking->destination_point,
+                        'offered_amount' => $booking->offered_amount,
+                        'distance' => $booking->distance,
+                        'type' => 'auto_dispatch_plot'
+                    ]
+                ]);
             }
 
             return response()->json([
