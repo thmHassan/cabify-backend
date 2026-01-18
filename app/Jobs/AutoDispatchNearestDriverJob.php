@@ -10,6 +10,8 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\CompanyBooking;
 use App\Models\CompanyDriver;
 use App\Models\CompanyPlot;
+use App\Services\FCMService;
+use Illuminate\Support\Facades\Http;
 
 class AutoDispatchNearestDriverJob implements ShouldQueue
 {
@@ -79,6 +81,21 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 'booking_id' => $booking->id,
             ]
         );
+
+        Http::withHeaders([
+            'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+        ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+            'drivers' => [$driver->id],
+            'booking' => [
+                'id' => $booking->id,
+                'booking_id' => $booking->booking_id,
+                'pickup_point' => $booking->pickup_point,
+                'destination_point' => $booking->destination_point,
+                'offered_amount' => $booking->offered_amount,
+                'distance' => $booking->distance,
+                'type' => 'auto_dispatch_plot'
+            ]
+        ]);
         
         array_push($this->driverIds, $driver->id);
 

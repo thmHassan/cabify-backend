@@ -268,6 +268,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::post('/driver/add-wallet-amount', [DriverSettingController::class, 'addWalletAmount']);
         Route::get('/driver/balance-transaction', [DriverSettingController::class, 'balanceTransaction']);
+        Route::post('/driver/send-message', [DriverSettingController::class, 'sendMessage']);
    
         Route::post('/driver/create-contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
@@ -288,6 +289,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/place-bid', [DriverBookingController::class, 'placeBid']);
         Route::post('/driver/rate-ride', [DriverBookingController::class, 'rateRide']);
         Route::post('/driver/cancel-confirm-ride', [DriverBookingController::class, 'cancelConfirmRide']);
+        Route::post('/driver/accept-ride', [DriverBookingController::class, 'acceptRide']);
 
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
@@ -319,6 +321,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
         Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
         Route::get('/rider/vehicle-list', [RiderSettingController::class, 'vehicleList']);
+        Route::post('/rider/send-message', [RiderSettingController::class, 'sendMessage']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);

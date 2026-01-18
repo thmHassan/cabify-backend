@@ -10,6 +10,7 @@ use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
 use App\Models\CompanyFAQ;
 use App\Models\PackageSetting;
+use Illuminate\Support\Facades\Http;
 
 class SettingController extends Controller
 {
@@ -216,6 +217,42 @@ class SettingController extends Controller
                 'success' => 1,
                 'setting' => $data
             ], 200);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function sendMessage(Request $request){
+        try{
+            $chat = new CompanyChat;
+            $chat->send_by = "driver";
+            $chat->driver_id = auth("driver")->user()->id;
+            $chat->user_id = $request->user_id;
+            $chat->ride_id = $request->ride_id;
+            $chat->message = $request->message;
+            $chat->status = 'unread';
+            $chat->save();
+
+            $booking = CompanyBooking::where("id", $request->ride_id)->first();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/user-message-notification', [
+                'user' => $request->user_id,
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'destination_point' => $booking->destination_point,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'type' => 'auto_dispatch_plot'
+                ]
+            ]);
         }
         catch(Exception $e){
             return response()->json([
