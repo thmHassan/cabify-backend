@@ -308,6 +308,9 @@ class AuthController extends Controller
 
     public function setLocation(Request $request){
         try{
+
+        \Log::info("enter");
+
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
 
             $driver->latitude = $request->latitude;
