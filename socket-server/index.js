@@ -76,6 +76,7 @@ io.on("connection", (socket) => {
                     }
                 }
             );
+            console.log("Event complete")
         } catch (err) {
             console.error("Laravel error", err);
             console.error("Laravel error", err.response?.status);
