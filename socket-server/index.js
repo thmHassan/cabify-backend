@@ -18,11 +18,6 @@ const userSockets = new Map();
 const dispatcherSockets = new Map();
 
 io.use(async (socket, next) => {
-    console.log("Incoming handshake:", socket.handshake);
-    next();
-});
-
-io.use(async (socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
     const database = socket.handshake.query.database;
     const driverId = socket.handshake.query.driver_id;
@@ -82,6 +77,7 @@ io.on("connection", (socket) => {
                 }
             );
         } catch (err) {
+            console.error("Laravel error", err);
             console.error("Laravel error", err.response?.status);
             console.error("Laravel error", err.response?.data);
         }
