@@ -62,6 +62,7 @@ io.on("connection", (socket) => {
     socket.on("driver-location", async (data) => {
         //Send to Laravel (store in DB)
         try {
+            console.log("📍 DRIVER LOCATION EVENT", data);
             await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
                 data,
@@ -72,7 +73,8 @@ io.on("connection", (socket) => {
                 }
             );
         } catch (err) {
-            console.error("Laravel error", err.message);
+            console.error("Laravel error", err.response?.status);
+            console.error("Laravel error", err.response?.data);
         }
         // Broadcast to React users
         socket.broadcast.emit("driver-location-update", data);
