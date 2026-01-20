@@ -24,8 +24,9 @@ io.use(async (socket, next) => {
     const userId = socket.handshake.query.user_id;
     const role = socket.handshake.query.role;
     const dispatcherId = socket.handshake.query.dispatcher_id;
-
+    console.log("ENter to socket")
     if (!authHeader || (role === 'driver' && !driverId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
+        console.log("error in params")
         return next(new Error("Unauthorized"));
     }
     socket.token = authHeader.split(" ")[1];
