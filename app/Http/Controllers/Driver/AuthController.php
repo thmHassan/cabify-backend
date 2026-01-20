@@ -311,7 +311,7 @@ class AuthController extends Controller
 
         \Log::info("enter");
 
-            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
             $driver->latitude = $request->latitude;
             $driver->longitude = $request->longitude;
