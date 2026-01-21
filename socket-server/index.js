@@ -78,7 +78,7 @@ io.on("connection", (socket) => {
             console.log(dataArray.database)
             await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
-                data,
+                dataArray,
                 {
                     headers: {
                         Authorization: `Bearer ${socket.token}`,
