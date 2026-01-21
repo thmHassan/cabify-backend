@@ -8,7 +8,9 @@ use App\Models\User;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Setting;
+use App\Models\Notification;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
 
 class HomeController extends Controller
 {
@@ -220,6 +222,36 @@ class HomeController extends Controller
             return response()->json([
                 'success' => 1,
                 'list' => $tenantList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function sendReminder(Request $request){
+        try{
+            $request->validate([
+                'client_id' => 'required',
+                'title' => 'required',
+                'description' => 'required'
+            ]);
+
+            $data = new Notification;
+            $data->tenant_id = $request->tenant_id;
+            $data->title = $request->title;
+            $data->description = $request->description;
+            $data->save();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                'client' => $request->client_id,
+                'title' => $request->title,
+                'description' => $request->description
             ]);
         }
         catch(\Exception $e){

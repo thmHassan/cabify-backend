@@ -17,21 +17,24 @@ const driverSockets = new Map();
 const userSockets = new Map();
 const dispatcherSockets = new Map();
 const clientSockets = new Map();
+const adminSockets = new Map();
 
 io.use(async (socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
     // const database = socket.handshake.query.database;
     const driverId = socket.handshake.query.driver_id;
     const userId = socket.handshake.query.user_id;
+    const adminId = socket.handshake.query.admin_id;
     const role = socket.handshake.query.role;
     const dispatcherId = socket.handshake.query.dispatcher_id;
-    if (!authHeader || (role === 'driver' && !driverId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
+    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || (role === 'dispatcher' && !dispatcherId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
         return next(new Error("Unauthorized"));
     }
     socket.token = authHeader.split(" ")[1];
     socket.driverId = driverId;
     socket.dispatcherId = dispatcherId;
     socket.userId = userId;
+    socket.adminId = adminId;
     // socket.database = database;
 
     next();
@@ -45,6 +48,7 @@ io.on("connection", (socket) => {
     const dispatcherId = socket.handshake.query.dispatcher_id;
     const userId = socket.handshake.query.user_id;
     const clientId = socket.handshake.query.client_id;
+    const adminId = socket.handshake.query.admin_id;
 
     if (role === "dispatcher" && dispatcherId) {
         dispatcherSockets.set(dispatcherId.toString(), socket.id);
@@ -54,6 +58,9 @@ io.on("connection", (socket) => {
     }
     if (role === "client" && clientId) {
         clientSockets.set(clientId.toString(), socket.id);
+    }
+    if (role === "admin" && adminId) {
+        adminSockets.set(adminId.toString(), socket.id);
     }
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
@@ -192,6 +199,17 @@ app.post("/change-driver-ride-status", (req, res) => {
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
         io.to(socketId).emit("driver-ride-status-event", status, booking);
+    }
+    return res.json({
+        success: true,
+    });
+});
+
+app.post("/send-reminder", (req, res) => {
+    const { clientId, title, description } = req.body;
+    const socketId = clientSockets.get(clientId.toString());
+    if (socketId) {
+        io.to(socketId).emit("driver-ride-status-event", title, description);
     }
     return res.json({
         success: true,
