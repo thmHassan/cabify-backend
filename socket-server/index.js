@@ -20,7 +20,7 @@ const clientSockets = new Map();
 
 io.use(async (socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
-    const database = socket.handshake.query.database;
+    // const database = socket.handshake.query.database;
     const driverId = socket.handshake.query.driver_id;
     const userId = socket.handshake.query.user_id;
     const role = socket.handshake.query.role;
@@ -32,7 +32,7 @@ io.use(async (socket, next) => {
     socket.driverId = driverId;
     socket.dispatcherId = dispatcherId;
     socket.userId = userId;
-    socket.database = database;
+    // socket.database = database;
 
     next();
 });
@@ -77,7 +77,7 @@ io.on("connection", (socket) => {
                 {
                     headers: {
                         Authorization: `Bearer ${socket.token}`,
-                        database: `${socket.database}`,
+                        database: `${dataArray.database}`,
                     }
                 }
             );
