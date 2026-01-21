@@ -68,6 +68,7 @@ io.on("connection", (socket) => {
             console.log("📍 DRIVER LOCATION EVENT", data);
             console.log(socket.token)
             var dataArray;
+            console.log("TYPE:", typeof data);
             if (typeof data === "string") {
                 dataArray = JSON.parse(data);
             }
