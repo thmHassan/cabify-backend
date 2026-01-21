@@ -16,6 +16,7 @@ use App\Models\CompanyUser;
 use App\Models\CompanyDriver; 
 use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
+use App\Models\CompanyBooking;
 
 class SettingController extends Controller
 {
@@ -717,6 +718,31 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Password match successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function dashboard(Request $request){
+        try{
+            $activeRides = CompanyBooking::where("booking_status", "ongoing")->count();
+            $cancelRides = CompanyBooking::where("booking_status", "cancelled")->count();
+            $waitingRides = CompanyBooking::where("booking_status", "pending")->count();
+
+            $data = [
+                "activeRides" => $activeRides,
+                "cancelRides" => $cancelRides,
+                "waitingRides" => $waitingRides,
+            ];
+
+            return response()->json([
+                'success' => 1,
+                'data' => $data
             ]);
         }
         catch(\Exception $e){

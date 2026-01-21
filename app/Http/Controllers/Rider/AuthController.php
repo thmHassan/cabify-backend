@@ -20,7 +20,7 @@ class AuthController extends Controller
                 'country_code' => 'required',
             ]);
 
-            $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->first();
+            $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->where("country_code", $request->country_code)->first();
             
             if(isset($existUser) && $existUser != NULL){
                 return response()->json([

@@ -10,4 +10,8 @@ class CompanyChat extends Model
     use HasFactory;
 
     protected $table = "chats";
+
+    public function rideDetail(){
+        return $this->hasOne(CompanyBooking::class, 'id', 'ride_id');
+    }
 }

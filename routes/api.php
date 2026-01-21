@@ -142,6 +142,8 @@ Route::group(['middleware' => ['auth:api']], function () {
 
 Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     // Route::group(['middleware' => ['tenant']], function () {
+        Route::post('/company/dashboard', [SettingController::class, 'dashboard']);
+
         Route::post('/company/create-dispatcher', [DispatcherController::class, 'createDispatcher']);
         Route::post('/company/edit-dispatcher', [DispatcherController::class, 'editDispatcher']);
         Route::get('/company/edit-dispatcher', [DispatcherController::class, 'getEditDispatcher']);
@@ -270,6 +272,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/add-wallet-amount', [DriverSettingController::class, 'addWalletAmount']);
         Route::get('/driver/balance-transaction', [DriverSettingController::class, 'balanceTransaction']);
         Route::post('/driver/send-message', [DriverSettingController::class, 'sendMessage']);
+        Route::get('/driver/message-list', [DriverSettingController::class, 'messageList']);
+        Route::get('/driver/message-history', [DriverSettingController::class, 'messageHistory']);
    
         Route::post('/driver/create-contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
@@ -323,6 +327,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
         Route::get('/rider/vehicle-list', [RiderSettingController::class, 'vehicleList']);
         Route::post('/rider/send-message', [RiderSettingController::class, 'sendMessage']);
+        Route::get('/rider/message-list', [RiderSettingController::class, 'messageList']);
+        Route::get('/rider/message-history', [RiderSettingController::class, 'messageHistory']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
