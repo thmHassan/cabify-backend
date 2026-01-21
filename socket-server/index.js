@@ -16,81 +16,73 @@ const io = new Server(server, {
 const driverSockets = new Map();
 const userSockets = new Map();
 const dispatcherSockets = new Map();
+const clientSockets = new Map();
 
 io.use(async (socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
-    // const database = socket.handshake.query.database;
+    const database = socket.handshake.query.database;
     const driverId = socket.handshake.query.driver_id;
     const userId = socket.handshake.query.user_id;
     const role = socket.handshake.query.role;
     const dispatcherId = socket.handshake.query.dispatcher_id;
-    console.log("ENter to socket")
     if (!authHeader || (role === 'driver' && !driverId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
-        console.log("error in params")
         return next(new Error("Unauthorized"));
     }
     socket.token = authHeader.split(" ")[1];
     socket.driverId = driverId;
     socket.dispatcherId = dispatcherId;
     socket.userId = userId;
-    // socket.database = database;
+    socket.database = database;
 
     next();
 });
 
 
 io.on("connection", (socket) => {
-    // console.log("Driver connected:", socket.id);
 
     const role = socket.handshake.query.role;
     const driverId = socket.handshake.query.driver_id;
     const dispatcherId = socket.handshake.query.dispatcher_id;
     const userId = socket.handshake.query.user_id;
+    const clientId = socket.handshake.query.client_id;
 
     if (role === "dispatcher" && dispatcherId) {
         dispatcherSockets.set(dispatcherId.toString(), socket.id);
-        console.log(`Dispatcher ${dispatcherId} connected with socket ${socket.id}`);
     }
     if (role === "user" && userId) {
         userSockets.set(userId.toString(), socket.id);
-        console.log(`user ${userId} connected with socket ${socket.id}`);
     }
-
+    if (role === "client" && clientId) {
+        clientSockets.set(clientId.toString(), socket.id);
+    }
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
-        console.log(`Driver ${driverId} connected with socket ${socket.id}`);
     }
+    console.log(socket)
 
     // Event call when from Flutter to Update location for driver
     socket.on("driver-location", async (data) => {
         //Send to Laravel (store in DB)
         try {
-            console.log("📍 DRIVER LOCATION EVENT", data);
-            console.log(socket.token)
             var dataArray;
-            console.log("TYPE:", typeof data);
             if (typeof data === "string") {
                 dataArray = JSON.parse(data);
             }
             else{
                 dataArray = data;
             }
-            console.log(dataArray.database)
             await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
                 dataArray,
                 {
                     headers: {
                         Authorization: `Bearer ${socket.token}`,
-                        database: `${dataArray.database}`,
+                        database: `${socket.database}`,
                     }
                 }
             );
-            console.log("Event complete")
         } catch (err) {
             console.error("Laravel error", err);
-            console.error("Laravel error", err.response?.status);
-            console.error("Laravel error", err.response?.data);
         }
         // Broadcast to React users
         socket.broadcast.emit("driver-location-update", data);
@@ -106,7 +98,9 @@ io.on("connection", (socket) => {
         if (role === "user" && userId) {
             userSockets.delete(userId.toString());
         }
-        console.log("Disconnected:", socket.id);
+        if (role === "client" && clientId) {
+            clientSockets.delete(userId.toString());
+        }
     });
 });
 
