@@ -21,7 +21,8 @@ class AuthController extends Controller
                 'country_code' => 'required',
             ]);
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->first();
+            $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->where("cpuntry_code", $request->country_code)->first();
+            
             if(isset($user) && $user != NULL){
                 return response()->json([
                     'error' => 1,

@@ -8,6 +8,7 @@ use App\Models\CompanyContactUs;
 use App\Models\CompanyFAQ;
 use App\Models\CompanySetting;
 use App\Models\CompanyRider;
+use App\Models\CompanyChat;
 use App\Models\WalletTransaction;
 use App\Models\CompanyVehicleType;
 use Illuminate\Support\Facades\Http;
@@ -240,6 +241,40 @@ class SettingController extends Controller
                     'distance' => $booking->distance,
                     'type' => 'auto_dispatch_plot'
                 ]
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function messageList(Request $request){
+        try{
+            $list = CompanyChat::where("user_id", auth("rider")->user()->id)->groupBy("ride_id")->with('rideDetail')->get();
+
+            return response()->json([
+                'success' => 1,
+                'list' => $list
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function messageHistory(Request $request){
+        try{
+            $chat = CompanyChat::where("ride_id", $request->ride_id)->orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'messages' => $chat
             ]);
         }
         catch(Exception $e){

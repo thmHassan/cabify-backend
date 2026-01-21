@@ -284,17 +284,17 @@ class BookingController extends Controller
             $map_api = json_decode($data->data)->maps_api;
             $map = json_decode($data->data)->map;
 
+            $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();   
+            $barikoi_key = $data->barikoi_key;
+
             if(isset($map) && $map == "enable"){
                 if(isset($map_api) && $map_api != NULL){
-                    $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();   
                     $google_map_key = $data->google_map_key;
-                    $barikoi_key = $data->barikoi_key;
                 }
             }
             else{
                 $data = CompanySetting::orderBy("id", "DESC")->first();
                 $google_map_key = $data->google_api_keys;
-                $barikoi_key = $data->barikoi_api_keys;
             }
             
             if(isset($map_api) && $map_api == "barikoi"){  
@@ -461,6 +461,12 @@ class BookingController extends Controller
                     $amount = (float) $amount + (float) $vehicle->base_fare_greater_than_x_price;
                 }
             }
+
+            if(isset($request->journey_type) && $request->journey_type == "return"){
+                $distance = 2 * $distance;
+                $amount = 2 * $amount;
+            }
+
             return response()->json([
                 'success' => 1,
                 'distance' => $distance,
