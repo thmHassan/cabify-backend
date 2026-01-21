@@ -67,17 +67,21 @@ io.on("connection", (socket) => {
         try {
             console.log("📍 DRIVER LOCATION EVENT", data);
             console.log(socket.token)
-            console.log(data.database)
+            var dataArray;
             if (typeof data === "string") {
-                data = JSON.parse(data);
+                dataArray = JSON.parse(data);
             }
+            else{
+                dataArray = data;
+            }
+            console.log(dataArray.database)
             await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
                 data,
                 {
                     headers: {
                         Authorization: `Bearer ${socket.token}`,
-                        database: `${data.database}`,
+                        database: `${dataArray.database}`,
                     }
                 }
             );
