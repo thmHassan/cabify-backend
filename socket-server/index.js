@@ -66,13 +66,15 @@ io.on("connection", (socket) => {
         //Send to Laravel (store in DB)
         try {
             console.log("📍 DRIVER LOCATION EVENT", data);
+            console.log(socket.token)
+            console.log(socket.database)
             await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
                 data,
                 {
                     headers: {
                         Authorization: `Bearer ${socket.token}`,
-                        database: `${data.database}`,
+                        database: `${socket.database}`,
                     }
                 }
             );
