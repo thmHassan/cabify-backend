@@ -314,8 +314,8 @@ class AuthController extends Controller
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
-            $driver->latitude = $request->latitude;
-            $driver->longitude = $request->longitude;
+            $driver->latitude = isset($request->latitude) ? $request->latitude : NULL;
+            $driver->longitude = isset($request->longitude) ? $request->longitude : NULL;
             $driver->save();
 
             return response()->json([
