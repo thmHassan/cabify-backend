@@ -67,7 +67,6 @@ io.on("connection", (socket) => {
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
     }
-    console.log(socket)
 
     // Event call when from Flutter to Update location for driver
     socket.on("driver-location", async (data) => {
@@ -91,7 +90,7 @@ io.on("connection", (socket) => {
                 }
             );
         } catch (err) {
-            console.error("Laravel error", err);
+            console.error("Laravel Socket error", err);
         }
         // Broadcast to React users
         socket.broadcast.emit("driver-location-update", data);
