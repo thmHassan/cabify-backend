@@ -14,6 +14,7 @@ use App\Jobs\AutoDispatchRetryJob;
 use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 class AutoDispatchPlotJob implements ShouldQueue
 {
@@ -22,7 +23,7 @@ class AutoDispatchPlotJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public int $bookingId, public int $priority, public int $plotId)
+    public function __construct(public int $bookingId, public int $priority, public string $tenantDatabase, public ?int $plotId = NULL)
     {
         
     }
@@ -32,6 +33,13 @@ class AutoDispatchPlotJob implements ShouldQueue
      */
     public function handle(): void
     {
+        config([
+            'database.connections.tenant.database' => $this->tenantDatabase,
+        ]);
+
+        DB::purge('tenant');
+        DB::reconnect('tenant');
+
         $bookingId = $this->bookingId;
         $booking = CompanyBooking::where("id",$bookingId)->first();
 
@@ -69,7 +77,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                     return;
                 }
                 if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                    SendBiddingFixedFareNotificationJob::dispatch($booking->id, 0);
+                    SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0);
                 }
                 elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
                     AutoDispatchNearestDriverJob::dispatch($booking->id, 0);
@@ -141,7 +149,7 @@ class AutoDispatchPlotJob implements ShouldQueue
             ]
         ]);
 
-        AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $plotId)
+        AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $this->tenantDatabase, $plotId)
             ->delay(now()->addSeconds(30));
     }
 }
