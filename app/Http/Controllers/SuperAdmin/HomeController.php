@@ -241,7 +241,7 @@ class HomeController extends Controller
             ]);
 
             $data = new Notification;
-            $data->tenant_id = $request->tenant_id;
+            $data->tenant_id = $request->client_id;
             $data->title = $request->title;
             $data->description = $request->description;
             $data->save();
