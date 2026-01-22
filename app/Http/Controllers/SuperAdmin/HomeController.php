@@ -253,6 +253,11 @@ class HomeController extends Controller
                 'title' => $request->title,
                 'description' => $request->description
             ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Remider sent successfully'
+            ]);
         }
         catch(\Exception $e){
             return response()->json([
