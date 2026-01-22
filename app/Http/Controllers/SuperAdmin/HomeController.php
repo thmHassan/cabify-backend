@@ -251,7 +251,7 @@ class HomeController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
-                'client' => $request->client_id,
+                'clientId' => $request->client_id,
                 'title' => $request->title,
                 'description' => $request->description
             ]);
