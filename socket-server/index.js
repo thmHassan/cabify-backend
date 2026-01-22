@@ -209,7 +209,7 @@ app.post("/send-reminder", (req, res) => {
     const { clientId, title, description } = req.body;
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
-        io.to(socketId).emit("driver-ride-status-event", title, description);
+        io.to(socketId).emit("send-reminder", title, description);
     }
     return res.json({
         success: true,
