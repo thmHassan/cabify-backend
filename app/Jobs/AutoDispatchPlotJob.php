@@ -77,10 +77,10 @@ class AutoDispatchPlotJob implements ShouldQueue
                     return;
                 }
                 if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                    SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0);
+                    SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $request->header('database'));
                 }
                 elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                    AutoDispatchNearestDriverJob::dispatch($booking->id, 0);
+                    AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), 0);
                 }
                 return;
             }
