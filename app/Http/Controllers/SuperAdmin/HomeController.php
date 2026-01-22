@@ -246,6 +246,8 @@ class HomeController extends Controller
             $data->description = $request->description;
             $data->save();
 
+            \Log::info("Enter to reminder");
+
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
@@ -260,6 +262,7 @@ class HomeController extends Controller
             ]);
         }
         catch(\Exception $e){
+            \Log::info($e->getMessage());
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
