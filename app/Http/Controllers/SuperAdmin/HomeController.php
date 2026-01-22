@@ -241,10 +241,12 @@ class HomeController extends Controller
             ]);
 
             $data = new Notification;
-            $data->tenant_id = $request->tenant_id;
+            $data->tenant_id = $request->client_id;
             $data->title = $request->title;
             $data->description = $request->description;
             $data->save();
+
+            \Log::info("Enter to reminder");
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -260,6 +262,7 @@ class HomeController extends Controller
             ]);
         }
         catch(\Exception $e){
+            \Log::info($e->getMessage());
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
