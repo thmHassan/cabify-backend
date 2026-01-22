@@ -21,7 +21,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public int $bookingId, public int $plotId, public int $count )
+    public function __construct(public int $bookingId, public int $plotId, public int $count, public string $tenantDatabase )
     {
 
     }
@@ -85,10 +85,10 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                 return;
             }
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                AutoDispatchPlotJob::dispatch($booking->id, 0);
+                AutoDispatchPlotJob::dispatch($booking->id, 0, $request->headers('database'));
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                AutoDispatchNearestDriverJob::dispatch($booking->id, 0);
+                AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), 0);
             }
             return;
         }
@@ -112,7 +112,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
         }
 
         $count = $this->count + 1;
-        SendBiddingFixedFareNotificationJob::dispatch($booking->id, $plotId, $count)
+        SendBiddingFixedFareNotificationJob::dispatch($booking->id, $plotId, $count, $request->header('database'))
             ->delay(now()->addSeconds(90));
     }
 }

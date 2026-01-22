@@ -20,7 +20,7 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public int $bookingId, public array $driverIds = [])
+    public function __construct(public int $bookingId, public string $tenantDatabase, public array $driverIds = [])
     {
         //
     }
@@ -65,10 +65,10 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 return;
             }
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                AutoDispatchPlotJob::dispatch($booking->id, 0);
+                AutoDispatchPlotJob::dispatch($booking->id, 0, $request->headers('database'));
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                AutoDispatchNearestDriverJob::dispatch($booking->id, 0);
+                AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), 0);
             }
             return;
         }
@@ -130,7 +130,7 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
             }
         }
 
-        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->driverIds)
+        AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), $this->driverIds)
             ->delay(now()->addSeconds(30));
     }
 }
