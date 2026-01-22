@@ -27,12 +27,14 @@ io.use(async (socket, next) => {
     const adminId = socket.handshake.query.admin_id;
     const role = socket.handshake.query.role;
     const dispatcherId = socket.handshake.query.dispatcher_id;
-    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || (role === 'dispatcher' && !dispatcherId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
+    const clientId = socket.handshake.query.client_id;
+    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
         return next(new Error("Unauthorized"));
     }
     socket.token = authHeader.split(" ")[1];
     socket.driverId = driverId;
     socket.dispatcherId = dispatcherId;
+    socket.clientId = clientId;
     socket.userId = userId;
     socket.adminId = adminId;
     // socket.database = database;
