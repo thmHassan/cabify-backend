@@ -108,7 +108,7 @@ io.on("connection", (socket) => {
             userSockets.delete(userId.toString());
         }
         if (role === "client" && clientId) {
-            clientSockets.delete(userId.toString());
+            clientSockets.delete(clientId.toString());
         }
     });
 });
@@ -217,7 +217,7 @@ app.post("/send-reminder", (req, res) => {
     console.log("description" , description)
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
-        io.to(socketId).emit("send-reminder", title, description);
+        io.to(socketId).emit("send-reminder", { title, description });
     }
     return res.json({
         success: true,
