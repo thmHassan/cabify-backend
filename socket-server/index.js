@@ -206,6 +206,7 @@ app.post("/change-driver-ride-status", (req, res) => {
 });
 
 app.post("/send-reminder", (req, res) => {
+    console.log("send reminder")
     const { clientId, title, description } = req.body;
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
