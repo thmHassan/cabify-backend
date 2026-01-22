@@ -209,10 +209,12 @@ app.post("/change-driver-ride-status", (req, res) => {
 
 app.post("/send-reminder", (req, res) => {
     console.log("send reminder")
+
+    const { clientId, title, description } = req.body;
+    
     console.log("clientId" , clientId)
     console.log("title" , title)
     console.log("description" , description)
-    const { clientId, title, description } = req.body;
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
         io.to(socketId).emit("send-reminder", title, description);
