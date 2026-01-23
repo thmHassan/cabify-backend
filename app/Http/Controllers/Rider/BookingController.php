@@ -9,6 +9,7 @@ use App\Models\CompanyRating;
 use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
 use App\Models\CompanyBid;
+use App\Models\CompanyPlot;
 use App\Models\CompanyDispatchSystem;
 use App\Jobs\AutoDispatchPlotJob;
 use App\Jobs\SendBiddingFixedFareNotificationJob;
