@@ -311,11 +311,9 @@ class BookingController extends Controller
                     break;
                 }
             }
-            dd($matched);
             return $matched;
         }
         catch(\Exception $e){
-            dd("7878");
             return NULL;
         }
     }
@@ -337,7 +335,7 @@ class BookingController extends Controller
             $pickUpArray =  explode(",", $request->pickup_point);
 
             $plot = $this->getPlot($pickUpArray[0], $pickUpArray[1]);
-
+            dd($plot);
             $distance = $request->distance;
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
