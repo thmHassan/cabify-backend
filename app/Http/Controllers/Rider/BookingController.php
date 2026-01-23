@@ -335,7 +335,6 @@ class BookingController extends Controller
             $pickUpArray =  explode(",", $request->pickup_point);
 
             $plot = $this->getPlot($pickUpArray[0], $pickUpArray[1]);
-            dd($plot);
             $distance = $request->distance;
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
@@ -343,7 +342,7 @@ class BookingController extends Controller
             $newBooking->booking_date = date("Y-m-d");
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
-            $newBooking->pickup_plot_id = (isset($plot) ? $plot->id : NULL);
+            $newBooking->pickup_plot_id = (isset($plot) && $plot != NULL) ? $plot->id : NULL;
             $newBooking->pickup_location = $request->pickup_location;
             $newBooking->destination_point = $request->destination_point;
             $newBooking->destination_location = $request->destination_location;
