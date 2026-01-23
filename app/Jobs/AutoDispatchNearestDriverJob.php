@@ -30,6 +30,13 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
      */
     public function handle(): void
     {
+        config([
+            'database.connections.tenant.database' => "tenant".$this->tenantDatabase,
+        ]);
+
+        DB::purge('tenant');
+        DB::reconnect('tenant');
+        
         $booking = CompanyBooking::where("id",$this->bookingId)->first();
 
         if(isset($booking->driver) && $booking->driver != NULL && $booking->driver != ""){
@@ -65,10 +72,10 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 return;
             }
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                AutoDispatchPlotJob::dispatch($booking->id, 0, $request->headers('database'));
+                AutoDispatchPlotJob::dispatch($booking->id, 0, $this->tenantDatabase);
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), 0);
+                AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, 0);
             }
             return;
         }
@@ -130,7 +137,7 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
             }
         }
 
-        AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), $this->driverIds)
+        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, $this->driverIds)
             ->delay(now()->addSeconds(30));
     }
 }
