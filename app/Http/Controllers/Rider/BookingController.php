@@ -295,6 +295,28 @@ class BookingController extends Controller
         }
     }
 
+    public function getPlot($latitude, $longitude){
+        try{
+            $lat = $latitude;
+            $lng = $longitude;
+
+            $records = CompanyPlot::orderBy("id", "DESC")->get();
+            $matched = null;
+            foreach ($records as $rec) {
+                $polygon = json_decode($rec->features, true);
+                $array = json_decode($polygon['geometry']['coordinates'], true)[0];
+                if ($this->pointInPolygon($lat, $lng, $array)) {
+                    $matched = $rec;
+                    break;
+                }
+            }
+            return $matched;
+        }
+        catch(\Exception $e){
+            return NULL;
+        }
+    }
+
     public function createBooking(Request $request){
         try{
             $request->validate([
@@ -309,6 +331,10 @@ class BookingController extends Controller
                 'distance' => 'required',
             ]);
 
+            $pickUpArray =  explode(",", $request->pickup_point);
+
+            $plot = $this->getPlot($pickUpArray[0], $pickUpArray[1]);
+
             $distance = $request->distance;
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
@@ -316,6 +342,7 @@ class BookingController extends Controller
             $newBooking->booking_date = date("Y-m-d");
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
+            $newBooking->pickup_plot_id = (isset($plot) ? $plot->id : NULL);
             $newBooking->pickup_location = $request->pickup_location;
             $newBooking->destination_point = $request->destination_point;
             $newBooking->destination_location = $request->destination_location;
