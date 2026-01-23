@@ -31,6 +31,13 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
      */
     public function handle(): void
     {
+        config([
+            'database.connections.tenant.database' => "tenant".$this->tenantDatabase,
+        ]);
+
+        DB::purge('tenant');
+        DB::reconnect('tenant');
+
         $booking = CompanyBooking::where("id",$this->bookingId)->first();
 
         if(isset($booking->driver) && $booking->driver != NULL && $booking->driver != ""){
@@ -85,10 +92,10 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                 return;
             }
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                AutoDispatchPlotJob::dispatch($booking->id, 0, $request->headers('database'));
+                AutoDispatchPlotJob::dispatch($booking->id, 0, $this->tenantDatabase);
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), 0);
+                AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, 0);
             }
             return;
         }
@@ -112,7 +119,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
         }
 
         $count = $this->count + 1;
-        SendBiddingFixedFareNotificationJob::dispatch($booking->id, $plotId, $count, $request->header('database'))
+        SendBiddingFixedFareNotificationJob::dispatch($booking->id, $plotId, $count, $this->tenantDatabase)
             ->delay(now()->addSeconds(90));
     }
 }

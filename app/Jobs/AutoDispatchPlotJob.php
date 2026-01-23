@@ -34,7 +34,7 @@ class AutoDispatchPlotJob implements ShouldQueue
     public function handle(): void
     {
         config([
-            'database.connections.tenant.database' => $this->tenantDatabase,
+            'database.connections.tenant.database' => "tenant".$this->tenantDatabase,
         ]);
 
         DB::purge('tenant');
@@ -77,10 +77,10 @@ class AutoDispatchPlotJob implements ShouldQueue
                     return;
                 }
                 if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                    SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $request->header('database'));
+                    SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
                 }
                 elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                    AutoDispatchNearestDriverJob::dispatch($booking->id, $request->header('database'), 0);
+                    AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, 0);
                 }
                 return;
             }
