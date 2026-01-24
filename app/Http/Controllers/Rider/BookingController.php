@@ -296,10 +296,15 @@ class BookingController extends Controller
         }
     }
 
-    public function getPlot($latitude, $longitude){
+    public function getPlot(Request $request){
         try{
-            $lat = $latitude;
-            $lng = $longitude;
+            $request->validate([
+                'latitude' => 'required',
+                'longitude' => 'required',
+            ]);
+
+            $lat = $request->latitude;
+            $lng = $request->longitude;
 
             $records = CompanyPlot::orderBy("id", "DESC")->get();
             $matched = null;
@@ -311,10 +316,17 @@ class BookingController extends Controller
                     break;
                 }
             }
-            return $matched;
+            return response()->json([
+                'success' => 1,
+                'found' => $matched ? 1 : 0,
+                'record' => $matched
+            ]);
         }
         catch(\Exception $e){
-            return NULL;
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
         }
     }
 
@@ -332,9 +344,7 @@ class BookingController extends Controller
                 'distance' => 'required',
             ]);
 
-            $pickUpArray =  explode(",", $request->pickup_point);
 
-            $plot = $this->getPlot($pickUpArray[0], $pickUpArray[1]);
             $distance = $request->distance;
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
@@ -342,7 +352,8 @@ class BookingController extends Controller
             $newBooking->booking_date = date("Y-m-d");
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
-            $newBooking->pickup_plot_id = (isset($plot) && $plot != NULL) ? $plot->id : NULL;
+            $newBooking->pickup_plot_id = $request->pickup_plot_id;
+            $newBooking->destination_plot_id = $request->destination_plot_id;
             $newBooking->pickup_location = $request->pickup_location;
             $newBooking->destination_point = $request->destination_point;
             $newBooking->destination_location = $request->destination_location;
