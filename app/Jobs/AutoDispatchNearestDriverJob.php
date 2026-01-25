@@ -46,7 +46,30 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
 
         $plot = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
         $plotData = json_decode($plot->features, true);
-        $array = $plotData['geometry']['coordinates'][0];
+
+        // safety check
+        if (
+            !isset($plotData['geometry']['coordinates'])
+        ) {
+            return;
+        }
+
+        // coordinates is a JSON STRING → decode again
+        $coordinates = $plotData['geometry']['coordinates'];
+
+        if (is_string($coordinates)) {
+            $coordinates = json_decode($coordinates, true);
+        }
+
+        // expecting [[[lng, lat], [lng, lat], ...]]
+        if (
+            !isset($coordinates[0]) ||
+            !is_array($coordinates[0])
+        ) {
+            return;
+        }
+
+        $array = $coordinates[0];
         $points = collect($array)
                 ->map(fn($p) => "{$p[0]} {$p[1]}")
                 ->implode(',');
