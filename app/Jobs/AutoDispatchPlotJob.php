@@ -80,7 +80,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                     SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
                 }
                 elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                    AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, 0);
+                    AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
                 }
                 return;
             }
