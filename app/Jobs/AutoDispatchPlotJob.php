@@ -49,7 +49,7 @@ class AutoDispatchPlotJob implements ShouldQueue
 
         $plotId = $this->plotId;
         if(!isset($this->plotId) || $this->plotId == NULL){
-            $plotId = $booking->pickup_plot_id;
+            $plotId = (int) $booking->pickup_plot_id;
         }
 
         $priority = $this->priority;
