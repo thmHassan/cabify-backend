@@ -9,6 +9,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use App\Models\CompanyBooking;
 use App\Models\CompanyDriver;
+use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyPlot;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\Http;
