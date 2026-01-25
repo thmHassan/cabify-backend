@@ -11,6 +11,7 @@ use App\Services\FCMService;
 use App\Models\CompanyBooking;
 use App\Models\CompanyDriver;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 class SendBiddingNotificationJob implements ShouldQueue
 {

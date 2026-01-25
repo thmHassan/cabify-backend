@@ -12,6 +12,7 @@ use App\Models\CompanyDriver;
 use App\Models\CompanyPlot;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 class AutoDispatchNearestDriverJob implements ShouldQueue
 {

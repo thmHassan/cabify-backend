@@ -13,6 +13,7 @@ use App\Models\CompanyPlot;
 use App\Services\FCMService;
 use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 class SendBiddingFixedFareNotificationJob implements ShouldQueue
 {
