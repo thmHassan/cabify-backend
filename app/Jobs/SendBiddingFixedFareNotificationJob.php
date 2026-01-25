@@ -46,7 +46,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
 
         $plotId = $this->plotId;
         if(!isset($plotId) || $plotId == NULL){
-            $plotId = $booking->pickup_plot_id;
+            $plotId = (int) $booking->pickup_plot_id;
         }
 
         CompanyDriver::where('driving_status', 'idle')->where("plot_id", $plotId)
