@@ -421,7 +421,7 @@ class BookingController extends Controller
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'));
+                AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);
