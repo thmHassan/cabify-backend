@@ -21,7 +21,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public int $bookingId, public int $plotId, public int $count, public string $tenantDatabase )
+    public function __construct(public int $bookingId, public ?int $plotId, public int $count, public string $tenantDatabase )
     {
 
     }
