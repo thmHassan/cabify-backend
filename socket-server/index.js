@@ -123,6 +123,9 @@ app.use((req, res, next) => {
 });
 
 app.post("/send-new-ride", (req, res) => {
+    return res.json({
+        success: 1,
+    });
     console.log("send-ride");
     const { drivers, booking } = req.body;
     let sentCount = 0;
