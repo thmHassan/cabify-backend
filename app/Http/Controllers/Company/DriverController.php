@@ -401,11 +401,11 @@ class DriverController extends Controller
                 ], 400);
             }
 
-            FCMService::sendToDevice(
-                $driver->device_token,
-                $request->title,
-                $request->body
-            );
+            // FCMService::sendToDevice(
+            //     $driver->device_token,
+            //     $request->title,
+            //     $request->body
+            // );
 
             return response()->json([
                 'success' => 1,
