@@ -20,6 +20,9 @@ const clientSockets = new Map();
 const adminSockets = new Map();
 
 io.use(async (socket, next) => {
+
+    console.log("enter socket 1");
+
     const authHeader = socket.handshake.headers.authorization;
     // const database = socket.handshake.query.database;
     const driverId = socket.handshake.query.driver_id;
@@ -44,7 +47,7 @@ io.use(async (socket, next) => {
 
 
 io.on("connection", (socket) => {
-
+console.log("enter socket 2");
     const role = socket.handshake.query.role;
     const driverId = socket.handshake.query.driver_id;
     const dispatcherId = socket.handshake.query.dispatcher_id;
