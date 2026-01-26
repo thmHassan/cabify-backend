@@ -46,13 +46,11 @@ class AutoDispatchPlotJob implements ShouldQueue
         if(isset($booking->driver) && $booking->driver != NULL && $booking->driver != ""){
             return;
         }
-        \Log::info("booking found");
         $plotId = $this->plotId;
         if(!isset($this->plotId) || $this->plotId == NULL){
             $plotId = (int) $booking->pickup_plot_id;
         }
 
-        \Log::info("plot found");
         $priority = $this->priority;
         $driver = CompanyDriver::where('driving_status', 'idle')
                 ->where('plot_id', $plotId)

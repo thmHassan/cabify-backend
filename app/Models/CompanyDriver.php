@@ -16,7 +16,8 @@ class CompanyDriver extends Authenticatable implements JWTSubject
     use HasFactory, SoftDeletes;
 
     protected $table = "drivers";
-
+    protected $connection = 'tenant';
+    
     public function getJWTIdentifier()
     {
         return $this->getKey();
