@@ -140,7 +140,7 @@ class AutoDispatchPlotJob implements ShouldQueue
         //     ]
         // );
 
-        Http::withHeaders([
+        $response = Http::withHeaders([
             'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
         ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
             'drivers' => [$driver->id],
@@ -154,6 +154,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                 'type' => 'auto_dispatch_plot'
             ]
         ]);
+        \Log::info('Node status: ' . $response->status());
+        \Log::info('Node body:', $response->json());    
         \Log::info("Driver Id");
         \Log::info($driver->id);
 
