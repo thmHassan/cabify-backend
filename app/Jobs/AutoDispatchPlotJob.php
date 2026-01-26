@@ -57,10 +57,13 @@ class AutoDispatchPlotJob implements ShouldQueue
         $driver = CompanyDriver::where('driving_status', 'idle')
                 ->where('plot_id', $plotId)
                 ->whereNotNull("device_token")
-                ->orderBy("priority_plot")
-                // ->skip($priority)
-                // ->take(1)
+                ->orderBy("priority_plot", "ASC")
+                ->skip($priority)
+                ->take(1)
                 ->first();
+
+        \Log::info("plot id");
+        \Log::info($plotId);
 
         if(!isset($driver) || $driver == NULL){
             \Log::info("driver not fount");
