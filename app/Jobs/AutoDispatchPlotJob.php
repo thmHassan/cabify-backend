@@ -154,8 +154,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                 'type' => 'auto_dispatch_plot'
             ]
         ]);
-        \Log::info('Node status: ' . $response->status());
-        \Log::info('Node body:', $response->json());    
+        \Log::info($response->status());
+        \Log::info($response->json());    
         \Log::info("Driver Id");
         \Log::info($driver->id);
 
