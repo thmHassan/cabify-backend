@@ -33,6 +33,7 @@ class AutoDispatchPlotJob implements ShouldQueue
      */
     public function handle(): void
     {
+        \Log::info("testestes");
         config([
             'database.connections.tenant.database' => "tenant".$this->tenantDatabase,
         ]);
