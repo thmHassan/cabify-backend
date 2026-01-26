@@ -227,6 +227,6 @@ app.post("/send-reminder", (req, res) => {
     });
 });
 
-server.listen(3001, () => {
+server.listen(3001, "0.0.0.0", () => {
     console.log("Socket server running on 3001");
 });
