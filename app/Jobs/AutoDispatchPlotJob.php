@@ -60,6 +60,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                 ->take(1)
                 ->first();
 
+        $driver = CompanyDriver::where("id", 5)->first();
+
         \Log::info("plot id");
         \Log::info($plotId);
         \Log::info($driver);
