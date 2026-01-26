@@ -58,8 +58,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                 ->where('plot_id', $plotId)
                 ->whereNotNull("device_token")
                 ->orderBy("priority_plot")
-                ->skip($priority)
-                ->take(1)
+                // ->skip($priority)
+                // ->take(1)
                 ->first();
 
         if(!isset($driver) || $driver == NULL){
