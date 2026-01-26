@@ -33,7 +33,6 @@ class AutoDispatchPlotJob implements ShouldQueue
      */
     public function handle(): void
     {
-        \Log::info("testestes");
         config([
             'database.connections.tenant.database' => "tenant".$this->tenantDatabase,
         ]);
@@ -47,12 +46,13 @@ class AutoDispatchPlotJob implements ShouldQueue
         if(isset($booking->driver) && $booking->driver != NULL && $booking->driver != ""){
             return;
         }
-
+        \Log::info("booking found");
         $plotId = $this->plotId;
         if(!isset($this->plotId) || $this->plotId == NULL){
             $plotId = (int) $booking->pickup_plot_id;
         }
 
+        \Log::info("plot found");
         $priority = $this->priority;
         $driver = CompanyDriver::where('driving_status', 'idle')
                 ->where('plot_id', $plotId)
@@ -63,6 +63,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 ->first();
 
         if(!isset($driver) || $driver == NULL){
+            \Log::info("driver not fount");
             $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
             $backupPlots = array_map('intval', explode(',', $plotData->backup_plots));
             $currentIndex = array_search($plotId, $backupPlots);
@@ -70,7 +71,7 @@ class AutoDispatchPlotJob implements ShouldQueue
             $priority = 0;
 
             if(!isset($plotId) || $plotId == NULL || $plotId == ""){
-
+                \Log::info("new plot not found");
                 $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
                 $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
@@ -149,6 +150,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                 'type' => 'auto_dispatch_plot'
             ]
         ]);
+        \Log::info("Driver Id");
+        \Log::info($driver->id);
 
         AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $this->tenantDatabase, $plotId)
             ->delay(now()->addSeconds(30));
