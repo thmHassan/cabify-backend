@@ -105,14 +105,14 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
             return;
         }
         
-        FCMService::sendToDevice(
-            $driver->device_token,
-            'New Ride Available for Bidding 🚖',
-            'Place your bid now',
-            [
-                'booking_id' => $booking->id,
-            ]
-        );
+        // FCMService::sendToDevice(
+        //     $driver->device_token,
+        //     'New Ride Available for Bidding 🚖',
+        //     'Place your bid now',
+        //     [
+        //         'booking_id' => $booking->id,
+        //     ]
+        // );
 
         Http::withHeaders([
             'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
