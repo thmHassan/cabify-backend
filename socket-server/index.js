@@ -120,6 +120,7 @@ app.use((req, res, next) => {
 });
 
 app.post("/send-new-ride", (req, res) => {
+    console.log("send-ride");
     const { drivers, booking } = req.body;
     let sentCount = 0;
     drivers.forEach(driverId => {
