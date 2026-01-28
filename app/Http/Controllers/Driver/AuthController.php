@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Validator;
 use App\Models\CompanyToken;
+use App\Models\CompanyPlot;
 
 class AuthController extends Controller
 {
