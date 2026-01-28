@@ -14,6 +14,7 @@ use App\Models\CompanyPlot;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use App\Events\BookingShownOnDispatcher;
 
 class AutoDispatchNearestDriverJob implements ShouldQueue
 {
