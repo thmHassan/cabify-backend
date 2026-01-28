@@ -61,6 +61,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 ->take(1)
                 ->first();
 
+        \Log::info($priority);
         \Log::info("plot id");
         \Log::info($this->tenantDatabase);
         \Log::info($plotId);

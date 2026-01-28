@@ -14,6 +14,7 @@ use App\Services\FCMService;
 use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use App\Events\BookingShownOnDispatcher;
 
 class SendBiddingFixedFareNotificationJob implements ShouldQueue
 {
