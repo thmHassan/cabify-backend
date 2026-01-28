@@ -319,7 +319,7 @@ class AuthController extends Controller
 
             $plot_id = $this->getPlot($driver->latitude, $driver->longitude);
             if(isset($plot_id) && $plot_id != NULL){
-                $drivers = CompanyDriver::where("plot_id", $request->plot_id)->orderBy("priority_plot")->where("id", "!=", auth("driver")->user()->id)->get();
+                $drivers = CompanyDriver::where("plot_id", $plot_id)->orderBy("priority_plot")->where("id", "!=", auth("driver")->user()->id)->get();
                 $key = -1;
 
                 foreach($drivers as $key => $driver){
@@ -328,7 +328,7 @@ class AuthController extends Controller
                 }
 
                 $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
-                $driver->plot_id = $request->plot_id;
+                $driver->plot_id = $plot_id;
                 $driver->priority_plot = $key + 2;
                 $driver->save();
             }
