@@ -52,7 +52,7 @@ class SendBiddingNotificationJob implements ShouldQueue
             ->orderBy('distance')
             ->chunk(100, function ($drivers) use ($booking) {
                 foreach ($drivers as $driver) {
-                    if (!$driver->device_token) continue;
+                    // if (!$driver->device_token) continue;
                     // FCMService::sendToDevice(
                     //     $driver->device_token,
                     //     'New Ride Available for Bidding 🚖',

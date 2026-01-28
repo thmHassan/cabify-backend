@@ -86,7 +86,7 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                     )",
                     [$polygonWKT]
                 )
-                ->whereNotNull("device_token")
+                // ->whereNotNull("device_token")
                 ->whereNotIn("id", $this->driverIds)
                 ->first();        
 

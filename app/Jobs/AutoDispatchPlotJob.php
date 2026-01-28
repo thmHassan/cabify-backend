@@ -55,7 +55,7 @@ class AutoDispatchPlotJob implements ShouldQueue
         $priority = $this->priority;
         $driver = CompanyDriver::where('driving_status', 'idle')
                 ->where('plot_id', $plotId)
-                ->where('device_token', '!=', '')
+                // ->where('device_token', '!=', '')
                 ->orderBy("priority_plot", "ASC")
                 ->skip($priority)
                 ->take(1)
@@ -94,7 +94,7 @@ class AutoDispatchPlotJob implements ShouldQueue
 
             $driver = CompanyDriver::where('driving_status', 'idle')
                 ->where('plot_id', $plotId)
-                ->whereNotNull("device_token")
+                // ->whereNotNull("device_token")
                 ->orderBy("priority_plot")
                 ->skip($priority)
                 ->take(1)
