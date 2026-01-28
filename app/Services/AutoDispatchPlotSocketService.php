@@ -23,7 +23,7 @@ class AutoDispatchPlotSocketService
 
         // Pick driver for current plot and priority
         $driver = CompanyDriver::where('driving_status', 'idle')
-            ->whereNotNull("device_token")
+            // ->whereNotNull("device_token")
             ->where('plot_id', $plotId)
             ->orderBy('priority_plot')
             ->skip($priority)
