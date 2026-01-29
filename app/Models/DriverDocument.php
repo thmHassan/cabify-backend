@@ -14,4 +14,8 @@ class DriverDocument extends Model
     public function documentDetail(){
         return $this->hasOne(CompanyDocumentType::class, 'id', 'document_id');
     }
+
+    public function driverDetail(){
+        return $this->hasOne(CompanyDriver::class, 'id', 'driver_id');
+    }
 }

@@ -422,7 +422,7 @@ class DriverController extends Controller
 
     public function pendingDocumentList(Request $request){
         try{
-            $data = DriverDocument::where("status", "pending")->paginate(10);
+            $data = DriverDocument::where("status", "pending")->with('driverDetail')->paginate(10);
 
             return response()->json([
                 'success' => 1,
