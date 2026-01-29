@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Dispatcher;
+use App\Models\CompanyDispatcherLog;
 use Hash;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -181,6 +182,23 @@ class DispatcherController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Dispatcher deleted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function dispatcherLogs(Request $request){
+        try{
+            $dispatcherLogs = CompanyDispatcherLog::where("dispatcher_id", $request->dispatcher_id)->whereDate("datetime", $request->date)->get();
+
+            return response()->json([
+                'success' => 1,
+                'logs' => $dispatcherLogs
             ]);
         }
         catch(\Exception $e){

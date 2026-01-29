@@ -150,6 +150,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/list-dispatcher', [DispatcherController::class, 'listDispatcher']);
         Route::get('/company/dispatcher-cards', [DispatcherController::class, 'dispatcherCards']);
         Route::get('/company/delete-dispatcher', [DispatcherController::class, 'deleteDispatcher']);
+        Route::get('/company/dispatcher-logs', [DispatcherController::class, 'dispatcherLogs']);
         
         Route::post('/company/create-user', [UserController::class, 'createUser']);
         Route::post('/company/edit-user', [UserController::class, 'editUser']);
@@ -262,6 +263,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
 Route::group(['middleware' => ['tenant.db']], function () {
     
     Route::post('/dispatcher/login', [CompanyController::class, 'dispatcherLogin']);
+    Route::post('/dispatcher/logout', [CompanyController::class, 'dispatcherLogout']);
     
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
     Route::post('/driver/register', [DriverAuthController::class, 'register']);
