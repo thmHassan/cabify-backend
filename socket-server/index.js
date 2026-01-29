@@ -92,6 +92,7 @@ console.log("enter socket 2");
                     }
                 }
             );
+            console.log(response)
             // Broadcast to React users
             socket.broadcast.emit("driver-location-update", data);
         } catch (err) {
