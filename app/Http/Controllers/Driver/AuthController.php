@@ -335,7 +335,8 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Driver location updated successfully'
+                'message' => 'Driver location updated successfully',
+                'driver' => $driver
             ]);
         }
         catch(\Exception $e){
