@@ -235,6 +235,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/edit-account', [AccountController::class, 'getEditAccount']);
         Route::get('/company/delete-account', [AccountController::class, 'deleteAccount']);
         Route::get('/company/list-account', [AccountController::class, 'listAccount']);
+        Route::get('/company/account-ride-history', [AccountController::class, 'accountRideHistory']);
+        Route::post('/company/collect-account-amount', [AccountController::class, 'collectAccountAmount']);
         
         Route::get('/company/list-ticket', [TicketController::class, 'listTicket']);
         Route::post('/company/change-ticket-status', [TicketController::class, 'changeTicketStatus']);
