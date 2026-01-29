@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyAccount;
+use App\Models\CompanyBooking;
 
 class AccountController extends Controller
 {
@@ -130,6 +131,47 @@ class AccountController extends Controller
             return response()->json([
                 'success' => 1,
                 'list' => $list
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'success' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function accountRideHistory(Request $request){
+        try{
+            $bookings = CompanyBooking::where("account", $request->account_id)->where("account_payment", "no")->get();
+            
+            $totalAmount = $bookings->sum("booking_amount");
+
+            return response()->json([
+                'success' => 1,
+                'data' => $bookings,
+                'totalAmount' => $totalAmount
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'success' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function collectAccountAmount(Request $request){
+        try{
+            CompanyBooking::where("account", $request->account_id)
+                ->where("account_payment", "no")
+                ->update([
+                    'account_payment' => 'yes'
+                ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Amount collected successfully'
             ]);
         }
         catch(\Exception $e){
