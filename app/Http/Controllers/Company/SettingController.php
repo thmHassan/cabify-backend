@@ -730,14 +730,28 @@ class SettingController extends Controller
 
     public function dashboard(Request $request){
         try{
-            $activeRides = CompanyBooking::where("booking_status", "ongoing")->count();
-            $cancelRides = CompanyBooking::where("booking_status", "cancelled")->count();
-            $waitingRides = CompanyBooking::where("booking_status", "pending")->count();
+            $activeRides = CompanyBooking::where("booking_status", "ongoing")->whereDate("booking_date", date("Y-m-d"))->count();
+            $cancelRides = CompanyBooking::where("booking_status", "cancelled")->whereDate("booking_date", date("Y-m-d"))->count();
+            $waitingRides = CompanyBooking::where("booking_status", "pending")->whereDate("booking_date", date("Y-m-d"))->count();
+            
+            $totalBookings = CompanyBooking::count();
+            $scheduledBookings = CompanyBooking::where("booking_status", "pending")->whereDate("booking_date", ">",date("Y-m-d"))->count();
+            $completedRides = CompanyBooking::where("booking_status", "completed")->count();
+            $totalCancelRides = CompanyBooking::where("booking_status", "cancelled")->count();
+
+            $totalUsers = CompanyUser::count();
+            $totalDrivers = CompanyDriver::count();
 
             $data = [
                 "activeRides" => $activeRides,
                 "cancelRides" => $cancelRides,
                 "waitingRides" => $waitingRides,
+                "totalUsers" => $totalUsers,
+                "totalDrivers" => $totalDrivers,
+                "totalBookings" => $totalBookings,
+                "scheduledBookings" => $scheduledBookings,
+                "completedBookings" => $completedBookings,
+                "totalCancelRides" => $totalCancelRides,
             ];
 
             return response()->json([
