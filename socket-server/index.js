@@ -93,7 +93,7 @@ console.log("enter socket 2");
                 }
             );
             // Broadcast to React users
-            socket.broadcast.emit("driver-location-update", response.driver);
+            socket.broadcast.emit("driver-location-update", response);
         } catch (err) {
             console.error("Laravel Socket error", err);
         }
