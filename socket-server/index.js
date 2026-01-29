@@ -82,7 +82,7 @@ console.log("enter socket 2");
             else{
                 dataArray = data;
             }
-            await axios.post(
+            const response = await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
                 dataArray,
                 {
@@ -92,11 +92,11 @@ console.log("enter socket 2");
                     }
                 }
             );
+            // Broadcast to React users
+            socket.broadcast.emit("driver-location-update", response.driver);
         } catch (err) {
             console.error("Laravel Socket error", err);
         }
-        // Broadcast to React users
-        socket.broadcast.emit("driver-location-update", data);
     });
 
     socket.on("disconnect", () => {
