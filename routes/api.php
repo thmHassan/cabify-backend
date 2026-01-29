@@ -175,6 +175,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
         Route::get('/company/delete-driver-document', [DriverController::class, 'deleteDriverDocument']);
         Route::get('/company/driver-ride-history', [DriverController::class, 'driverRideHistory']);
         Route::post('/company/send-driver-notification', [DriverController::class, 'sendDriverNotification']);
+        Route::get('/company/pending-document-list', [DriverController::class, 'pendingDocumentList']);
         
         Route::post('/company/create-document-type', [DocumentTypeController::class, 'createDocumentType']);
         Route::post('/company/edit-document-type', [DocumentTypeController::class, 'editDocumentType']);

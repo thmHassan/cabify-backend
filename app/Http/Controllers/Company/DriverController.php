@@ -419,4 +419,21 @@ class DriverController extends Controller
             ]);
         }
     }
+
+    public function pendingDocumentList(Request $request){
+        try{
+            $data = DriverDocument::where("status", "pending")->paginate(10);
+
+            return response()->json([
+                'success' => 1,
+                "data" => $data
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
