@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\Subscription;
 use App\Models\TenantUser;
 use App\Models\CompanySetting;
+use App\Models\CompanyDispatcherLog;
 use App\Models\Setting;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
@@ -1080,6 +1081,12 @@ class CompanyController extends Controller
             
             $token = JWTAuth::fromUser($user);
 
+            $record = new CompanyDispatcherLog;
+            $record->dispatcher_id = $user->id;
+            $record->datetime = date("Y-m-d H:i:s");
+            $record->type = "login";
+            $record->save();
+
             return response()->json([
                 'message' => 'Dispatcher login successful',
                 'token' => $token,
@@ -1092,6 +1099,18 @@ class CompanyController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    public function dispatcherLogout()
+    {
+        $record = new CompanyDispatcherLog;
+        $record->dispatcher_id = auth('dispatcher')->user()->id;
+        $record->datetime = date("Y-m-d H:i:s");
+        $record->type = "logout";
+        $record->save();
+
+        auth('dispatcher')->logout();
+        return response()->json(['message' => 'Successfully logged out']);
     }
 
     public function forgotPassword(Request $request)
