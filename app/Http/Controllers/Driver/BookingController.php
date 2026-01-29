@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyBooking;
 use App\Models\CompanyRating;
 use App\Models\CompanyBid;
+use Illuminate\Support\Facades\Http;
 
 class BookingController extends Controller
 {
@@ -208,7 +209,7 @@ class BookingController extends Controller
 
     public function acceptRide(Request $request){
         try{
-            $booking = CompanyBooking::where("id", $request->ride_id)->first();
+            $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
             $booking->booking_status = "ongoing";
             $booking->driver = auth("driver")->user()->id;
             $booking->save();
@@ -225,7 +226,11 @@ class BookingController extends Controller
                     'destination_point' => $booking->destination_point,
                     'offered_amount' => $booking->offered_amount,
                     'distance' => $booking->distance,
-                    'type' => 'auto_dispatch_plot'
+                    'user_id' => $booking->user_id,
+                    'user_name' => $booking->name,
+                    'user_profile' => $booking->userDetail->profile_image,
+                    'pickup_location' => $booking->pickup_location,
+                    'destination_location' => $booking->destination_location,
                 ]
             ]);
 

@@ -40,7 +40,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
         DB::purge('tenant');
         DB::reconnect('tenant');
 
-        $booking = CompanyBooking::where("id",$this->bookingId)->first();
+        $booking = CompanyBooking::where("id",$this->bookingId)->with('userDetail')->first();
 
         if(isset($booking->driver) && $booking->driver != NULL && $booking->driver != ""){
             return;
@@ -75,7 +75,11 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                             'destination_point' => $booking->destination_point,
                             'offered_amount' => $booking->offered_amount,
                             'distance' => $booking->distance,
-                            'type' => 'auto_dispatch_plot'
+                            'user_id' => $booking->user_id,
+                            'user_name' => $booking->name,
+                            'user_profile' => $booking->userDetail->profile_image,
+                            'pickup_location' => $booking->pickup_location,
+                            'destination_location' => $booking->destination_location,
                         ]
                     ]);
                 }

@@ -178,7 +178,7 @@ class UserController extends Controller
 
     public function rideHistory(Request $request){
         try{
-            $data = CompanyBooking::where("user_id", $request->user_id)->with('driverDetail')->orderBy("id", "DESC")->get();
+            $data = CompanyBooking::where("user_id", $request->user_id)->with('driverDetail')->orderBy("id", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
