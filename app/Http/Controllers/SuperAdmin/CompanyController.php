@@ -5,6 +5,7 @@ namespace App\Http\Controllers\SuperAdmin;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Tenant; 
+use App\Models\Setting; 
 use Illuminate\Support\Facades\Artisan;
 use DB;
 use Illuminate\Support\Facades\Hash;
@@ -12,7 +13,6 @@ use App\Models\Subscription;
 use App\Models\TenantUser;
 use App\Models\CompanySetting;
 use App\Models\CompanyDispatcherLog;
-use App\Models\Setting;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
 use Stripe\Price;
@@ -88,6 +88,8 @@ class CompanyController extends Controller
                 $file->move(public_path('pictures'), $filename);
             }
 
+            $setting = Setting::orderBy("id", "DESC")->first();
+
             $tenant = new Tenant();
             $tenant->id = $tenantId;
             $tenant->company_name = $request->company_name;
@@ -121,8 +123,8 @@ class CompanyController extends Controller
             $tenant->enable_smtp = $request->enable_smtp;
             $tenant->dispatcher = $request->dispatcher;
             $tenant->map = $request->map;
-            $tenant->google_api_key = $request->google_api_key;
-            $tenant->barikoi_api_key = $request->barikoi_api_key;
+            $tenant->google_api_key = (isset($request->map) && $request->map == "enable") ? $setting->google_map_key : NULL;
+            $tenant->barikoi_api_key = (isset($request->map) && $request->map == "enable") ? $setting->barikoi_key : NULL;
             $tenant->push_notification = $request->push_notification;
             $tenant->usage_monitoring = $request->usage_monitoring;
             $tenant->revenue_statements = $request->revenue_statements;
