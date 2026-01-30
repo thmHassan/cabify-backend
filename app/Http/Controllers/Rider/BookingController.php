@@ -524,7 +524,11 @@ class BookingController extends Controller
 
     public function currentRide(Request $request){
         try{
-            $currentBooking = CompanyBooking::where("user_id", auth("rider")->user()->id)->where("booking_status", "ongoing")->orderBy("id", "DESC")->first();
+            $currentBooking = CompanyBooking::where("user_id", auth('rider')->user()->id)
+                        ->where(function($q){
+                            $q->where("booking_status", 'arrived')
+                              ->orWhere("booking_status", 'ongoing');
+                        })->with('userDetail')->first();
 
             return response()->json([
                 'success' => 1,
