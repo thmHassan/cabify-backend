@@ -170,9 +170,12 @@ app.post("/bid-accept", (req, res) => {
 app.post("/change-ride-status", (req, res) => {
     console.log("enter User ")
     const { userId, status, booking } = req.body;
+    console.log(userId)
+    console.log(status)
+    console.log(booking)
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
-        io.to(socketId).emit("user-ride-status-event", {status, booking});
+        io.to(socketId).emit("user-ride-status-event", status, booking);
     }
     return res.json({
         success: true,
