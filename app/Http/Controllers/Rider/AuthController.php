@@ -8,6 +8,8 @@ use App\Models\CompanyRider;
 use Carbon\Carbon;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use App\Models\CompanyToken;
+use Illuminate\Support\Facades\Http;
+use App\Models\TenantUser;
 
 class AuthController extends Controller
 {
@@ -19,6 +21,26 @@ class AuthController extends Controller
                 'name' => 'required',
                 'country_code' => 'required',
             ]);
+
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            if($countUser >= $dataCheck->data['passengers_allowed']){
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'clientId' => $request->header('database'),
+                    'title' => "Passenger Limit",
+                    'description' => "You have reached your passenger limits"
+                ]);
+
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This company already reached to passenger limits. Please contact to Admin'
+                ]);
+            }
 
             $existUser = CompanyRider::where('phone_no', $request->phone)->where("email", $request->email)->where("country_code", $request->country_code)->first();
             

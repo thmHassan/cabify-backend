@@ -8,6 +8,8 @@ use App\Models\CompanyUser;
 use App\Models\CompanyBooking;
 use Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Http;
+use App\Models\TenantUser;
 
 class UserController extends Controller
 {
@@ -21,6 +23,28 @@ class UserController extends Controller
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
             ]);
+
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            $countUser = CompanyUser::count();
+            
+            if($countUser >= $dataCheck->data['passengers_allowed']){
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'clientId' => $request->header('database'),
+                    'title' => "Passenger Limit",
+                    'description' => "You have reached your passenger limits"
+                ]);
+
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'You have already reached to passenger limits'
+                ]);
+            }
             
             $newUser = new CompanyUser;
             $newUser->name = $request->name; 
