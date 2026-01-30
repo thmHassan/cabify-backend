@@ -10,6 +10,8 @@ use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Validator;
 use App\Models\CompanyToken;
 use App\Models\CompanyPlot;
+use App\Models\TenantUser;
+use Illuminate\Support\Facades\Http;
 
 class AuthController extends Controller
 {
@@ -21,6 +23,28 @@ class AuthController extends Controller
                 'name' => 'required',
                 'country_code' => 'required',
             ]);
+
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            $countDriver = CompanyDriver::count();
+
+            if($countDriver >= $dataCheck->data['drivers_allowed']){
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'clientId' => $request->header('database'),
+                    'title' => "Driver Limit",
+                    'description' => "You have reached your driver limits"
+                ]);
+
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This company already reached to driver limits. Please contact to Admin.'
+                ]);
+            }
 
             $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->where("cpuntry_code", $request->country_code)->first();
             

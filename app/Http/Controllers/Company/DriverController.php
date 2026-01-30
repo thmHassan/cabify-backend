@@ -9,6 +9,8 @@ use Illuminate\Validation\Rule;
 use App\Models\DriverDocument;
 use App\Models\CompanyBooking;
 use App\Services\FCMService;
+use App\Models\TenantUser;
+use Illuminate\Support\Facades\Http;
 
 class DriverController extends Controller
 {
@@ -25,6 +27,28 @@ class DriverController extends Controller
                 'joined_date' => 'required',
                 'sub_company' => 'required'
             ]);
+
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            $countDriver = CompanyDriver::count();
+            
+            if($countDriver >= $dataCheck->data['drivers_allowed']){
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'clientId' => $request->header('database'),
+                    'title' => "Driver Limit",
+                    'description' => "You have reached your driver limits"
+                ]);
+
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'You have already reached to driver limits'
+                ]);
+            }
 
             $driver = new CompanyDriver;
             $driver->name = $request->name;
