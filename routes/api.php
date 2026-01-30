@@ -309,6 +309,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/current-ride', [DriverBookingController::class, 'currentRide']);
         Route::get('/driver/arrived-status', [DriverBookingController::class, 'arrivedStatus']);
         Route::get('/driver/waiting-time', [DriverBookingController::class, 'waitingTime']);
+        Route::get('/driver/change-booking-payment-status', [DriverBookingController::class, 'changeBookingPaymentStatus']);
 
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
@@ -354,6 +355,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/store-token', [RiderAuthController::class, 'storeToken']);
 
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
+        Route::get('/rider/change-booking-payment-status', [RiderBookingController::class, 'changeBookingPaymentStatus']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);

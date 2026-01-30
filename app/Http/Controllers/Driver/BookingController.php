@@ -357,4 +357,23 @@ class BookingController extends Controller
             ]);
         }
     }
+
+    public function changeBookingPaymentStatus(Request $request){
+        try{
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            $booking->payment_status = "completed";
+            $booking->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Payment status marked as completed'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }

@@ -380,6 +380,7 @@ class BookingController extends Controller
                 'offered_amount' => 'required',
                 'recommended_amount' => 'required',
                 'distance' => 'required',
+                'payment_method' => 'required',
             ]);
 
 
@@ -409,6 +410,7 @@ class BookingController extends Controller
             $newBooking->offered_amount = $request->offered_amount;
             $newBooking->recommended_amount = $request->recommended_amount;
             $newBooking->note = $request->note;
+            $newBooking->payment_method = $request->payment_method;
             $newBooking->save();
 
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
@@ -604,6 +606,25 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Ride cancelled succesfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function changeBookingPaymentStatus(Request $request){
+        try{
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            $booking->payment_status = "completed";
+            $booking->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Payment status marked as completed'
             ]);
         }
         catch(\Exception $e){
