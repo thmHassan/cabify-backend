@@ -17,6 +17,7 @@ use App\Models\CompanyDriver;
 use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyBooking;
+use Carbon\Carbon;
 
 class SettingController extends Controller
 {
@@ -757,6 +758,48 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'data' => $data
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function systemAlert(Request $request){
+        try{
+            $data = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();   
+
+            $expiryDate = Carbon::parse($data->data['expiry_date']); 
+            $daysLeft = now()->diffInDays($expiryDate, false);
+
+            $cancelledRide = CompanyBooking::where("booking_status", "cancelled")->whereDate("booking_date", date("Y-m-d"))->count();
+
+            $alerts = [];
+            $i = 0;
+            if($daysLeft <= 10){
+                $alerts[$i]['title'] = "Subscription Expiry Alert";
+                $alerts[$i]['description'] = "Your Subscription is going to expire in $daysLeft days.";
+                $i++;
+            }
+
+            $alerts[$i]['title'] = "Cancelled Rides";
+            $alerts[$i]['description'] = "Today $cancelledRide rides are canceled";
+            $i++;
+
+            $scheduledRide = CompanyBooking::whereDate("booking_date", date("Y-m-d"))->count();
+            $alerts[$i]['title'] = "Scheduled Rides";
+            $alerts[$i]['description'] = "Today $scheduledRide rides are scheduled";
+            $i++;
+
+            return response()->json([
+                'success' => 1,
+                'alerts' => $alerts
             ]);
         }
         catch(\Exception $e){
