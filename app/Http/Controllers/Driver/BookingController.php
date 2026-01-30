@@ -217,7 +217,7 @@ class BookingController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
-                'user' => $booking->user_id,
+                'userId' => $booking->user_id,
                 'status' => "accept_ride",
                 'booking' => [
                     'id' => $booking->id,
