@@ -172,7 +172,7 @@ app.post("/change-ride-status", (req, res) => {
     const { userId, status, booking } = req.body;
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
-        io.to(socketId).emit("user-ride-status-event", status, booking);
+        io.to(socketId).emit("user-ride-status-event", {status, booking});
     }
     return res.json({
         success: true,
