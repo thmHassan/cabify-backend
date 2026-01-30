@@ -411,6 +411,7 @@ class BookingController extends Controller
             $newBooking->recommended_amount = $request->recommended_amount;
             $newBooking->note = $request->note;
             $newBooking->payment_method = $request->payment_method;
+            $newBooking->otp = rand(1000,9999);
             $newBooking->save();
 
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
@@ -530,7 +531,7 @@ class BookingController extends Controller
                         ->where(function($q){
                             $q->where("booking_status", 'arrived')
                               ->orWhere("booking_status", 'ongoing');
-                        })->with('userDetail')->first();
+                        })->with(['driverDetail', 'vehicleDetail'])->first();
 
             return response()->json([
                 'success' => 1,

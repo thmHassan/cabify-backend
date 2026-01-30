@@ -256,7 +256,7 @@ class BookingController extends Controller
                         ->where(function($q){
                             $q->where("booking_status", 'arrived')
                               ->orWhere("booking_status", 'ongoing');
-                        })->with('userDetail')->first();
+                        })->with(['userDetail', 'vehicleDetail'])->first();
 
             return response()->json([
                 'success' => 1,
@@ -368,6 +368,30 @@ class BookingController extends Controller
                 'success' => 1,
                 'message' => 'Payment status marked as completed'
             ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function verifyBookingOtp(Request $request){
+        try{
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            if($booking->otp == $request->otp){
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'OTP verified successfully'
+                ]);
+            }
+            else{
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'OTP unverified'
+                ], 500);
+            }
         }
         catch(\Exception $e){
             return response()->json([
