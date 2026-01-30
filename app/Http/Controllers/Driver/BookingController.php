@@ -188,7 +188,7 @@ class BookingController extends Controller
                         'destination_point' => $booking->destination_point,
                         'offered_amount' => $booking->offered_amount,
                         'distance' => $booking->distance,
-                        'type' => 'auto_dispatch_plot'
+                        'booking_status' => $booking->booking_status
                     ]
                 ]);
 
@@ -237,6 +237,62 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Ride accepted successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function currentRide(Request $request){
+        try{
+            $booking = CompanyBooking::where("driver", auth('driver')->user()->id)
+                        ->where(function($q){
+                            $q->where("booking_status", 'arrived')
+                              ->orWhere("booking_status", 'ongoing');
+                        })->with('userDetail')->first();
+
+            return response()->json([
+                'success' => 1,
+                'currentRide' => $booking
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function arrivedStatus(Request $request){
+        try{
+            $booking = CompanyBooking::where("id", $request->ride_id)->first();
+            $booking->booking_status = "arrived";
+            $booking->save();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                'user' => $booking->user_id,
+                'status' => "cancel_confirm_ride",
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'destination_point' => $booking->destination_point,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'booking_status' => $booking->booking_status
+                ]
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'User received notification that you arrived'
             ]);
         }
         catch(\Exception $e){
