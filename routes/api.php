@@ -61,6 +61,7 @@ Broadcast::routes([
 
 Route::get('/test-notification', [CompanyController::class, 'sendNotification']);
 Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
+Route::post('/super-admin/subscription-update-webhook', [CompanyController::class, 'subscriptionUpdateWebhook']);
 Route::post('login', [AuthController::class, 'login']);
 Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);

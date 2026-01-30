@@ -1207,4 +1207,121 @@ class CompanyController extends Controller
         ));
         return response()->json(['status' => 'sent']);
     }
+
+    public function subscriptionUpdateWebhook(Request $request){
+        try{
+            
+            $setting = Setting::orderBy("id", "DESC")->first();
+            Stripe::setApiKey($setting->stripe_secret);
+            
+            $payload = $request->getContent();
+            $sig_header = $request->header('Stripe-Signature');
+            $setting = Setting::orderBy("id", "DESC")->first();
+            $endpoint_secret = "whsec_dzD6zqZgGUu7BP7FDqxvq0kD8sGgRqBY";
+
+            \Log::info("enter to webhook");
+
+            try {
+                $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
+            } catch (\Exception $e) {
+                return response($e->getMessage(), 400);
+            }
+
+            switch ($event->type) {
+                case 'invoice.payment_succeeded':
+
+                    $session = $event->data->object;
+                    $userId = $session->metadata->user_id ?? null;
+                    $subscriptionId = $session->metadata->subscription_id ?? null;
+                    $stripeSubscriptionId = $session->subscription;
+                    $stripeCustomerId = $session->customer;
+                    
+                    $tenant = Tenant::where("id", $userId)->first();
+                    $subscription = Subscription::where("id", $subscriptionId)->first();
+
+                    $tenant->payment_status = "success";
+                    $tenant->payment_method = "stripe";
+                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
+                    $tenant->stripe_customer_id  = $stripeCustomerId;
+                    $tenant->payment_amount = $subscription->amount;
+                    $tenant->save();
+
+                    if($subscription->billing_cycle == "monthly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 month'));
+                    }
+                    elseif($subscription->billing_cycle == "quarterly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+3 months'));
+                    }
+                    elseif($subscription->billing_cycle == "yearly"){
+                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
+                    }
+                    $tenant->subscription_start_date = date('Y-m-d');
+                    $tenant->save();
+
+                    $userSubscription = new UserSubscription;
+                    $userSubscription->subscription_id = $subscription->id;
+                    $userSubscription->user_id = $tenant->id;
+                    $userSubscription->plan_name = $subscription->plan_name;
+                    $userSubscription->billing_cycle = $subscription->billing_cycle;
+                    $userSubscription->amount = $subscription->amount;
+                    $userSubscription->features = $subscription->features;
+                    $userSubscription->status = 'active';
+                    if($subscription->billing_cycle == "monthly"){
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
+                    }
+                    elseif($subscription->billing_cycle == "quarterly"){
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
+                    }
+                    elseif($subscription->billing_cycle == "yearly"){
+                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
+                    }
+                    $userSubscription->save();
+
+                    $payment = new Transaction;
+                    $payment->user_id = $userId;
+                    $payment->amount = $subscription->amount;
+                    $payment->status = 'paid';
+                    $payment->method = 'card';
+                    $payment->save();
+
+                    $paymentMethodId = null;
+
+                    // Case 1: payment_intent exists (one-time or first subscription)
+                    if (!empty($session->payment_intent)) {
+                        $paymentIntent = \Stripe\PaymentIntent::retrieve($session->payment_intent);
+                        $paymentMethodId = $paymentIntent->payment_method;
+                    }
+
+                    // Case 2: subscription Checkout (payment method via invoice)
+                    elseif (!empty($session->subscription)) {
+                        $subscriptionObj = \Stripe\Subscription::retrieve($session->subscription);
+                        $paymentMethodId = $subscriptionObj->default_payment_method;
+                    }
+
+                    // Attach & set default only if exists
+                    if ($paymentMethodId) {
+                        $paymentMethod = \Stripe\PaymentMethod::retrieve($paymentMethodId);
+
+                        try {
+                            $paymentMethod->attach([
+                                'customer' => $session->customer,
+                            ]);
+                        } catch (\Stripe\Exception\InvalidRequestException $e) {
+                            // Already attached → ignore
+                        }
+
+                        \Stripe\Customer::update($session->customer, [
+                            'invoice_settings' => [
+                                'default_payment_method' => $paymentMethodId,
+                            ],
+                        ]);
+                    }
+                    break;
+            }
+        }
+        catch(\Exception $e){
+            \Log::info("Issue in subscription updation time");
+            \Log::info($e->getMessage());
+        }
+    }
 }
