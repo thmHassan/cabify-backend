@@ -180,10 +180,10 @@ app.post("/change-ride-status", (req, res) => {
 });
 
 app.post("/user-message-notification", (req, res) => {
-    const { userId, booking } = req.body;
+    const { userId, chat } = req.body;
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
-        io.to(socketId).emit("user-message-event", booking);
+        io.to(socketId).emit("user-message-event", chat);
     }
     return res.json({
         success: true,
@@ -191,10 +191,10 @@ app.post("/user-message-notification", (req, res) => {
 });
 
 app.post("/driver-message-notification", (req, res) => {
-    const { driverId, booking } = req.body;
+    const { driverId, chat } = req.body;
     const socketId = driverSockets.get(driverId.toString());
     if (socketId) {
-        io.to(socketId).emit("driver-message-event", booking);
+        io.to(socketId).emit("driver-message-event", chat);
     }
     return res.json({
         success: true,
@@ -202,8 +202,8 @@ app.post("/driver-message-notification", (req, res) => {
 });
 
 app.post("/change-driver-ride-status", (req, res) => {
-    const { userId, status, booking } = req.body;
-    const socketId = userSockets.get(userId.toString());
+    const { driverId, status, booking } = req.body;
+    const socketId = driverSockets.get(driverId.toString());
     if (socketId) {
         io.to(socketId).emit("driver-ride-status-event", status, booking);
     }

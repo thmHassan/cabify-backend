@@ -496,7 +496,7 @@ class BookingController extends Controller
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/bid-accept', [
-                    'drivers' => $bid->driver_id,
+                    'driverId' => $bid->driver_id,
                     'booking' => [
                         'id' => $booking->id,
                         'booking_id' => $booking->booking_id,
@@ -587,7 +587,7 @@ class BookingController extends Controller
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-driver-ride-status', [
-                    'drivers' => $booking->driver,
+                    'driverId' => $booking->driver,
                     'status' => "cancel_confirm_ride",
                     'booking' => [
                         'id' => $booking->id,
