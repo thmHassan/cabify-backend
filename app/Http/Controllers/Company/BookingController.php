@@ -106,6 +106,7 @@ class BookingController extends Controller
                 'vehicle' => 'required',
                 'passenger' => 'required',
                 'booking_amount' => 'required',
+                'payment_method' => 'required',
                 'driver' => 'required_without:booking_system',
                 'booking_system' => 'required_without:driver',
             ]);
@@ -174,6 +175,7 @@ class BookingController extends Controller
                         $newBooking->dispatcher_id = $request->dispatcher_id;
                         $newBooking->start_at = $request->start_at;
                         $newBooking->end_at = $request->end_at;
+                        $newBooking->payment_method = $request->payment_method;
                         $newBooking->save();    
                     }
                 }
@@ -243,6 +245,7 @@ class BookingController extends Controller
                 $newBooking->week = $request->week;
                 $newBooking->start_at = $request->start_at;
                 $newBooking->end_at = $request->end_at;
+                $newBooking->payment_method = $request->payment_method;
                 $newBooking->save();
 
                 $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
