@@ -247,13 +247,13 @@ class BookingController extends Controller
 
                 $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 
-                if($dispatchSystems->first()->dispatch_system == "auto_dispatch_plot_base"){
+                if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                     AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->headers('database'));
                 }
-                elseif($dispatchSystems->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                     SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
                 }
-                elseif($dispatchSystems->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
                     AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
                 }
             }
