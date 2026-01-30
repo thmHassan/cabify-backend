@@ -7,7 +7,10 @@ use Illuminate\Http\Request;
 use App\Models\CompanyBooking;
 use App\Models\CompanyRating;
 use App\Models\CompanyBid;
+use App\Models\CompanySetting;
+use App\Models\CompanyWaitingTimeLog;
 use Illuminate\Support\Facades\Http;
+use Carbon\Carbon;
 
 class BookingController extends Controller
 {
@@ -294,6 +297,58 @@ class BookingController extends Controller
                 'success' => 1,
                 'message' => 'User received notification that you arrived'
             ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function waitingTime(Request $request){
+        try{
+            $request->validate([
+                'booking_id' => 'required'
+            ]);
+
+            $waitingRecord = CompanyWaitingTimeLog::where("booking_id", $request->booking_id)->where("status", 'start')->orderBy("id", "DESC")->first();
+
+            if(!isset($waitingRecord) || $waitingRecord == NULL){
+                $waitingRecord = new CompanyWaitingTimeLog;
+                $waitingRecord->booking_id = $request->booking_id;
+                $waitingRecord->start_time = date("Y-m-d H:i:s");
+                $waitingRecord->status = "start";
+                $waitingRecord->save();
+
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Waiting time has started'
+                ]);
+            }
+            else{
+                $setting = CompanySetting::orderBy("id", "DESC")->first();
+                $waitingRecord->end_time = date("Y-m-d H:i:s");
+                $waitingRecord->status = "stop";
+                $waitingRecord->save();
+
+                $start = Carbon::parse($waitingRecord->start_time);
+                $end   = Carbon::parse($waitingRecord->end_time);
+                $waitingMinutes = $start->diffInMinutes($end);
+
+                $amount = $waitingMinutes * $setting->waiting_time_charge;
+                $booking = CompanyBooking::where("id", $request->booking_id)->first();
+                $booking->booking_amount += $amount;
+                $booking->save();
+                $waitingRecord->charge = $amount;
+                $waitingRecord->save();
+
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Waiting time has stopped',
+                    'updated_amount' => $booking->booking_amount
+                ]);
+            }
         }
         catch(\Exception $e){
             return response()->json([
