@@ -750,7 +750,7 @@ class SettingController extends Controller
                 "totalDrivers" => $totalDrivers,
                 "totalBookings" => $totalBookings,
                 "scheduledBookings" => $scheduledBookings,
-                "completedBookings" => $completedBookings,
+                "completedRides" => $completedRides,
                 "totalCancelRides" => $totalCancelRides,
             ];
 
