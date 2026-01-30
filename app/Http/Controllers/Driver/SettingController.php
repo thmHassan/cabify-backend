@@ -243,16 +243,8 @@ class SettingController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/user-message-notification', [
-                'user' => $request->user_id,
-                'booking' => [
-                    'id' => $booking->id,
-                    'booking_id' => $booking->booking_id,
-                    'pickup_point' => $booking->pickup_point,
-                    'destination_point' => $booking->destination_point,
-                    'offered_amount' => $booking->offered_amount,
-                    'distance' => $booking->distance,
-                    'type' => 'auto_dispatch_plot'
-                ]
+                'userId' => $request->user_id,
+                'chat' => $chat
             ]);
         }
         catch(Exception $e){
