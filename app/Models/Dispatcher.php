@@ -17,7 +17,7 @@ class Dispatcher extends Authenticatable implements JWTSubject
 
     protected $connection = 'tenant';
     protected $table = "dispatcher";
-    protected $append = ["active_rides", 'completed_rides'];
+    protected $appends = ["active_rides", 'completed_rides'];
     
     public function getJWTIdentifier()
     {
@@ -33,7 +33,7 @@ class Dispatcher extends Authenticatable implements JWTSubject
         $count = CompanyBooking::where("dispatcher_id", $this->id)
                 ->where(function($q){
                     $q->where("booking_status", "ongoing")
-                      ->where("booking_status", "arrived");
+                      ->orWhere("booking_status", "arrived");
                 })
                 ->whereDate("booking_date", date("Y-m-d"))->count();
         return $count;
