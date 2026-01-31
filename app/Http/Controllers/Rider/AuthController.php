@@ -121,11 +121,11 @@ class AuthController extends Controller
             ]);   
 
             $user = CompanyRider::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
-            print_r($user);
+
             if(!isset($user) || $user == NULL){
                 return response()->json([
                     'error' => 1,
-                    'message' => 'User does not existssssss'
+                    'message' => 'User does not exist'
                 ]);
             }
 
