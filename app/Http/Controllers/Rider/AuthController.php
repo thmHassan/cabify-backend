@@ -125,7 +125,7 @@ class AuthController extends Controller
             if(!isset($user) || $user == NULL){
                 return response()->json([
                     'error' => 1,
-                    'message' => 'User does not exist'
+                    'message' => 'User does not existssssss'
                 ]);
             }
 
