@@ -411,6 +411,7 @@ class BookingController extends Controller
         try{
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
             if($booking->otp == $request->otp){
+                $booking->booking_status = "started";
                 return response()->json([
                     'success' => 1,
                     'message' => 'OTP verified successfully'
