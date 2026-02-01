@@ -70,7 +70,7 @@ class AutoDispatchPlotJob implements ShouldQueue
         if(!isset($driver) || $driver == NULL){
             \Log::info("driver not fount");
             $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
-            $backupPlots = array_map('intval', explode(',', $plotData->backup_plots));
+            $backupPlots = $plotData->backup_plots;
             $currentIndex = array_search($plotId, $backupPlots);
             $plotId = $backupPlots[$currentIndex + 1] ?? null;
             $priority = 0;
