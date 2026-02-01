@@ -208,7 +208,7 @@ app.post("/change-driver-ride-status", (req, res) => {
     const { driverId, status, booking } = req.body;
     const socketId = driverSockets.get(driverId.toString());
     if (socketId) {
-        io.to(socketId).emit("driver-ride-status-event", status, booking);
+        io.to(socketId).emit("driver-ride-status-event", {status, booking});
     }
     return res.json({
         success: true,
