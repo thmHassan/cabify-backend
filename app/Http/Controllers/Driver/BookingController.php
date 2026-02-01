@@ -281,6 +281,7 @@ class BookingController extends Controller
             $booking = CompanyBooking::where("driver", auth('driver')->user()->id)
                         ->where(function($q){
                             $q->where("booking_status", 'arrived')
+                              ->orWhere("booking_status", 'arrived')
                               ->orWhere("booking_status", 'ongoing');
                         })->with(['userDetail', 'vehicleDetail'])->first();
 
