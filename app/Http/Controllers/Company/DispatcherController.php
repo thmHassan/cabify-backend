@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use App\Notifications\CompanyNotification; 
 use App\Models\CompanyNotification as CompanyNotificationTable;
+use App\Models\TenantUser;
+use Illuminate\Support\Facades\Http;
 
 class DispatcherController extends Controller
 {
@@ -24,6 +26,28 @@ class DispatcherController extends Controller
                 'phone_no' => 'required|max:255',
                 'status' => 'required|max:255',
             ]);
+
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            $countDispatcher = Dispatcher::count();
+
+            if($countDispatcher >= $dataCheck->data['dispatchers_allowed']){
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'clientId' => $request->header('database'),
+                    'title' => "Dispatcher Limit",
+                    'description' => "You have reached your dispatcher limits"
+                ]);
+
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'You have already reached to dispatcher limits'
+                ]);
+            }
 
             $dispatcher = new Dispatcher;
             $dispatcher->name = $request->name;
