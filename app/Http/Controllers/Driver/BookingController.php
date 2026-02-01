@@ -214,6 +214,7 @@ class BookingController extends Controller
         try{
             $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
             $booking->booking_status = "ongoing";
+            $booking->booking_amount = $booking->offered_amount;
             $booking->driver = auth("driver")->user()->id;
             $booking->save();
 
@@ -235,6 +236,13 @@ class BookingController extends Controller
                     'pickup_location' => $booking->pickup_location,
                     'destination_location' => $booking->destination_location,
                 ]
+            ]);
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
+                'driverId' => auth("driver")->user()->id,
+                'driverName' => auth("driver")->user()->name,
             ]);
 
             return response()->json([
@@ -392,6 +400,63 @@ class BookingController extends Controller
                     'message' => 'OTP unverified'
                 ], 500);
             }
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function completeCurrentRide(Request $request){
+        try{
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            $booking->booking_status = "completed";
+            $booking->save();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                'user' => $booking->user_id,
+                'status' => "complete_current_ride",
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'destination_point' => $booking->destination_point,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'booking_status' => $booking->booking_status
+                ]
+            ]);
+
+            Mail::send('emails.ride-complete', [
+                'name' => $booking->name ?? 'User',
+                'pickup_location' => $booking->pickup_location,
+                'dropoff_location' => $booking->destination_location,
+                'ride_date' => $booking->booking_date,
+                'total_fare' => $booking->booking_amount,
+            ], function ($message) use ($booking) {
+                $message->to($booking->email)
+                        ->subject('Ride Completed');
+            });
+
+            Mail::send('emails.ride-complete', [
+                'name' => auth("driver")->user()->name ?? 'User',
+                'pickup_location' => $booking->pickup_location,
+                'dropoff_location' => $booking->destination_location,
+                'ride_date' => $booking->booking_date,
+                'total_fare' => $booking->booking_amount,
+            ], function ($message) {
+                $message->to(auth("driver")->user()->email)
+                        ->subject('Ride Completed');
+            });
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride completed successfully'
+            ]);
         }
         catch(\Exception $e){
             return response()->json([
