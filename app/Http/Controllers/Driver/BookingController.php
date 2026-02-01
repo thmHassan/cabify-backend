@@ -311,7 +311,7 @@ class BookingController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
-                'user' => $booking->user_id,
+                'userId' => $booking->user_id,
                 'status' => "arrived_driver",
                 'booking' => [
                     'id' => $booking->id,
@@ -418,6 +418,22 @@ class BookingController extends Controller
                     'success' => 1,
                     'message' => 'OTP verified successfully'
                 ]);
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                    'userId' => $booking->user_id,
+                    'status' => "ride_started",
+                    'booking' => [
+                        'id' => $booking->id,
+                        'booking_id' => $booking->booking_id,
+                        'pickup_point' => $booking->pickup_point,
+                        'destination_point' => $booking->destination_point,
+                        'offered_amount' => $booking->offered_amount,
+                        'distance' => $booking->distance,
+                        'booking_status' => $booking->booking_status
+                    ]
+                ]);
             }
             else{
                 return response()->json([
@@ -443,7 +459,7 @@ class BookingController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
-                'user' => $booking->user_id,
+                'userId' => $booking->user_id,
                 'status' => "complete_current_ride",
                 'booking' => [
                     'id' => $booking->id,
