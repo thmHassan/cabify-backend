@@ -1231,7 +1231,7 @@ class CompanyController extends Controller
             ->delete();
 
             return response()->json([
-                'error' => 0,
+                'success' => 1,
                 'message' => 'Password reset successfully'
             ]);
         }
