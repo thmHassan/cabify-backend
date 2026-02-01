@@ -10,6 +10,7 @@ use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
 use App\Models\CompanyBid;
 use App\Models\CompanyPlot;
+use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
 use App\Jobs\AutoDispatchPlotJob;
 use App\Jobs\SendBiddingFixedFareNotificationJob;
@@ -509,6 +510,15 @@ class BookingController extends Controller
                         'distance' => $booking->distance,
                         'type' => 'auto_dispatch_plot'
                     ]
+                ]);
+
+                $driver = CompanyDriver::where("id", $bid->driver_id)->first();
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
+                    'driverId' => $bid->driver_id,
+                    'driverName' => $driver->name,
                 ]);
             }
 

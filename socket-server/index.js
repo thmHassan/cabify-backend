@@ -215,6 +215,17 @@ app.post("/change-driver-ride-status", (req, res) => {
     });
 });
 
+app.post("/on-job-driver", (req, res) => {
+    const { driverId, driverName } = req.body;
+    const socketId = driverSockets.get(driverId.toString());
+    if (socketId) {
+        io.to(socketId).emit("on-job-driver-event", driverName);
+    }
+    return res.json({
+        success: true,
+    });
+});
+
 app.post("/send-reminder", (req, res) => {
     console.log("send reminder")
 

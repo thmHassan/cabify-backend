@@ -12,6 +12,7 @@ use App\Models\CompanyToken;
 use App\Models\CompanyPlot;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 
 class AuthController extends Controller
 {
@@ -68,6 +69,14 @@ class AuthController extends Controller
             $user->otp_expires_at = $expiresAt;
             $user->save();
 
+            Mail::send('emails.send-otp', [
+                'name' => $user->name ?? 'User',
+                'otp' => $otp
+            ], function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Registration OTP');
+            });
+
             return response()->json([
                 'success' => 1,
                 'message' => "User sign up successfully and OTP sent",
@@ -102,6 +111,14 @@ class AuthController extends Controller
             $user->otp = $otp;
             $user->otp_expires_at = $expiresAt;
             $user->save();
+
+            Mail::send('emails.send-otp', [
+                'name' => $user->name ?? 'User',
+                'otp' => $otp
+            ], function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Login OTP');
+            });
 
             return response()->json([
                 'success' => 1,

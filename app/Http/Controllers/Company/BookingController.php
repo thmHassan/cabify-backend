@@ -248,16 +248,18 @@ class BookingController extends Controller
                 $newBooking->payment_method = $request->payment_method;
                 $newBooking->save();
 
-                $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
-                
-                if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                    AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                }
-                elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                    SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
-                }
-                elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                    AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
+                if(!isset($request->driver) || $request->driver == NULL){
+                    $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
+                    
+                    if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
+                        AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
+                    }
+                    elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                        SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
+                    }
+                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                        AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
+                    }
                 }
             }
 
