@@ -87,7 +87,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                 });
 
             $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
-            $backupPlots = array_map('intval', explode(',', $plotData->backup_plots));
+            $backupPlots = $plotData->backup_plots;
             $currentIndex = array_search($plotId, $backupPlots);
             $plotId = $backupPlots[$currentIndex + 1] ?? null;
 
