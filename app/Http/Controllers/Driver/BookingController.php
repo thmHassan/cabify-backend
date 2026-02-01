@@ -414,10 +414,6 @@ class BookingController extends Controller
             if($booking->otp == $request->otp){
                 $booking->booking_status = "started";
                 $booking->save();
-                return response()->json([
-                    'success' => 1,
-                    'message' => 'OTP verified successfully'
-                ]);
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -433,6 +429,11 @@ class BookingController extends Controller
                         'distance' => $booking->distance,
                         'booking_status' => $booking->booking_status
                     ]
+                ]);
+
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'OTP verified successfully'
                 ]);
             }
             else{
