@@ -195,7 +195,7 @@ class BookingController extends Controller
                     $date = $request->booking_date;
                     $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)
                         ->where(function($q){
-                            $q->where("booking_status", 'arrived')
+                            $q->where("booking_status", 'started')
                               ->orWhere("booking_status", 'started')
                               ->orWhere("booking_status", 'ongoing');
                         })
