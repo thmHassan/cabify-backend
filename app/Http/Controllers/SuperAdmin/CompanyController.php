@@ -1165,7 +1165,7 @@ class CompanyController extends Controller
                 'password' => 'required|confirmed',
             ]);
 
-            $status = Password::broker('tenant_users')->reset(
+            $status = Password::broker('tenants')->reset(
                 [
                     'email' => $request->email,
                     'password' => $request->password,

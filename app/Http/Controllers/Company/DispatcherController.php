@@ -40,13 +40,6 @@ class DispatcherController extends Controller
             $notification->message = 'You have added new dispatcher '.$dispatcher->name;
             $notification->save();
 
-            // auth('tenant')->user()->notify(
-            //     new CompanyNotification([
-            //         'title' => 'Dispatcher Added',
-            //         'message' => 'You have added new dispatcher ' . $dispatcher->name,
-            //     ])
-            // );
-
             return response()->json([
                 'success' => 1,
                 'message' => 'Dispatcher saved successfully'
