@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyTicket;
+use App\Models\CompanyDriver;
+use App\Models\CompanyUser;
+use Illuminate\Support\Facades\Mail;
 
 class TicketController extends Controller
 {
@@ -47,6 +50,22 @@ class TicketController extends Controller
             $ticket = CompanyTicket::where("id", $request->ticket_id)->first();
             $ticket->status = $request->status;
             $ticket->save();
+
+            if($ticket->user_type == "driver"){
+                $user = CompanyDriver::where("id", $ticket->user_id)->first();
+            }
+            else{
+                $user = CompanyUser::where("id", $ticket->user_id)->first();
+            }
+
+            Mail::send('emails.ticket-close', [
+                'name' => $user->name ?? 'User',
+                'ticket_id' => $ticket->ticket_id,
+                'subject' => $ticket->subject,
+            ], function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Wallet Topup');
+            });
 
             return response()->json([
                 'success' => 1,

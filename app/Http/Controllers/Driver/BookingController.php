@@ -11,6 +11,7 @@ use App\Models\CompanySetting;
 use App\Models\CompanyWaitingTimeLog;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Mail;
 
 class BookingController extends Controller
 {
@@ -208,7 +209,7 @@ class BookingController extends Controller
                 'driverName' => auth("driver")->user()->name,
                 'plot' => auth("driver")->user()->plot_id,
             ]);
-            
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Ride cancelled succesfully'
