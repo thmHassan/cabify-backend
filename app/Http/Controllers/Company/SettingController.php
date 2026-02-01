@@ -731,7 +731,12 @@ class SettingController extends Controller
 
     public function dashboard(Request $request){
         try{
-            $activeRides = CompanyBooking::where("booking_status", "ongoing")->whereDate("booking_date", date("Y-m-d"))->count();
+            $activeRides = CompanyBooking::where(function($q){
+                            $q->where("booking_status", 'arrived')
+                              ->orWhere("booking_status", 'started')
+                              ->orWhere("booking_status", 'ongoing');
+                        })
+                        ->whereDate("booking_date", date("Y-m-d"))->count();
             $cancelRides = CompanyBooking::where("booking_status", "cancelled")->whereDate("booking_date", date("Y-m-d"))->count();
             $waitingRides = CompanyBooking::where("booking_status", "pending")->whereDate("booking_date", date("Y-m-d"))->count();
             
