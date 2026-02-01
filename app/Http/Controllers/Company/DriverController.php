@@ -11,6 +11,7 @@ use App\Models\CompanyBooking;
 use App\Services\FCMService;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 
 class DriverController extends Controller
 {
@@ -238,6 +239,14 @@ class DriverController extends Controller
             $driver->wallet_balance += $request->amount;
             $driver->save();
 
+            Mail::send('emails.wallet-topup', [
+                'name' => $driver->name ?? 'User',
+                'amount' => $request->amount,
+            ], function ($message) use ($driver) {
+                $message->to($driver->email)
+                        ->subject('Wallet Topup');
+            });
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Balance added successfully'
@@ -322,6 +331,16 @@ class DriverController extends Controller
                     $document->status = 'verified';
                     $document->save();
                 }
+                $user = CompanyDriver::where("id", $request->driver_id)->first();
+
+                Mail::send('emails.document-status', [
+                    'name' => $user->name ?? 'User',
+                    'status' => "approved",
+                ], function ($message) use ($user) {
+                    $message->to($user->email)
+                            ->subject('Document Status Updated');
+                });
+            
             }
             else if(isset($request->reject_all) && $request->reject_all == 1){
                 $documentList = DriverDocument::where("driver_id", $request->driver_id)->where("status", "pending")->get();
@@ -329,16 +348,44 @@ class DriverController extends Controller
                     $document->status = 'failed';
                     $document->save();
                 }
+
+                $user = CompanyDriver::where("id", $request->driver_id)->first();
+
+                Mail::send('emails.document-status', [
+                    'name' => $user->name ?? 'User',
+                    'status' => "rejected",
+                ], function ($message) use ($user) {
+                    $message->to($user->email)
+                            ->subject('Document Status Updated');
+                });
             }
             else if(isset($request->driver_document_id) && $request->driver_document_id != NULL){
                 $document = DriverDocument::where("id", $request->driver_document_id)->first();
                 $document->status = $request->status;
                 $document->save();
+
+                $user = CompanyDriver::where("id", $request->driver_id)->first();
+
+                Mail::send('emails.document-status', [
+                    'name' => $user->name ?? 'User',
+                    'status' => $request->status,
+                ], function ($message) use ($user) {
+                    $message->to($user->email)
+                            ->subject('Document Status Updated');
+                });
             }
             else if(isset($request->document_approved_office) && $request->document_approved_office == 1){
                 $driver = CompanyDriver::where("id", $request->driver_id)->first();
                 $driver->document_approved_office = 1;
                 $driver->save();
+
+                Mail::send('emails.document-status', [
+                    'name' => $user->name ?? 'User',
+                    'status' => "approved",
+                ], function ($message) use ($user) {
+                    $message->to($user->email)
+                            ->subject('Document Status Updated');
+                });
             }
             return response()->json([
                 'success' => 1,

@@ -216,10 +216,21 @@ app.post("/change-driver-ride-status", (req, res) => {
 });
 
 app.post("/on-job-driver", (req, res) => {
-    const { driverId, driverName } = req.body;
-    const socketId = driverSockets.get(driverId.toString());
+    const { clientId, driverName } = req.body;
+    const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
         io.to(socketId).emit("on-job-driver-event", driverName);
+    }
+    return res.json({
+        success: true,
+    });
+});
+
+app.post("/waiting-driver", (req, res) => {
+    const { clientId, driverName, plot } = req.body;
+    const socketId = clientSockets.get(clientId.toString());
+    if (socketId) {
+        io.to(socketId).emit("waiting-driver-event", {driverName, plot});
     }
     return res.json({
         success: true,

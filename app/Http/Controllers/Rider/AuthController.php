@@ -10,6 +10,7 @@ use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use App\Models\CompanyToken;
 use Illuminate\Support\Facades\Http;
 use App\Models\TenantUser;
+use Illuminate\Support\Facades\Mail;
 
 class AuthController extends Controller
 {

@@ -11,6 +11,7 @@ use App\Models\CompanySetting;
 use App\Models\CompanyWaitingTimeLog;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Mail;
 
 class BookingController extends Controller
 {
@@ -197,6 +198,18 @@ class BookingController extends Controller
 
             }
 
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $driver->driving_status = "idle";
+            $driver->save();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+                'clientId' => $request->header('database'),
+                'driverName' => auth("driver")->user()->name,
+                'plot' => auth("driver")->user()->plot_id,
+            ]);
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Ride cancelled succesfully'
@@ -217,6 +230,10 @@ class BookingController extends Controller
             $booking->booking_amount = $booking->offered_amount;
             $booking->driver = auth("driver")->user()->id;
             $booking->save();
+
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $driver->driving_status = "busy";
+            $driver->save();
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -241,7 +258,7 @@ class BookingController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
-                'driverId' => auth("driver")->user()->id,
+                'clientId' => $request->header('database'),
                 'driverName' => auth("driver")->user()->name,
             ]);
 
@@ -285,11 +302,15 @@ class BookingController extends Controller
             $booking->booking_status = "arrived";
             $booking->save();
 
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $driver->driving_status = "busy";
+            $driver->save();
+
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                 'user' => $booking->user_id,
-                'status' => "cancel_confirm_ride",
+                'status' => "arrived_driver",
                 'booking' => [
                     'id' => $booking->id,
                     'booking_id' => $booking->booking_id,
@@ -430,6 +451,18 @@ class BookingController extends Controller
                     'booking_status' => $booking->booking_status
                 ]
             ]);
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+                'clientId' => $request->header('database'),
+                'driverName' => auth("driver")->user()->name,
+                'plot' => auth("driver")->user()->plot_id,
+            ]);
+
+            $driver = CompanyDriver::where("id", auth('driver')->user()->id)->first();
+            $driver->driving_status = "idle";
+            $driver->save();
 
             Mail::send('emails.ride-complete', [
                 'name' => $booking->name ?? 'User',

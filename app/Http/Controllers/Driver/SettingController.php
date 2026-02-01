@@ -12,6 +12,7 @@ use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
 use App\Models\PackageSetting;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 
 class SettingController extends Controller
 {
@@ -26,6 +27,14 @@ class SettingController extends Controller
             $user = CompanyDriver::where("id", $userId)->first();
             $user->wallet_balance += $request->amount;
             $user->save();
+
+            Mail::send('emails.wallet-topup', [
+                'name' => $user->name ?? 'User',
+                'amount' => $request->amount,
+            ], function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Wallet Topup');
+            });
             
             $wallet = new WalletTransaction;
             $wallet->user_type = "driver";
