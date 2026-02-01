@@ -1145,7 +1145,7 @@ class CompanyController extends Controller
             });
 
             return response()->json([
-                'error' => 0,
+                'success' => 1,
                 'message' => 'Reset password link sent successfully'
             ]);
 
@@ -1165,31 +1165,75 @@ class CompanyController extends Controller
                 'password' => 'required|confirmed',
             ]);
 
-            $status = Password::broker('tenants')->reset(
-                [
-                    'email' => $request->email,
-                    'password' => $request->password,
-                    'password_confirmation' => $request->password_confirmation,
-                    'token' => $request->token,
-                ],
-                function (TenantUser $user, string $password) {
+            // $status = Password::broker('tenants')->reset(
+            //     [
+            //         'email' => $request->email,
+            //         'password' => $request->password,
+            //         'password_confirmation' => $request->password_confirmation,
+            //         'token' => $request->token,
+            //     ],
+            //     function (TenantUser $user, string $password) {
+            //         $data = $user->data;
+            //         $data['password'] = Hash::make($password);
 
-                    $user->password = Hash::make($password);
-                    $user->save();
-                }
-            );
+            //         $user->data = $data;
+            //         $user->save();
+            //     }
+            // );
 
-            if ($status === Password::PASSWORD_RESET) {
+            // if ($status === Password::PASSWORD_RESET) {
+            //     return response()->json([
+            //         'error' => 0,
+            //         'message' => 'Password reset successfully'
+            //     ]);
+            // }
+
+            // return response()->json([
+            //     'error' => 1,
+            //     'message' => __($status)
+            // ], 400);
+
+            $tokenRow = DB::table('password_reset_tokens')
+            ->where('email', $request->email)
+            ->first();
+
+            if (!$tokenRow) {
                 return response()->json([
-                    'error' => 0,
-                    'message' => 'Password reset successfully'
-                ]);
+                    'error' => 1,
+                    'message' => 'Invalid or expired reset token'
+                ], 400);
             }
 
+            if (!Hash::check($request->token, $tokenRow->token)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid reset token'
+                ], 400);
+            }
+
+            $tenant = TenantUser::where('data->email', $request->email)->first();
+
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            $data = $tenant->data;
+            $data['password'] = Hash::make($request->password);
+
+            $tenant->data = $data;
+            $tenant->save();
+
+            DB::table('password_reset_tokens')
+            ->where('email', $request->email)
+            ->delete();
+
             return response()->json([
-                'error' => 1,
-                'message' => __($status)
-            ], 400);
+                'error' => 0,
+                'message' => 'Password reset successfully'
+            ]);
         }
         catch (\Exception $e) {
             return response()->json([
