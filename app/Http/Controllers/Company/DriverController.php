@@ -154,7 +154,7 @@ class DriverController extends Controller
                     $query->where("status", $request->status)->orWhereNULL("status");
                 });
             }
-            else{
+            elseif(isset($request->status)){
                 $drivers->where("status", $request->status);
             }
             if(isset($request->search) && $request->search != NULL){
