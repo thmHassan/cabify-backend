@@ -100,6 +100,23 @@ class AutoDispatchPlotJob implements ShouldQueue
                     ->skip($priority)
                     ->take(1)
                     ->first();
+                
+                if(!isset($driver) || $driver == NULL || $driver == ""){
+                    \Log::info("new plot not found & Driver Found");
+                    $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
+                    $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+
+                    if(!isset($dispatch_system) || count($dispatch_system) <= 0){
+                        return;
+                    }
+                    if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                        SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
+                    }
+                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
+                    }
+                    return;
+                }
             }
 
             if($priority < 4){
