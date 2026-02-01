@@ -513,11 +513,13 @@ class BookingController extends Controller
                 ]);
 
                 $driver = CompanyDriver::where("id", $bid->driver_id)->first();
+                $driver->driving_status = "busy";
+                $driver->save();
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
-                    'driverId' => $bid->driver_id,
+                    'clientId' => $request->header('database'),
                     'driverName' => $driver->name,
                 ]);
             }
@@ -597,6 +599,10 @@ class BookingController extends Controller
                 $booking->cancelled_by = 'user';
                 $booking->save();
 
+                $driver = CompanyDriver::where("id", $booking->driver)->first();
+                $driver->driving_status = "idle";
+                $driver->save();
+
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-driver-ride-status', [
@@ -613,6 +619,16 @@ class BookingController extends Controller
                     ]
                 ]);
             }
+
+            $driver = CompanyBooking::where("id", $booking->driver)->first();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+                'clientId' => $request->header('database'),
+                'driverName' => $driver->name,
+                'plot' => $driver->plot_id,
+            ]);
 
             return response()->json([
                 'success' => 1,
