@@ -193,7 +193,13 @@ class BookingController extends Controller
                 }
                 else if($request->driver != NULL){
                     $date = $request->booking_date;
-                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->where('status', 'ongoing')->first();
+                    $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)
+                        ->where(function($q){
+                            $q->where("booking_status", 'arrived')
+                              ->orWhere("booking_status", 'started')
+                              ->orWhere("booking_status", 'ongoing');
+                        })
+                        ->first();
                     if ($existingBooking && $alertMessage == NULL) {
                         $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
                     }

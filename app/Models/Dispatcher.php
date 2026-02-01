@@ -32,8 +32,9 @@ class Dispatcher extends Authenticatable implements JWTSubject
     public function getActiveRidesAttribute(){
         $count = CompanyBooking::where("dispatcher_id", $this->id)
                 ->where(function($q){
-                    $q->where("booking_status", "ongoing")
-                      ->orWhere("booking_status", "arrived");
+                    $q->where("booking_status", 'arrived')
+                        ->orWhere("booking_status", 'started')
+                        ->orWhere("booking_status", 'ongoing');
                 })
                 ->whereDate("booking_date", date("Y-m-d"))->count();
         return $count;
