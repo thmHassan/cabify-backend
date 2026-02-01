@@ -299,7 +299,7 @@ class BookingController extends Controller
 
     public function arrivedStatus(Request $request){
         try{
-            $booking = CompanyBooking::where("id", $request->ride_id)->first();
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
             $booking->booking_status = "arrived";
             $booking->save();
 
