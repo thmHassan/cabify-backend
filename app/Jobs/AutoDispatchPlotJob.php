@@ -169,7 +169,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 ->delay(now()->addSeconds(30));
         }
         catch(\Exception $e){
-            \Log::infor("Auto Dispatch Plot Driver AUto Dispatch");
+            \Log::info("Auto Dispatch Plot Driver AUto Dispatch");
             \Log::info($e->getMessage());
         }
     }

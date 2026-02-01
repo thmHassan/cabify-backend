@@ -172,7 +172,7 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 ->delay(now()->addSeconds(30));
         }
         catch(\Exception $e){
-            \Log::infor("Nearest Driver AUto Dispatch");
+            \Log::info("Nearest Driver AUto Dispatch");
             \Log::info($e->getMessage());
         }
     }

@@ -84,7 +84,7 @@ class SendBiddingNotificationJob implements ShouldQueue
                 });
         }
         catch(\Exception $e){
-            \Log::infor("Bidding Notification");
+            \Log::info("Bidding Notification");
             \Log::info($e->getMessage());
         }
     }

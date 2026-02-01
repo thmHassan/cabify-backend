@@ -130,7 +130,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                 ->delay(now()->addSeconds(90));
         }
         catch(\Exception $e){
-            \Log::infor("Bidding Fioxed Fare");
+            \Log::info("Bidding Fioxed Fare");
             \Log::info($e->getMessage());
         }
     }
