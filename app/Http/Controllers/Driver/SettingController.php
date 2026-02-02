@@ -282,7 +282,8 @@ class SettingController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Message sent successfully'
+                'message' => 'Message sent successfully',
+                'chat' => $chat
             ]);
         }
         catch(Exception $e){
