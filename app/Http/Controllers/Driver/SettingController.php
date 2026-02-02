@@ -279,6 +279,11 @@ class SettingController extends Controller
                     );
                 }
             }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Message sent successfully'
+            ]);
         }
         catch(Exception $e){
             return response()->json([
