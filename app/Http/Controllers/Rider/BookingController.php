@@ -20,7 +20,7 @@ use App\Services\AutoDispatchPlotSocketService;
 
 class BookingController extends Controller
 {
-    public function completedRide(){
+    public function completedRide(Request $request){
         try{
             $query = CompanyBooking::where("booking_status", "completed")->where("user_id", auth('rider')->user()->id);
             if(isset($request->date) && $request->date != NULL){
@@ -41,7 +41,7 @@ class BookingController extends Controller
         }
     }
 
-    public function cancelledRide(){
+    public function cancelledRide(Request $request){
         try{
             $query = CompanyBooking::where("booking_status", "cancelled")->where("user_id", auth('rider')->user()->id);
             if(isset($request->date) && $request->date != NULL){
