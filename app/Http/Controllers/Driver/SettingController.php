@@ -10,6 +10,7 @@ use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
 use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
+use App\Models\CompanyBooking;
 use App\Models\CompanyNotification;
 use App\Models\PackageSetting;
 use Illuminate\Support\Facades\Http;
