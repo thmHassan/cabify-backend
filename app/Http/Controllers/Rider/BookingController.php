@@ -11,6 +11,7 @@ use App\Models\CompanySetting;
 use App\Models\CompanyBid;
 use App\Models\CompanyPlot;
 use App\Models\CompanyToken;
+use App\Models\CompanyNotification;
 use App\Services\FCMService;
 use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
@@ -500,6 +501,13 @@ class BookingController extends Controller
                     ]
                 ]);
 
+                $notification = new CompanyNotification;
+                $notification->user_type = "driver";
+                $notification->user_id = $bid->driver_id;
+                $notification->title = 'Accept Bid';
+                $notification->message = 'Your bid for ride has been accepted';
+                $notification->save();
+
                 $tokens = CompanyToken::where("user_id", $bid->driver_id)->where("user_type", "driver")->get();
 
                 if(isset($tokens) && $tokens != NULL){
@@ -622,6 +630,13 @@ class BookingController extends Controller
                         'type' => 'auto_dispatch_plot'
                     ]
                 ]);
+
+                $notification = new CompanyNotification;
+                $notification->user_type = "driver";
+                $notification->user_id = $booking->driver;
+                $notification->title = 'Cancel Ride';
+                $notification->message = 'Your ride has been cancelled by Rider';
+                $notification->save();
 
                 $tokens = CompanyToken::where("user_id", $booking->driver)->where("user_type", "driver")->get();
 

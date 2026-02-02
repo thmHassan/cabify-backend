@@ -10,6 +10,7 @@ use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
 use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
+use App\Models\CompanyNotification;
 use App\Models\PackageSetting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -257,6 +258,13 @@ class SettingController extends Controller
                 'userId' => $request->user_id,
                 'chat' => $chat
             ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "rider";
+            $notification->user_id = $request->user_id;
+            $notification->title = 'Message Alert';
+            $notification->message = 'New message arrived from your driver';
+            $notification->save();
 
             $tokens = CompanyToken::where("user_id", $request->user_id)->where("user_type", "rider")->get();
 

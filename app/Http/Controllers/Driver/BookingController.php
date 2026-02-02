@@ -15,6 +15,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Services\FCMService;
+use App\Models\CompanyNotification;
 
 class BookingController extends Controller
 {
@@ -199,6 +200,13 @@ class BookingController extends Controller
                     ]
                 ]);
 
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $booking->user_id;
+                $notification->title = 'Cancel Ride';
+                $notification->message = 'Your ride has been cancelled by driver';
+                $notification->save();
+
                 $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
 
                 if(isset($tokens) && $tokens != NULL){
@@ -271,6 +279,13 @@ class BookingController extends Controller
                     'destination_location' => $booking->destination_location,
                 ]
             ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "rider";
+            $notification->user_id = $booking->user_id;
+            $notification->title = 'Accept Ride';
+            $notification->message = 'Your ride has been accepted by driver';
+            $notification->save();
 
             $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
 
@@ -354,6 +369,13 @@ class BookingController extends Controller
                     'booking_status' => $booking->booking_status
                 ]
             ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "rider";
+            $notification->user_id = $booking->user_id;
+            $notification->title = 'Arrived Ride';
+            $notification->message = 'Driver is arrived at your pickup location';
+            $notification->save();
 
             $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
 
@@ -479,6 +501,13 @@ class BookingController extends Controller
                     ]
                 ]);
 
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $booking->user_id;
+                $notification->title = 'Ride Start';
+                $notification->message = 'Your ride has been started to your destination';
+                $notification->save();
+
                 $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
 
                 if(isset($tokens) && $tokens != NULL){
@@ -535,6 +564,13 @@ class BookingController extends Controller
                     'booking_status' => $booking->booking_status
                 ]
             ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "rider";
+            $notification->user_id = $booking->user_id;
+            $notification->title = 'Ride Completed';
+            $notification->message = 'Your ride has been completed. Please rate application';
+            $notification->save();
 
             $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
 

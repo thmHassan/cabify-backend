@@ -12,6 +12,7 @@ use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyPlot;
 use App\Models\CompanyToken;
+use App\Models\CompanyNotification;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
@@ -126,6 +127,13 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                     'destination_location' => $booking->destination_location,
                 ]
             ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "driver";
+            $notification->user_id = $driver->id;
+            $notification->title = 'New Ride Available for Bidding';
+            $notification->message = 'Place your bid now';
+            $notification->save();
 
             $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
 
