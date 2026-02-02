@@ -293,9 +293,11 @@ class BookingController extends Controller
 
             if(isset(auth('tenant')->user()->id)){
                 $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
+                dd("1", $data);
             }
             else{
                 $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+                    dd("1", $data, $request->header('database'));
             }
 
             $map_api = json_decode($data->data)->maps_api;
