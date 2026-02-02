@@ -22,7 +22,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $completedRides = $query->orderBy("booking_date", "DESC")->paginate(10);
+            $completedRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -43,7 +43,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $cancelledRides = $query->orderBy("booking_date", "DESC")->paginate(10);
+            $cancelledRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -64,7 +64,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $pendingRides = $query->orderBy("booking_date", "DESC")->paginate(10);
+            $pendingRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -370,6 +370,8 @@ class BookingController extends Controller
                 $amount = $waitingMinutes * $setting->waiting_time_charge;
                 $booking = CompanyBooking::where("id", $request->booking_id)->first();
                 $booking->booking_amount += $amount;
+                $booking->waiting_time += $waitingMinutes;
+                $booking->waiting_amount += $amount;
                 $booking->save();
                 $waitingRecord->charge = $amount;
                 $waitingRecord->save();
