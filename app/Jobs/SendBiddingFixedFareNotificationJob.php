@@ -10,6 +10,7 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\CompanyDriver;
 use App\Models\CompanyBooking;
 use App\Models\CompanyPlot;
+use App\Models\CompanyToken;
 use App\Services\FCMService;
 use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
@@ -55,15 +56,6 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
             CompanyDriver::where('driving_status', 'idle')->where("plot_id", $plotId)
                 ->chunk(100, function ($drivers) use ($booking) {
                     foreach ($drivers as $driver) {
-                        // if (!$driver->device_token) continue;
-                        // FCMService::sendToDevice(
-                        //     $driver->device_token,
-                        //     'New Ride Available for Bidding 🚖',
-                        //     'Place your bid now',
-                        //     [
-                        //         'booking_id' => $booking->id,
-                        //     ]
-                        // ); 
 
                         Http::withHeaders([
                             'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -83,6 +75,22 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                                 'destination_location' => $booking->destination_location,
                             ]
                         ]);
+
+                        
+                        $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
+
+                        if(isset($tokens) && $tokens != NULL){
+                            foreach($tokens as $key => $token){
+                                FCMService::sendToDevice(
+                                    $token->device_token,
+                                    'New Ride Available for Bidding 🚖',
+                                    'Place your bid now',
+                                    [
+                                        'booking_id' => $booking->id,
+                                    ]
+                                );
+                            }
+                        }
                     }
                 });
 

@@ -13,6 +13,8 @@ use App\Models\WalletTransaction;
 use App\Models\CompanyVehicleType;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use App\Models\CompanyToken;
+use App\Services\FCMService;
 
 class SettingController extends Controller
 {
@@ -243,6 +245,19 @@ class SettingController extends Controller
                 'driverId' => $request->driver_id,
                 'chat' => $chat
             ]);
+
+            $tokens = CompanyToken::where("user_id", $request->driver_id)->where("user_type", "driver")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'Message Alert',
+                        'New message arrived from passenger',
+                        []
+                    );
+                }
+            }
         }
         catch(Exception $e){
             return response()->json([

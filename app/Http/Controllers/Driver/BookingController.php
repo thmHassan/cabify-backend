@@ -13,6 +13,8 @@ use App\Models\CompanyWaitingTimeLog;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Mail;
+use App\Models\CompanyToken;
+use App\Services\FCMService;
 
 class BookingController extends Controller
 {
@@ -197,6 +199,20 @@ class BookingController extends Controller
                     ]
                 ]);
 
+                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->device_token,
+                            'Cancel Ride',
+                            'Your ride has been cancelled by driver',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
+                }
             }
 
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
@@ -255,6 +271,21 @@ class BookingController extends Controller
                     'destination_location' => $booking->destination_location,
                 ]
             ]);
+
+            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'Accept Ride',
+                        'Your ride has been accepted by driver',
+                        [
+                            'booking_id' => $booking->id,
+                        ]
+                    );
+                }
+            }
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -323,6 +354,21 @@ class BookingController extends Controller
                     'booking_status' => $booking->booking_status
                 ]
             ]);
+
+            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'Arrived Driver',
+                        'Driver is arrived at your pickup location',
+                        [
+                            'booking_id' => $booking->id,
+                        ]
+                    );
+                }
+            }
 
             return response()->json([
                 'success' => 1,
@@ -433,6 +479,21 @@ class BookingController extends Controller
                     ]
                 ]);
 
+                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->device_token,
+                            'Ride Start',
+                            'Your ride has been started to your destination',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
+                }
+
                 return response()->json([
                     'success' => 1,
                     'message' => 'OTP verified successfully'
@@ -474,6 +535,21 @@ class BookingController extends Controller
                     'booking_status' => $booking->booking_status
                 ]
             ]);
+
+            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'Ride completed',
+                        'Your ride has been completed. Please rate application',
+                        [
+                            'booking_id' => $booking->id,
+                        ]
+                    );
+                }
+            }
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),

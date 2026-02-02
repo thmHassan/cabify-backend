@@ -13,6 +13,8 @@ use App\Models\CompanyChat;
 use App\Models\PackageSetting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use App\Models\CompanyToken;
+use App\Services\FCMService;
 
 class SettingController extends Controller
 {
@@ -255,6 +257,19 @@ class SettingController extends Controller
                 'userId' => $request->user_id,
                 'chat' => $chat
             ]);
+
+            $tokens = CompanyToken::where("user_id", $request->user_id)->where("user_type", "rider")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'Message Alert',
+                        'New message arrived from your driver',
+                        []
+                    );
+                }
+            }
         }
         catch(Exception $e){
             return response()->json([
