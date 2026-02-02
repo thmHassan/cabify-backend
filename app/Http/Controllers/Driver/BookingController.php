@@ -9,6 +9,7 @@ use App\Models\CompanyRating;
 use App\Models\CompanyBid;
 use App\Models\CompanySetting;
 use App\Models\CompanyDriver;
+use App\Models\VehicleType;
 use App\Models\CompanyWaitingTimeLog;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
