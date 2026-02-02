@@ -10,6 +10,7 @@ use Illuminate\Queue\SerializesModels;
 use App\Services\FCMService;
 use App\Models\CompanyBooking;
 use App\Models\CompanyToken;
+use App\Models\CompanyNotification;
 use App\Models\CompanyDriver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
@@ -72,6 +73,13 @@ class SendBiddingNotificationJob implements ShouldQueue
                                 'destination_location' => $booking->destination_location,
                             ]
                         ]);
+
+                        $notification = new CompanyNotification;
+                        $notification->user_type = "driver";
+                        $notification->user_id = $driver->id;
+                        $notification->title = 'New Ride Available for Bidding';
+                        $notification->message = 'Place your bid now';
+                        $notification->save();
                                     
                         $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
 

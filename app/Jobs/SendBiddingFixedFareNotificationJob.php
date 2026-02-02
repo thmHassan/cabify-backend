@@ -9,6 +9,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use App\Models\CompanyDriver;
 use App\Models\CompanyBooking;
+use App\Models\CompanyNotification;
 use App\Models\CompanyPlot;
 use App\Models\CompanyToken;
 use App\Services\FCMService;
@@ -76,6 +77,12 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                             ]
                         ]);
 
+                        $notification = new CompanyNotification;
+                        $notification->user_type = "driver";
+                        $notification->user_id = $driver->id;
+                        $notification->title = 'New Ride Available for Bidding';
+                        $notification->message = 'Place your bid now';
+                        $notification->save();
                         
                         $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
 

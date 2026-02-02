@@ -11,6 +11,7 @@ use App\Models\CompanyBooking;
 use App\Models\CompanyDriver;
 use App\Models\CompanyPlot;
 use App\Models\CompanyToken;
+use App\Models\CompanyNotification;
 use App\Jobs\AutoDispatchRetryJob;
 use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanyDispatchSystem;
@@ -169,6 +170,13 @@ class AutoDispatchPlotJob implements ShouldQueue
                     'destination_location' => $booking->destination_location,
                 ]
             ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "driver";
+            $notification->user_id = $driver->id;
+            $notification->title = 'New Ride Available for Bidding';
+            $notification->message = 'Place your bid now';
+            $notification->save();
 
             $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
 
