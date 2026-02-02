@@ -26,7 +26,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $completedRides = $query->orderBy("booking_date", "DESC")->paginate(10);
+            $completedRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -47,7 +47,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $cancelledRide = $query->orderBy("booking_date", "DESC")->paginate(10);
+            $cancelledRide = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -660,6 +660,27 @@ class BookingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function upcomingRide(Request $request){
+        try{
+            $query = CompanyBooking::where("booking_status", "pending")->where("driver", auth('rider')->user()->id);
+            if(isset($request->date) && $request->date != NULL){
+                $query->whereDate("booking_date", $request->date);
+            }
+            $pendingRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+
+            return response()->json([
+                'success' => 1,
+                'list' => $pendingRides
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
         }
     }
 }

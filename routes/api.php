@@ -360,7 +360,6 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/change-booking-payment-status', [RiderBookingController::class, 'changeBookingPaymentStatus']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
-        Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
         Route::get('/rider/current-ride', [RiderBookingController::class, 'currentRide']);
         Route::post('/rider/rate-ride', [RiderBookingController::class, 'rateRide']);
         Route::post('/rider/get-plot', [RiderBookingController::class, 'getPlot']);
