@@ -293,11 +293,9 @@ class BookingController extends Controller
 
             if(isset(auth('tenant')->user()->id)){
                 $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
-                dd("1", $data);
             }
             else{
                 $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
-                    dd("1", $data, $request->header('database'));
             }
 
             $map_api = json_decode($data->data)->maps_api;
@@ -432,7 +430,17 @@ class BookingController extends Controller
             }
 
             $vehicle = CompanyVehicleType::where("id", $request->vehicle_id)->first();
-            if(auth('tenant')->user()->data['units'] == "miles"){
+
+            if(isset(auth('tenant')->user()->id)){
+                $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
+            }
+            else{
+                $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+            }
+
+            $data = json_decode($data->data);
+
+            if($data->units == "miles"){
                 $cdistance = ($distance / 1609.344);
             }
             else{
