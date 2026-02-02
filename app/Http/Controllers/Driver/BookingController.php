@@ -157,12 +157,21 @@ class BookingController extends Controller
             $newBid->save();
 
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            $vehicle = VehicleType::where("id", auth("driver")->user()->vehicle_type)->first();
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/place-bid', [
                 'userId' => $booking->user_id,
-                'bid' => $newBid
+                'bid' => [
+                    'amount' => $newBid->amount,
+                    'driver_name' => auth("driver")->user()->name,
+                    'profile_image' => auth("driver")->user()->profile_image,
+                    'vehicle_name' => auth("driver")->user()->vehicle_name,
+                    'vehicle_type' => $vehicle->vehicle_type_name,
+                    'rating' => 1,
+                    'bid_id' => $newBid->id
+                ]
             ]);
 
             $notification = new CompanyNotification;
