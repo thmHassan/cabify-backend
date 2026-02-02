@@ -156,6 +156,37 @@ class BookingController extends Controller
             $newBid->amount = $request->amount;
             $newBid->save();
 
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/place-bid', [
+                'userId' => $booking->user_id,
+                'bid' => $newBid
+            ]);
+
+            $notification = new CompanyNotification;
+            $notification->user_type = "rider";
+            $notification->user_id = $booking->user_id;
+            $notification->title = 'New Bid';
+            $notification->message = 'New bid is placed by driver';
+            $notification->save();
+
+            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'New Bid',
+                        'New bid is placed by driver',
+                        [
+                            'bid_id' => $newBid->id,
+                        ]
+                    );
+                }
+            }
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Bid placed succesfully'
