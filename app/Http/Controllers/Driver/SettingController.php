@@ -11,6 +11,7 @@ use App\Models\WalletTransaction;
 use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
 use App\Models\CompanyBooking;
+use App\Models\CompanyUser;
 use App\Models\CompanyNotification;
 use App\Models\PackageSetting;
 use Illuminate\Support\Facades\Http;
@@ -251,6 +252,7 @@ class SettingController extends Controller
             $chat->status = 'unread';
             $chat->save();
 
+            $user = CompanyUser::where("id", $request->user_id)->first();
             $booking = CompanyBooking::where("id", $request->ride_id)->first();
 
             Http::withHeaders([
@@ -283,7 +285,8 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Message sent successfully',
-                'chat' => $chat
+                'chat' => $chat,
+                'user' => $user
             ]);
         }
         catch(Exception $e){

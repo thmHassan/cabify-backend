@@ -8,6 +8,7 @@ use App\Models\CompanyContactUs;
 use App\Models\CompanyFAQ;
 use App\Models\CompanySetting;
 use App\Models\CompanyRider;
+use App\Models\CompanyDriver;
 use App\Models\CompanyChat;
 use App\Models\CompanyBooking;
 use App\Models\CompanyNotification;
@@ -240,6 +241,7 @@ class SettingController extends Controller
             $chat->save();
 
             $booking = CompanyBooking::where("id", $request->ride_id)->first();
+            $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -271,7 +273,8 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Message sent successfully',
-                'chat' => $chat
+                'chat' => $chat,
+                'driver' => $driver
             ]);
         }
         catch(Exception $e){
