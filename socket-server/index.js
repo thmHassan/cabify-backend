@@ -21,10 +21,7 @@ const adminSockets = new Map();
 
 io.use(async (socket, next) => {
 
-    console.log("enter socket 1");
-
     const authHeader = socket.handshake.headers.authorization;
-    // const database = socket.handshake.query.database;
     const driverId = socket.handshake.query.driver_id;
     const userId = socket.handshake.query.user_id;
     const adminId = socket.handshake.query.admin_id;
@@ -40,14 +37,12 @@ io.use(async (socket, next) => {
     socket.clientId = clientId;
     socket.userId = userId;
     socket.adminId = adminId;
-    // socket.database = database;
 
     next();
 });
 
 
 io.on("connection", (socket) => {
-console.log("enter socket 2");
     const role = socket.handshake.query.role;
     const driverId = socket.handshake.query.driver_id;
     const dispatcherId = socket.handshake.query.dispatcher_id;
@@ -92,7 +87,6 @@ console.log("enter socket 2");
                     }
                 }
             );
-            console.log(response.data)
             // Broadcast to React users
             socket.broadcast.emit("driver-location-update", response.data.driver);
         } catch (err) {
@@ -124,7 +118,6 @@ app.use((req, res, next) => {
 });
 
 app.post("/send-new-ride", (req, res) => {
-    console.log("send-ride");
     const { drivers, booking } = req.body;
     let sentCount = 0;
     drivers.forEach(driverId => {
@@ -168,11 +161,7 @@ app.post("/bid-accept", (req, res) => {
 });
 
 app.post("/change-ride-status", (req, res) => {
-    console.log("enter User ")
     const { userId, status, booking } = req.body;
-    console.log(userId)
-    console.log(status)
-    console.log(booking)
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
         io.to(socketId).emit("user-ride-status-event", {status, booking});
@@ -238,13 +227,7 @@ app.post("/waiting-driver", (req, res) => {
 });
 
 app.post("/send-reminder", (req, res) => {
-    console.log("send reminder")
-
     const { clientId, title, description } = req.body;
-    
-    console.log("clientId" , clientId)
-    console.log("title" , title)
-    console.log("description" , description)
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
         io.to(socketId).emit("send-reminder", { title, description });

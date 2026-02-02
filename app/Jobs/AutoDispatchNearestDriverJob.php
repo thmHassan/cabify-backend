@@ -11,6 +11,7 @@ use App\Models\CompanyBooking;
 use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyPlot;
+use App\Models\CompanyToken;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
@@ -106,15 +107,6 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 }
                 return;
             }
-            
-            // FCMService::sendToDevice(
-            //     $driver->device_token,
-            //     'New Ride Available for Bidding 🚖',
-            //     'Place your bid now',
-            //     [
-            //         'booking_id' => $booking->id,
-            //     ]
-            // );
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -134,6 +126,21 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                     'destination_location' => $booking->destination_location,
                 ]
             ]);
+
+            $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        'New Ride Available for Bidding 🚖',
+                        'Place your bid now',
+                        [
+                            'booking_id' => $booking->id,
+                        ]
+                    );
+                }
+            }
             
             array_push($this->driverIds, $driver->id);
 

@@ -10,6 +10,8 @@ use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
 use App\Models\CompanyBid;
 use App\Models\CompanyPlot;
+use App\Models\CompanyToken;
+use App\Services\FCMService;
 use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
 use App\Jobs\AutoDispatchPlotJob;
@@ -429,20 +431,6 @@ class BookingController extends Controller
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);
-                // $companyDrivers = CompanyDriver::where('driving_status', 'idle')->pluck('id')->toArray(); 
-                // Http::withHeaders([
-                //     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                // ])->post('https://backend.cabifyit.com:3001/send-new-ride', [
-                //     'drivers' => $companyDrivers,
-                //     'booking' => [
-                //         'id' => $newBooking->id,
-                //         'booking_id' => $newBooking->booking_id,
-                //         'pickup_point' => $newBooking->pickup_point,
-                //         'destination_point' => $newBooking->destination_point,
-                //         'offered_amount' => $newBooking->offered_amount,
-                //         'distance' => $newBooking->distance,
-                //     ]
-                // ]);
             }
 
             return response()->json([
@@ -511,6 +499,21 @@ class BookingController extends Controller
                         'type' => 'auto_dispatch_plot'
                     ]
                 ]);
+
+                $tokens = CompanyToken::where("user_id", $bid->driver_id)->where("user_type", "driver")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->device_token,
+                            'Accept Bid',
+                            'Your bid for ride has been accepted',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
+                }
 
                 $driver = CompanyDriver::where("id", $bid->driver_id)->first();
                 $driver->driving_status = "busy";
@@ -619,6 +622,21 @@ class BookingController extends Controller
                         'type' => 'auto_dispatch_plot'
                     ]
                 ]);
+
+                $tokens = CompanyToken::where("user_id", $booking->driver)->where("user_type", "driver")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->device_token,
+                            'Cancel Ride',
+                            'Your ride has been cancelled by Rider',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
+                }
             }
 
             $driver = CompanyBooking::where("id", $booking->driver)->first();
