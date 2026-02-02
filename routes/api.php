@@ -66,7 +66,9 @@ Route::post('login', [AuthController::class, 'login']);
 Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
-Route::post('/driver/location', [DriverAuthController::class, 'setLocation']);
+Route::group(['middleware' => ['tenant.db']], function () {
+    Route::post('/driver/location', [DriverAuthController::class, 'setLocation']);
+});
 
 Route::group(['middleware' => ['auth:api']], function () {
     Route::post('logout', [AuthController::class, 'logout']);
