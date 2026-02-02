@@ -109,10 +109,10 @@ class AuthController extends Controller
             $existUser->save();
 
             Mail::send('emails.send-otp', [
-                'name' => $user->name ?? 'User',
+                'name' => $existUser->name ?? 'User',
                 'otp' => $otp
-            ], function ($message) use ($user) {
-                $message->to($user->email)
+            ], function ($message) use ($existUser) {
+                $message->to($existUser->email)
                         ->subject('Login OTP');
             });
 
