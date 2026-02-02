@@ -291,7 +291,13 @@ class BookingController extends Controller
                 'vehicle_id' => 'required'
             ]);
 
-            $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
+            if(isset(auth('tenant')->user()->id)){
+                $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
+            }
+            else{
+                $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+            }
+
             $map_api = json_decode($data->data)->maps_api;
             $map = json_decode($data->data)->map;
 
