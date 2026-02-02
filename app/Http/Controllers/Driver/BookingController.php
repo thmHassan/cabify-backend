@@ -20,7 +20,7 @@ class BookingController extends Controller
         try{
             $query = CompanyBooking::where("booking_status", "completed")->where("driver", auth('driver')->user()->id);
             if(isset($request->date) && $request->date != NULL){
-                $query->whereDate("booking_date", $request->date);
+                $query->where("booking_date", $request->date);
             }
             $completedRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
