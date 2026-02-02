@@ -160,6 +160,17 @@ app.post("/bid-accept", (req, res) => {
     });
 });
 
+app.post("/place-bid", (req, res) => {
+    const { userId, bid } = req.body;
+    const socketId = userSockets.get(userId.toString());
+    if (socketId) {
+        io.to(socketId).emit("place-bid-event", bid);
+    }
+    return res.json({
+        success: true,
+    });
+});
+
 app.post("/change-ride-status", (req, res) => {
     const { userId, status, booking } = req.body;
     const socketId = userSockets.get(userId.toString());
