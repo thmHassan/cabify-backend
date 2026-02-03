@@ -294,9 +294,25 @@ app.get("/bookings/:id", async (req, res) => {
     }
 });
 
+// app.post("/bookings/broadcast", async (req, res) => {
+//     try {
+//         const { booking_id, tenantDb } = req.body;
+
+//         const db = getConnection(tenantDb);
+
 app.post("/bookings/broadcast", async (req, res) => {
     try {
-        const { booking_id, tenantDb } = req.body;
+        const booking_id = req.body.booking_id;
+        const tenantDb =
+            req.body.tenantDb ||
+            (req.headers.database ? `tenant${req.headers.database}` : null);
+
+        if (!tenantDb) {
+            return res.status(400).json({
+                success: false,
+                message: "tenantDb missing"
+            });
+        }
 
         const db = getConnection(tenantDb);
 
