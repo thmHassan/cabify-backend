@@ -418,11 +418,13 @@ class BookingController extends Controller
             $newBooking->otp = rand(1000,9999);
             $newBooking->save();
 
+            // 🔥 Broadcast to socket automatically
+            $this->broadcastNewBooking($newBooking, $request->header('database'));
+
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                 AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                // AutoDispatchPlotSocketService::dispatch($newBooking, 0);
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
@@ -445,6 +447,19 @@ class BookingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    // 🔥 Helper function to broadcast booking
+    private function broadcastNewBooking($booking, $database){
+        try {
+            Http::timeout(5)->withHeaders([
+                'database' => $database,
+            ])->post(env('NODE_SOCKET_URL') . '/api/bookings/notify', [
+                'booking' => $booking->toArray()
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Socket broadcast failed: ' . $e->getMessage());
         }
     }
 
@@ -485,6 +500,9 @@ class BookingController extends Controller
                 $booking->driver = $bid->driver_id;
                 $booking->save();
                 $message = "Bid accepted successfully";
+
+                // 🔥 Broadcast bid accepted
+                $this->broadcastNewBooking($booking, $request->header('database'));
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -581,6 +599,9 @@ class BookingController extends Controller
             if(isset($booking) && $booking != NULL){
                 $booking->booking_status = "cancelled";
                 $booking->save();
+
+                // 🔥 Broadcast cancellation
+                $this->broadcastNewBooking($booking, $request->header('database'));
             }
 
             return response()->json([
@@ -610,6 +631,9 @@ class BookingController extends Controller
                 $booking->cancel_reason = $request->cancel_reason;
                 $booking->cancelled_by = 'user';
                 $booking->save();
+
+                // 🔥 Broadcast cancellation
+                $this->broadcastNewBooking($booking, $request->header('database'));
 
                 $driver = CompanyDriver::where("id", $booking->driver)->first();
                 $driver->driving_status = "idle";
@@ -654,7 +678,7 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyBooking::where("id", $booking->driver)->first();
+            $driver = CompanyDriver::where("id", $booking->driver)->first();
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
@@ -682,6 +706,9 @@ class BookingController extends Controller
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
             $booking->payment_status = "completed";
             $booking->save();
+
+            // 🔥 Broadcast payment update
+            $this->broadcastNewBooking($booking, $request->header('database'));
 
             return response()->json([
                 'success' => 1,
