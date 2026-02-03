@@ -372,82 +372,6 @@ class BookingController extends Controller
         return $inside;
     }
 
-    // public function createBooking(Request $request){
-    //     try{
-    //         $request->validate([
-    //             'booking_type' => 'required',
-    //             'pickup_point' => 'required',
-    //             'pickup_location' => 'required',
-    //             'destination_point' => 'required',
-    //             'destination_location' => 'required',
-    //             'vehicle' => 'required',
-    //             'offered_amount' => 'required',
-    //             'recommended_amount' => 'required',
-    //             'distance' => 'required',
-    //             'payment_method' => 'required',
-    //         ]);
-
-
-    //         $distance = $request->distance;
-    //         $newBooking = new CompanyBooking;
-    //         $newBooking->booking_id = "RD". strtoupper(uniqid());
-    //         $newBooking->pickup_time = 'asap';
-    //         $newBooking->booking_date = date("Y-m-d");
-    //         $newBooking->booking_type = $request->booking_type;
-    //         $newBooking->pickup_point = $request->pickup_point;
-    //         $newBooking->pickup_plot_id = $request->pickup_plot_id;
-    //         $newBooking->destination_plot_id = $request->destination_plot_id;
-    //         $newBooking->pickup_location = $request->pickup_location;
-    //         $newBooking->destination_point = $request->destination_point;
-    //         $newBooking->destination_location = $request->destination_location;
-    //         $newBooking->via_point = json_encode($request->via_point);
-    //         $newBooking->via_location = json_encode($request->via_location);
-    //         $newBooking->user_id = auth("rider")->user()->id;
-    //         $newBooking->name = auth("rider")->user()->name;
-    //         $newBooking->email = auth("rider")->user()->email;
-    //         $newBooking->phone_no = auth("rider")->user()->phone_no;
-    //         $newBooking->tel_no = auth("rider")->user()->tel_no;
-    //         $newBooking->journey_type = "one_way";
-    //         $newBooking->vehicle = $request->vehicle;
-    //         $newBooking->booking_status = 'pending';
-    //         $newBooking->distance = $distance;
-    //         $newBooking->offered_amount = $request->offered_amount;
-    //         $newBooking->recommended_amount = $request->recommended_amount;
-    //         $newBooking->note = $request->note;
-    //         $newBooking->payment_method = $request->payment_method;
-    //         $newBooking->otp = rand(1000,9999);
-    //         $newBooking->save();
-
-    //         $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
-                
-    //         if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-    //             AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-    //             // AutoDispatchPlotSocketService::dispatch($newBooking, 0);
-    //         }
-    //         elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-    //             SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
-    //         }
-    //         elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-    //             AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
-    //         }
-    //         elseif($dispatch_system->first()->dispatch_system == "bidding"){
-    //             SendBiddingNotificationJob::dispatch($newBooking->id);
-    //         }
-
-    //         return response()->json([
-    //             'success' => 1,
-    //             'message' => 'Booking created successfully',
-    //             'newBooking' => $newBooking
-    //         ]);
-    //     }
-    //     catch(\Exception $e){
-    //         return response()->json([
-    //             'error' => 1,
-    //             'message' => $e->getMessage()
-    //         ]);
-    //     }
-    // }
-
     public function createBooking(Request $request){
         try{
             $request->validate([
@@ -463,30 +387,6 @@ class BookingController extends Controller
                 'payment_method' => 'required',
             ]);
 
-            // 🔥 Handle form-data string format for coordinates
-            $pickupPoint = $request->pickup_point;
-            if (is_string($pickupPoint) && strpos($pickupPoint, ',') !== false) {
-                // Convert "40.0000, -100.0000" to JSON
-                $coords = array_map('trim', explode(',', $pickupPoint));
-                $pickupPoint = json_encode([
-                    'latitude' => floatval($coords[0]),
-                    'longitude' => floatval($coords[1])
-                ]);
-            } else if (is_array($pickupPoint)) {
-                $pickupPoint = json_encode($pickupPoint);
-            }
-
-            $destinationPoint = $request->destination_point;
-            if (is_string($destinationPoint) && strpos($destinationPoint, ',') !== false) {
-                // Convert "34.0000, -118.0000" to JSON
-                $coords = array_map('trim', explode(',', $destinationPoint));
-                $destinationPoint = json_encode([
-                    'latitude' => floatval($coords[0]),
-                    'longitude' => floatval($coords[1])
-                ]);
-            } else if (is_array($destinationPoint)) {
-                $destinationPoint = json_encode($destinationPoint);
-            }
 
             $distance = $request->distance;
             $newBooking = new CompanyBooking;
@@ -494,11 +394,11 @@ class BookingController extends Controller
             $newBooking->pickup_time = 'asap';
             $newBooking->booking_date = date("Y-m-d");
             $newBooking->booking_type = $request->booking_type;
-            $newBooking->pickup_point = $pickupPoint;
+            $newBooking->pickup_point = $request->pickup_point;
             $newBooking->pickup_plot_id = $request->pickup_plot_id;
             $newBooking->destination_plot_id = $request->destination_plot_id;
             $newBooking->pickup_location = $request->pickup_location;
-            $newBooking->destination_point = $destinationPoint;
+            $newBooking->destination_point = $request->destination_point;
             $newBooking->destination_location = $request->destination_location;
             $newBooking->via_point = json_encode($request->via_point);
             $newBooking->via_location = json_encode($request->via_location);
@@ -518,19 +418,28 @@ class BookingController extends Controller
             $newBooking->otp = rand(1000,9999);
             $newBooking->save();
 
-            // 🔥 Broadcast to socket automatically
-            $this->broadcastNewBooking($newBooking, $request->header('database'));
+            // 🔔 Broadcast booking to dispatcher / admin / client
+                Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                 ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                    'booking_id' => $newBooking->id,
+                    'tenantDb'   => $request->header('database'),
+                 ]);
 
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                 AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
+                // AutoDispatchPlotSocketService::dispatch($newBooking, 0);
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
                 AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
+            }
+            elseif($dispatch_system->first()->dispatch_system == "bidding"){
+                SendBiddingNotificationJob::dispatch($newBooking->id);
             }
 
             return response()->json([
@@ -544,20 +453,6 @@ class BookingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
-        }
-    }
-
-    private function broadcastNewBooking($booking, $database){
-        try {
-            Http::timeout(5)->withHeaders([
-                'database' => $database,
-            ])->post(env('NODE_SOCKET_URL') . '/api/bookings/notify', [
-                'booking' => $booking->toArray()
-            ]);
-            
-            \Log::info("✅ Booking broadcasted: " . $booking->booking_id);
-        } catch (\Exception $e) {
-            \Log::error('❌ Socket broadcast failed: ' . $e->getMessage());
         }
     }
 
