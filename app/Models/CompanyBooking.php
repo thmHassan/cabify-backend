@@ -32,6 +32,6 @@ class CompanyBooking extends Model
     }
     
     public function ratingDetail(){
-        return $this->hasMany(CompanyRating::class, "id", "booking_id");
+        return $this->hasMany(CompanyRating::class, "booking_id", "id");
     }
 }
