@@ -300,7 +300,7 @@ class SettingController extends Controller
 
     public function messageList(Request $request)
     {
-        try {
+        try { 
             $list = CompanyChat::where('user_id', auth('driver')->user()->id)
                 ->whereIn('id', function ($q) {
                     $q->select(DB::raw('MAX(id)'))
