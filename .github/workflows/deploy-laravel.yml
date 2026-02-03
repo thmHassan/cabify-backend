@@ -54,6 +54,7 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+            php artisan optimize:clear
             cd socket-server
             npm install
             pm2 restart project-socket || pm2 start index.js --name project-socket

@@ -524,7 +524,7 @@ class BookingController extends Controller
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
             if($booking->otp == $request->otp){
                 $booking->booking_status = "started";
-                $booking->driver_pickup_time = now()->format('H:i:s');
+                $booking->driver_pickup_time = now()->format('Y-m-d H:i:s');
                 $booking->save();
 
                 Http::withHeaders([
@@ -589,7 +589,7 @@ class BookingController extends Controller
         try{
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
             $booking->booking_status = "completed";
-            $booking->driver_dropoff_time = now()->format('H:i:s');
+            $booking->driver_dropoff_time = now()->format('Y-m-d H:i:s');
             $booking->save();
 
             Http::withHeaders([
