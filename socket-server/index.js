@@ -296,9 +296,9 @@ app.get("/bookings/:id", async (req, res) => {
 
 app.post("/bookings/broadcast", async (req, res) => {
     try {
-        const { booking_id } = req.body;
+        const { booking_id, tenantDb } = req.body;
 
-        const db = getConnection(req.tenantDb);
+        const db = getConnection(tenantDb);
 
         const [rows] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
