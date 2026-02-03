@@ -297,29 +297,13 @@ app.get("/bookings/:id", async (req, res) => {
 app.post("/bookings/broadcast", async (req, res) => {
     try {
         const { booking_id, tenantDb } = req.body;
-
+         const DB_PREFIX = "tenant";
         // 👇 STATIC STRING APPEND
         const finalDb = `${DB_PREFIX}${tenantDb}`;
 
         console.log("📂 Using DB:", finalDb);
 
         const db = getConnection(finalDb);
-
-        // app.post("/bookings/broadcast", async (req, res) => {
-        //     try {
-        //         const booking_id = req.body.booking_id;
-        //         const tenantDb =
-        //             req.body.tenantDb ||
-        //             (req.headers.database ? `tenant${req.headers.database}` : null);
-
-        //         if (!tenantDb) {
-        //             return res.status(400).json({
-        //                 success: false,
-        //                 message: "tenantDb missing"
-        //             });
-        //         }
-
-        // const db = getConnection(tenantDb);
 
         const [rows] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
