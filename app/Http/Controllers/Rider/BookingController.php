@@ -434,6 +434,13 @@ class BookingController extends Controller
                 SendBiddingNotificationJob::dispatch($newBooking->id);
             }
 
+                       Http::withHeaders([
+          'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+          'tenantDb'      => $request->header('database'),
+          ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+             'booking_id' => $newBooking->id,
+          ]);
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Booking created successfully',

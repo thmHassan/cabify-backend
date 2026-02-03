@@ -176,7 +176,7 @@ class BookingController extends Controller
                         $newBooking->start_at = $request->start_at;
                         $newBooking->end_at = $request->end_at;
                         $newBooking->payment_method = $request->payment_method;
-                        $newBooking->save();    
+                        $newBooking->save();  
                     }
                 }
             }
@@ -268,6 +268,13 @@ class BookingController extends Controller
                     }
                 }
             }
+        
+                        Http::withHeaders([
+                        'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                        'tenantDb'      => $request->header('database'),
+                        ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                        'booking_id' => $newBooking->id,
+                        ]);
 
             return response()->json([
                 'success' => 1,
