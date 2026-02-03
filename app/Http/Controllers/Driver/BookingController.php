@@ -26,7 +26,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->where("booking_date", $request->date);
             }
-            $completedRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+            $completedRides = $query->with(['userDetail', 'driverDetail','ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -47,7 +47,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $cancelledRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+            $cancelledRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -68,7 +68,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $pendingRides = $query->with(['userDetail', 'driverDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+            $pendingRides = $query->with(['userDetail', 'driverDetail','ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -128,7 +128,7 @@ class BookingController extends Controller
 
     public function rideDetail(Request $request){
         try{
-            $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['userDetail'])->first();
+            $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['userDetail', 'ratingDetail'])->first();
 
             return response()->json([
                 'success' => 1,
