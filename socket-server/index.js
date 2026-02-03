@@ -295,24 +295,74 @@ app.get("/api/bookings/:id", async (req, res) => {
     }
 });
 
+// app.post("/api/bookings/broadcast", async (req, res) => {
+//     try {
+//         const { booking_id } = req.body;
+//         const db = getConnection(req.tenantDb);
+
+//         const query = `SELECT * FROM bookings WHERE id = ?`;
+//         const [bookings] = await db.query(query, [booking_id]);
+
+//         if (bookings.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Booking not found"
+//             });
+//         }
+
+//         const booking = bookings[0];
+
+//         let sentCount = 0;
+//         dispatcherSockets.forEach((socketId) => {
+//             io.to(socketId).emit("new-booking-event", booking);
+//             sentCount++;
+//         });
+
+//         adminSockets.forEach((socketId) => {
+//             io.to(socketId).emit("new-booking-event", booking);
+//             sentCount++;
+//         });
+
+//         return res.json({
+//             success: true,
+//             sent_to: sentCount,
+//             booking: booking
+//         });
+
+//     } catch (error) {
+//         console.error("Error broadcasting booking:", error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
 app.post("/api/bookings/broadcast", async (req, res) => {
     try {
         const { booking_id } = req.body;
+
         const db = getConnection(req.tenantDb);
 
-        const query = `SELECT * FROM bookings WHERE id = ?`;
-        const [bookings] = await db.query(query, [booking_id]);
+        const [rows] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [booking_id]
+        );
 
-        if (bookings.length === 0) {
+        if (!rows.length) {
             return res.status(404).json({
                 success: false,
                 message: "Booking not found"
             });
         }
 
-        const booking = bookings[0];
-
+        const booking = rows[0];
         let sentCount = 0;
+
+        console.log("📢 Broadcasting booking:", booking.id);
+        console.log("Dispatchers:", dispatcherSockets.size);
+        console.log("Admins:", adminSockets.size);
+        console.log("Clients:", clientSockets.size);
+
         dispatcherSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
             sentCount++;
@@ -323,14 +373,19 @@ app.post("/api/bookings/broadcast", async (req, res) => {
             sentCount++;
         });
 
+        clientSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
         return res.json({
             success: true,
             sent_to: sentCount,
-            booking: booking
+            booking
         });
 
     } catch (error) {
-        console.error("Error broadcasting booking:", error);
+        console.error("❌ Broadcast error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
