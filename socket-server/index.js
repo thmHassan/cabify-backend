@@ -2,7 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
-const db = require("./db");
+const db = require("./db"); 
 
 const app = express();
 app.use(express.json());
@@ -28,13 +28,13 @@ io.use(async (socket, next) => {
     const role = socket.handshake.query.role;
     const dispatcherId = socket.handshake.query.dispatcher_id;
     const clientId = socket.handshake.query.client_id;
-
-    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) ||
-        (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) ||
+    
+    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || 
+        (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) || 
         (role === 'user' && !userId)) {
         return next(new Error("Unauthorized"));
     }
-
+    
     socket.token = authHeader.split(" ")[1];
     socket.driverId = driverId;
     socket.dispatcherId = dispatcherId;
@@ -131,12 +131,12 @@ app.get("/api/bookings", async (req, res) => {
                 u.phone_no as user_phone,
                 d.name as driver_name,
                 d.phone_no as driver_phone
-            FROM bookings cb
-            LEFT JOIN accounts u ON cb.user_id = u.id
-            LEFT JOIN drivers d ON cb.driver = d.id
+            FROM company_bookings cb
+            LEFT JOIN company_users u ON cb.user_id = u.id
+            LEFT JOIN company_drivers d ON cb.driver = d.id
             WHERE 1=1
         `;
-
+        
         const queryParams = [];
 
         // Add filters
@@ -165,9 +165,9 @@ app.get("/api/bookings", async (req, res) => {
         const [bookings] = await db.query(query, queryParams);
 
         // Get total count
-        let countQuery = `SELECT COUNT(*) as total FROM bookings cb WHERE 1=1`;
+        let countQuery = `SELECT COUNT(*) as total FROM company_bookings cb WHERE 1=1`;
         const countParams = [];
-
+        
         if (status) {
             countQuery += ` AND booking_status = ?`;
             countParams.push(status);
@@ -230,10 +230,12 @@ app.get("/api/bookings/:id", async (req, res) => {
                 u.phone_no as user_phone,
                 d.name as driver_name,
                 d.phone_no as driver_phone,
-                d.vehicle_no as driver_vehicle_no
-            FROM bookings cb
-            LEFT JOIN accounts u ON cb.user_id = u.id
-            LEFT JOIN drivers d ON cb.driver = d.id
+                d.vehicle_no as driver_vehicle_no,
+                vt.name as vehicle_type_name
+            FROM company_bookings cb
+            LEFT JOIN company_users u ON cb.user_id = u.id
+            LEFT JOIN company_drivers d ON cb.driver = d.id
+            LEFT JOIN company_vehicle_types vt ON cb.vehicle = vt.id
             WHERE cb.id = ?
         `;
 
@@ -264,15 +266,16 @@ app.post("/api/bookings/broadcast", async (req, res) => {
     try {
         const { booking_id } = req.body;
 
+        // Fetch booking details from database
         const query = `
             SELECT 
                 cb.*,
                 u.name as user_name,
                 u.email as user_email,
                 d.name as driver_name
-            FROM bookings cb
-            LEFT JOIN accounts u ON cb.user_id = u.id
-            LEFT JOIN drivers d ON cb.driver = d.id
+            FROM company_bookings cb
+            LEFT JOIN company_users u ON cb.user_id = u.id
+            LEFT JOIN company_drivers d ON cb.driver = d.id
             WHERE cb.id = ?
         `;
 
@@ -373,7 +376,7 @@ app.post("/change-ride-status", (req, res) => {
     const { userId, status, booking } = req.body;
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
-        io.to(socketId).emit("user-ride-status-event", { status, booking });
+        io.to(socketId).emit("user-ride-status-event", {status, booking});
     }
     return res.json({
         success: true,
@@ -406,7 +409,7 @@ app.post("/change-driver-ride-status", (req, res) => {
     const { driverId, status, booking } = req.body;
     const socketId = driverSockets.get(driverId.toString());
     if (socketId) {
-        io.to(socketId).emit("driver-ride-status-event", { status, booking });
+        io.to(socketId).emit("driver-ride-status-event", {status, booking});
     }
     return res.json({
         success: true,
@@ -428,7 +431,7 @@ app.post("/waiting-driver", (req, res) => {
     const { clientId, driverName, plot } = req.body;
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
-        io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+        io.to(socketId).emit("waiting-driver-event", {driverName, plot});
     }
     return res.json({
         success: true,
