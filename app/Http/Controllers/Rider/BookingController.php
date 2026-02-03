@@ -440,7 +440,6 @@ class BookingController extends Controller
             elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);
             }
-      
 
             return response()->json([
                 'success' => 1,

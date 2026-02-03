@@ -3,16 +3,32 @@ const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
 const { getConnection } = require("./db");
+const cors = require("cors");
 
 const app = express();
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "database"],
+}));
+
+app.options("*", cors());
 app.use(express.json());
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
     cors: {
-        origin: "*"
-    }
+        origin: "*",
+        methods: ["GET", "POST"],
+        allowedHeaders: ["Authorization", "database"],
+    },
 });
+// const io = new Server(server, {
+//     cors: {
+//         origin: "*"
+//     }
+// });
 
 const driverSockets = new Map();
 const userSockets = new Map();
@@ -120,7 +136,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// Middleware to get database name from header
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
@@ -297,29 +312,10 @@ app.get("/bookings/:id", async (req, res) => {
 app.post("/bookings/broadcast", async (req, res) => {
     try {
         const { booking_id, tenantDb } = req.body;
+        const DB_PREFIX = "tenant";
 
-        // 👇 STATIC STRING APPEND
         const finalDb = `${DB_PREFIX}${tenantDb}`;
-
-        console.log("📂 Using DB:", finalDb);
-
         const db = getConnection(finalDb);
-
-        // app.post("/bookings/broadcast", async (req, res) => {
-        //     try {
-        //         const booking_id = req.body.booking_id;
-        //         const tenantDb =
-        //             req.body.tenantDb ||
-        //             (req.headers.database ? `tenant${req.headers.database}` : null);
-
-        //         if (!tenantDb) {
-        //             return res.status(400).json({
-        //                 success: false,
-        //                 message: "tenantDb missing"
-        //             });
-        //         }
-
-        // const db = getConnection(tenantDb);
 
         const [rows] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
@@ -336,10 +332,10 @@ app.post("/bookings/broadcast", async (req, res) => {
         const booking = rows[0];
         let sentCount = 0;
 
-        console.log("📢 Broadcasting booking:", booking.id);
-        console.log("Dispatchers:", dispatcherSockets.size);
-        console.log("Admins:", adminSockets.size);
-        console.log("Clients:", clientSockets.size);
+        // console.log("📢 Broadcasting booking:", booking.id);
+        // console.log("Dispatchers:", dispatcherSockets.size);
+        // console.log("Admins:", adminSockets.size);
+        // console.log("Clients:", clientSockets.size);
 
         dispatcherSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
