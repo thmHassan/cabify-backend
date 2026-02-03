@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Services\FCMService;
+use Illuminate\Support\Facades\DB;
 
 class SettingController extends Controller
 {
@@ -285,16 +286,25 @@ class SettingController extends Controller
         }
     }
 
-    public function messageList(Request $request){
-        try{
-            $list = CompanyChat::where("user_id", auth("rider")->user()->id)->groupBy("ride_id")->with('rideDetail')->get();
+    public function messageList(Request $request)
+    {
+        try {
+            $list = CompanyChat::where('user_id', auth('rider')->user()->id)
+                ->whereIn('id', function ($q) {
+                    $q->select(DB::raw('MAX(id)'))
+                    ->from('chats')
+                    ->groupBy('ride_id');
+                })
+                ->with(['rideDetail', 'userDetail', 'driverDetail'])
+                ->orderBy('created_at', 'DESC')
+                ->get();
 
             return response()->json([
                 'success' => 1,
                 'list' => $list
             ]);
         }
-        catch(Exception $e){
+        catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
