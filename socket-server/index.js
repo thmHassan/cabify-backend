@@ -131,45 +131,37 @@ app.get("/api/bookings", async (req, res) => {
         // Get database connection for this tenant
         const db = getConnection(req.tenantDb);
 
-        let query = `
-            SELECT 
-                cb.*,
-                u.name as user_name,
-                u.email as user_email,
-                u.phone_no as user_phone,
-                d.name as driver_name,
-                d.phone_no as driver_phone
-            FROM bookings cb
-            LEFT JOIN company_users u ON cb.user_id = u.id
-            LEFT JOIN company_drivers d ON cb.driver = d.id
-            WHERE 1=1
-        `;
+        let query = `SELECT * FROM bookings WHERE 1=1`;
 
         const queryParams = [];
 
+        // Add filters
         if (status) {
-            query += ` AND cb.booking_status = ?`;
+            query += ` AND booking_status = ?`;
             queryParams.push(status);
         }
         if (date) {
-            query += ` AND DATE(cb.booking_date) = ?`;
+            query += ` AND DATE(booking_date) = ?`;
             queryParams.push(date);
         }
         if (user_id) {
-            query += ` AND cb.user_id = ?`;
+            query += ` AND user_id = ?`;
             queryParams.push(user_id);
         }
         if (driver_id) {
-            query += ` AND cb.driver = ?`;
+            query += ` AND driver = ?`;
             queryParams.push(driver_id);
         }
 
-        query += ` ORDER BY cb.booking_date DESC, cb.id DESC LIMIT ? OFFSET ?`;
+        // Add ordering and pagination
+        query += ` ORDER BY booking_date DESC, id DESC LIMIT ? OFFSET ?`;
         queryParams.push(parseInt(limit), parseInt(offset));
 
+        // Execute query
         const [bookings] = await db.query(query, queryParams);
 
-        let countQuery = `SELECT COUNT(*) as total FROM bookings cb WHERE 1=1`;
+        // Get total count
+        let countQuery = `SELECT COUNT(*) as total FROM bookings WHERE 1=1`;
         const countParams = [];
 
         if (status) {
@@ -192,6 +184,7 @@ app.get("/api/bookings", async (req, res) => {
         const [countResult] = await db.query(countQuery, countParams);
         const total = countResult[0].total;
 
+        // Emit to connected sockets (dispatchers/admins)
         dispatcherSockets.forEach((socketId) => {
             io.to(socketId).emit("bookings-list-update", {
                 bookings: bookings,
@@ -226,22 +219,7 @@ app.get("/api/bookings/:id", async (req, res) => {
         const { id } = req.params;
         const db = getConnection(req.tenantDb);
 
-        const query = `
-            SELECT 
-                cb.*,
-                u.name as user_name,
-                u.email as user_email,
-                u.phone_no as user_phone,
-                d.name as driver_name,
-                d.phone_no as driver_phone,
-                d.vehicle_no as driver_vehicle_no,
-                vt.name as vehicle_type_name
-            FROM bookings cb
-            LEFT JOIN company_users u ON cb.user_id = u.id
-            LEFT JOIN company_drivers d ON cb.driver = d.id
-            LEFT JOIN company_vehicle_types vt ON cb.vehicle = vt.id
-            WHERE cb.id = ?
-        `;
+        const query = `SELECT * FROM bookings WHERE id = ?`;
 
         const [bookings] = await db.query(query, [id]);
 
@@ -271,17 +249,7 @@ app.post("/api/bookings/broadcast", async (req, res) => {
         const { booking_id } = req.body;
         const db = getConnection(req.tenantDb);
 
-        const query = `
-            SELECT 
-                cb.*,
-                u.name as user_name,
-                u.email as user_email,
-                d.name as driver_name
-            FROM bookings cb
-            LEFT JOIN company_users u ON cb.user_id = u.id
-            LEFT JOIN company_drivers d ON cb.driver = d.id
-            WHERE cb.id = ?
-        `;
+        const query = `SELECT * FROM bookings WHERE id = ?`;
 
         const [bookings] = await db.query(query, [booking_id]);
 
@@ -294,12 +262,14 @@ app.post("/api/bookings/broadcast", async (req, res) => {
 
         const booking = bookings[0];
 
+        // Broadcast to all dispatchers
         let sentCount = 0;
         dispatcherSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
             sentCount++;
         });
 
+        // Also broadcast to admin sockets
         adminSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
             sentCount++;
