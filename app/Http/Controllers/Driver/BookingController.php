@@ -128,7 +128,7 @@ class BookingController extends Controller
 
     public function rideDetail(Request $request){
         try{
-            $rideDetail = COmpanyBooking::where("id", $request->ride_id)->first();
+            $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['userDetail'])->first();
 
             return response()->json([
                 'success' => 1,
@@ -170,7 +170,7 @@ class BookingController extends Controller
                     'profile_image' => auth("driver")->user()->profile_image,
                     'vehicle_name' => auth("driver")->user()->vehicle_name,
                     'vehicle_type' => $vehicle->vehicle_type_name,
-                    'rating' => 1,
+                    'rating' => auth("driver")->user()->rating,
                     'bid_id' => $newBid->id
                 ]
             ]);
@@ -524,6 +524,7 @@ class BookingController extends Controller
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
             if($booking->otp == $request->otp){
                 $booking->booking_status = "started";
+                $booking->driver_pickup_time = now()->format('H:i:s');
                 $booking->save();
 
                 Http::withHeaders([
@@ -588,6 +589,7 @@ class BookingController extends Controller
         try{
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
             $booking->booking_status = "completed";
+            $booking->driver_dropoff_time = now()->format('H:i:s');
             $booking->save();
 
             Http::withHeaders([

@@ -10,12 +10,14 @@ use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\CompanyRating;
 
 class CompanyDriver extends Authenticatable implements JWTSubject
 {
     use HasFactory, SoftDeletes;
 
     protected $table = "drivers";
+    protected $appends = ['rating'];
 
     public function getJWTIdentifier()
     {
@@ -25,5 +27,11 @@ class CompanyDriver extends Authenticatable implements JWTSubject
     public function getJWTCustomClaims()
     {
         return [];
+    }
+
+    public function getRatingAttribute(){
+        $rating = CompanyRating::where("user_type", "driver")->where("user_id", $this->id)->avg("rating");
+
+        return $rating;
     }
 }
