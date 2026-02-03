@@ -182,7 +182,7 @@ app.post("/api/bookings/notify", async (req, res) => {
     }
 });
 
-app.get("/api/bookings", async (req, res) => {
+app.get("/bookings", async (req, res) => {
     try {
         const { status, date, user_id, driver_id, page = 1, limit = 10 } = req.query;
         const offset = (page - 1) * limit;
@@ -266,7 +266,7 @@ app.get("/api/bookings", async (req, res) => {
     }
 });
 
-app.get("/api/bookings/:id", async (req, res) => {
+app.get("/bookings/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const db = getConnection(req.tenantDb);
@@ -295,49 +295,7 @@ app.get("/api/bookings/:id", async (req, res) => {
     }
 });
 
-// app.post("/api/bookings/broadcast", async (req, res) => {
-//     try {
-//         const { booking_id } = req.body;
-//         const db = getConnection(req.tenantDb);
-
-//         const query = `SELECT * FROM bookings WHERE id = ?`;
-//         const [bookings] = await db.query(query, [booking_id]);
-
-//         if (bookings.length === 0) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: "Booking not found"
-//             });
-//         }
-
-//         const booking = bookings[0];
-
-//         let sentCount = 0;
-//         dispatcherSockets.forEach((socketId) => {
-//             io.to(socketId).emit("new-booking-event", booking);
-//             sentCount++;
-//         });
-
-//         adminSockets.forEach((socketId) => {
-//             io.to(socketId).emit("new-booking-event", booking);
-//             sentCount++;
-//         });
-
-//         return res.json({
-//             success: true,
-//             sent_to: sentCount,
-//             booking: booking
-//         });
-
-//     } catch (error) {
-//         console.error("Error broadcasting booking:", error);
-//         return res.status(500).json({
-//             success: false,
-//             error: error.message
-//         });
-//     }
-// });
-app.post("/api/bookings/broadcast", async (req, res) => {
+app.post("/bookings/broadcast", async (req, res) => {
     try {
         const { booking_id } = req.body;
 
