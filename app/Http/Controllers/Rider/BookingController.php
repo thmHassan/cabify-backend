@@ -418,6 +418,13 @@ class BookingController extends Controller
             $newBooking->otp = rand(1000,9999);
             $newBooking->save();
 
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                 ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                    'booking_id' => $newBooking->id,
+                    'tenantDb'   => $request->header('database'),
+                 ]);
+
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
@@ -433,13 +440,6 @@ class BookingController extends Controller
             elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);
             }
-
-                       Http::withHeaders([
-          'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-          'tenantDb'      => $request->header('database'),
-          ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
-             'booking_id' => $newBooking->id,
-          ]);
 
             return response()->json([
                 'success' => 1,
