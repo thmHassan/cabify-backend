@@ -30,4 +30,8 @@ class CompanyBooking extends Model
     public function accountDetail(){
         return $this->hasOne(CompanyAccount::class, "id", "account");
     }
+    
+    public function ratingDetail(){
+        return $this->hasMany(CompanyRating::class, "id", "booking_id");
+    }
 }
