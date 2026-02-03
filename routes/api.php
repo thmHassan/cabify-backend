@@ -371,6 +371,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/cancel-ride', [RiderBookingController::class, 'cancelRide']);
         Route::post('/rider/cancel-confirm-ride', [RiderBookingController::class, 'cancelConfirmRide']);
         Route::post('/rider/calculate-fare', [RiderBookingController::class, 'calculateFare']);
+        Route::get('/rider/ride-detail', [RiderBookingController::class, 'rideDetail']);
     });
 });
 

@@ -724,4 +724,21 @@ class BookingController extends Controller
             ], 400);
         }
     }
+
+    public function rideDetail(Request $request){
+        try{
+            $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['driverDetail'])->first();
+
+            return response()->json([
+                'success' => 1,
+                'rideDetail' => $rideDetail
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
 }

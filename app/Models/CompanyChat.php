@@ -14,4 +14,12 @@ class CompanyChat extends Model
     public function rideDetail(){
         return $this->hasOne(CompanyBooking::class, 'id', 'ride_id');
     }
+
+    public function userDetail(){
+        return $this->hasOne(CompanyUser::class, 'id', 'user_id');
+    }
+
+    public function driverDetail(){
+        return $this->hasOne(CompanyDriver::class, 'id', 'driver_id');
+    }
 }
