@@ -418,13 +418,12 @@ class BookingController extends Controller
             $newBooking->otp = rand(1000,9999);
             $newBooking->save();
 
-            // 🔔 Broadcast booking to dispatcher / admin / client
-                Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                 ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
-                    'booking_id' => $newBooking->id,
-                    'tenantDb'   => $request->header('database'),
-                 ]);
+           Http::withHeaders([
+          'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+          'tenantDb'      => $request->header('database'),
+          ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+             'booking_id' => $newBooking->id,
+          ]);
 
             $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
                 

@@ -179,12 +179,11 @@ class BookingController extends Controller
                         $newBooking->save();  
                         
                         Http::withHeaders([
-                       'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                        'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                        'tenantDb'      => $request->header('database'),
                         ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
-                        'booking_id' => $bookingId,
-                        'tenantDb'   => $request->header('database'),
+                        'booking_id' => $newBooking->id,
                         ]);
-
                     }
                 }
             }

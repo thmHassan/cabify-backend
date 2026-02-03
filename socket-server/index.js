@@ -130,7 +130,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// 🔥 NEW ENDPOINT - Auto broadcast bookings from Laravel
 app.post("/api/bookings/notify", async (req, res) => {
     try {
         const { booking } = req.body;
@@ -299,7 +298,8 @@ app.post("/bookings/broadcast", async (req, res) => {
     try {
         const { booking_id } = req.body;
 
-        const db = getConnection(req.tenantDb);
+        const tenantDb = req.headers.tenantdb;
+        const db = getConnection(tenantDb);
 
         const [rows] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
