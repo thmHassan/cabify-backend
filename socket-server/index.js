@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
+const db = require("./db"); 
 
 const app = express();
 app.use(express.json());
@@ -20,7 +21,6 @@ const clientSockets = new Map();
 const adminSockets = new Map();
 
 io.use(async (socket, next) => {
-
     const authHeader = socket.handshake.headers.authorization;
     const driverId = socket.handshake.query.driver_id;
     const userId = socket.handshake.query.user_id;
@@ -28,9 +28,13 @@ io.use(async (socket, next) => {
     const role = socket.handshake.query.role;
     const dispatcherId = socket.handshake.query.dispatcher_id;
     const clientId = socket.handshake.query.client_id;
-    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
+    
+    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || 
+        (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) || 
+        (role === 'user' && !userId)) {
         return next(new Error("Unauthorized"));
     }
+    
     socket.token = authHeader.split(" ")[1];
     socket.driverId = driverId;
     socket.dispatcherId = dispatcherId;
@@ -40,7 +44,6 @@ io.use(async (socket, next) => {
 
     next();
 });
-
 
 io.on("connection", (socket) => {
     const role = socket.handshake.query.role;
@@ -68,13 +71,11 @@ io.on("connection", (socket) => {
 
     // Event call when from Flutter to Update location for driver
     socket.on("driver-location", async (data) => {
-        //Send to Laravel (store in DB)
         try {
             var dataArray;
             if (typeof data === "string") {
                 dataArray = JSON.parse(data);
-            }
-            else{
+            } else {
                 dataArray = data;
             }
             const response = await axios.post(
@@ -115,6 +116,206 @@ app.use((req, res, next) => {
     //     return res.status(401).json({ error: "Unauthorized" });
     // }
     next();
+});
+
+app.get("/api/bookings", async (req, res) => {
+    try {
+        const { status, date, user_id, driver_id, page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        let query = `
+            SELECT 
+                cb.*,
+                u.name as user_name,
+                u.email as user_email,
+                u.phone_no as user_phone,
+                d.name as driver_name,
+                d.phone_no as driver_phone
+            FROM company_bookings cb
+            LEFT JOIN company_users u ON cb.user_id = u.id
+            LEFT JOIN company_drivers d ON cb.driver = d.id
+            WHERE 1=1
+        `;
+        
+        const queryParams = [];
+
+        // Add filters
+        if (status) {
+            query += ` AND cb.booking_status = ?`;
+            queryParams.push(status);
+        }
+        if (date) {
+            query += ` AND DATE(cb.booking_date) = ?`;
+            queryParams.push(date);
+        }
+        if (user_id) {
+            query += ` AND cb.user_id = ?`;
+            queryParams.push(user_id);
+        }
+        if (driver_id) {
+            query += ` AND cb.driver = ?`;
+            queryParams.push(driver_id);
+        }
+
+        // Add ordering and pagination
+        query += ` ORDER BY cb.booking_date DESC, cb.id DESC LIMIT ? OFFSET ?`;
+        queryParams.push(parseInt(limit), parseInt(offset));
+
+        // Execute query
+        const [bookings] = await db.query(query, queryParams);
+
+        // Get total count
+        let countQuery = `SELECT COUNT(*) as total FROM company_bookings cb WHERE 1=1`;
+        const countParams = [];
+        
+        if (status) {
+            countQuery += ` AND booking_status = ?`;
+            countParams.push(status);
+        }
+        if (date) {
+            countQuery += ` AND DATE(booking_date) = ?`;
+            countParams.push(date);
+        }
+        if (user_id) {
+            countQuery += ` AND user_id = ?`;
+            countParams.push(user_id);
+        }
+        if (driver_id) {
+            countQuery += ` AND driver = ?`;
+            countParams.push(driver_id);
+        }
+
+        const [countResult] = await db.query(countQuery, countParams);
+        const total = countResult[0].total;
+
+        // Emit to connected sockets (dispatchers/admins)
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("bookings-list-update", {
+                bookings: bookings,
+                total: total,
+                page: parseInt(page),
+                limit: parseInt(limit)
+            });
+        });
+
+        return res.json({
+            success: true,
+            data: bookings,
+            pagination: {
+                total: total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total_pages: Math.ceil(total / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error("Error fetching bookings:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.get("/api/bookings/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = `
+            SELECT 
+                cb.*,
+                u.name as user_name,
+                u.email as user_email,
+                u.phone_no as user_phone,
+                d.name as driver_name,
+                d.phone_no as driver_phone,
+                d.vehicle_no as driver_vehicle_no,
+                vt.name as vehicle_type_name
+            FROM company_bookings cb
+            LEFT JOIN company_users u ON cb.user_id = u.id
+            LEFT JOIN company_drivers d ON cb.driver = d.id
+            LEFT JOIN company_vehicle_types vt ON cb.vehicle = vt.id
+            WHERE cb.id = ?
+        `;
+
+        const [bookings] = await db.query(query, [id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: bookings[0]
+        });
+
+    } catch (error) {
+        console.error("Error fetching booking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.post("/api/bookings/broadcast", async (req, res) => {
+    try {
+        const { booking_id } = req.body;
+
+        // Fetch booking details from database
+        const query = `
+            SELECT 
+                cb.*,
+                u.name as user_name,
+                u.email as user_email,
+                d.name as driver_name
+            FROM company_bookings cb
+            LEFT JOIN company_users u ON cb.user_id = u.id
+            LEFT JOIN company_drivers d ON cb.driver = d.id
+            WHERE cb.id = ?
+        `;
+
+        const [bookings] = await db.query(query, [booking_id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        // Broadcast to all dispatchers
+        let sentCount = 0;
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        // Also broadcast to admin sockets
+        adminSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        return res.json({
+            success: true,
+            sent_to: sentCount,
+            booking: booking
+        });
+
+    } catch (error) {
+        console.error("Error broadcasting booking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 app.post("/send-new-ride", (req, res) => {
