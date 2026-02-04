@@ -251,7 +251,7 @@ app.get("/bookings", async (req, res) => {
                 b.phone_no LIKE ? OR 
                 b.email LIKE ? OR
                 d.name LIKE ? OR
-                vt.name LIKE ?
+                vt.vehicle_type_name LIKE ?
             )`;
             const searchParam = `%${search}%`;
             params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
@@ -265,12 +265,13 @@ app.get("/bookings", async (req, res) => {
                 d.name as driver_name,
                 d.email as driver_email,
                 d.phone_no as driver_phone,
-                d.profile_photo as driver_photo,
+                d.profile_image as driver_profile_image,
                 vt.id as vehicle_type_id,
-                vt.name as vehicle_name,
-                vt.image as vehicle_image,
+                vt.vehicle_type_name as vehicle_type_name,
+                vt.vehicle_type_service as vehicle_type_service,
                 sc.id as sub_company_id,
-                sc.name as sub_company_name
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
             ${baseQuery}
             ORDER BY b.booking_date DESC, b.id DESC
             LIMIT ? OFFSET ?
@@ -281,9 +282,9 @@ app.get("/bookings", async (req, res) => {
         // Format the response to include nested objects
         const formattedBookings = bookings.map(booking => {
             const {
-                driver_id, driver_name, driver_email, driver_phone, driver_photo,
-                vehicle_type_id, vehicle_name, vehicle_image,
-                sub_company_id, sub_company_name,
+                driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
+                vehicle_type_id, vehicle_type_name, vehicle_type_service,
+                sub_company_id, sub_company_name, sub_company_email,
                 ...bookingData
             } = booking;
 
@@ -294,16 +295,17 @@ app.get("/bookings", async (req, res) => {
                     name: driver_name,
                     email: driver_email,
                     phone_no: driver_phone,
-                    profile_photo: driver_photo
+                    profile_image: driver_profile_image
                 } : null,
                 vehicleDetail: vehicle_type_id ? {
                     id: vehicle_type_id,
-                    name: vehicle_name,
-                    image: vehicle_image
+                    vehicle_type_name: vehicle_type_name,
+                    vehicle_type_service: vehicle_type_service
                 } : null,
                 subCompanyDetail: sub_company_id ? {
                     id: sub_company_id,
-                    name: sub_company_name
+                    name: sub_company_name,
+                    email: sub_company_email
                 } : null
             };
         });
