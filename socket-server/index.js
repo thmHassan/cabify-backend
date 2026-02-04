@@ -211,7 +211,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        let { status, date, user_id, driver_id, page = 1, limit = 10 } = req.query;
+        let { status, date, user_id, driver_id, search, page = 1, limit = 10 } = req.query;
 
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
@@ -219,34 +219,94 @@ app.get("/bookings", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        let baseQuery = `FROM bookings WHERE 1=1`;
+        let baseQuery = `
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE 1=1
+        `;
         const params = [];
 
         if (status) {
-            baseQuery += ` AND booking_status = ?`;
+            baseQuery += ` AND b.booking_status = ?`;
             params.push(status);
         }
         if (date) {
-            baseQuery += ` AND DATE(booking_date) = ?`;
+            baseQuery += ` AND DATE(b.booking_date) = ?`;
             params.push(date);
         }
         if (user_id) {
-            baseQuery += ` AND user_id = ?`;
+            baseQuery += ` AND b.user_id = ?`;
             params.push(user_id);
         }
         if (driver_id) {
-            baseQuery += ` AND driver = ?`;
+            baseQuery += ` AND b.driver = ?`;
             params.push(driver_id);
         }
+        if (search) {
+            baseQuery += ` AND (
+                b.booking_id LIKE ? OR 
+                b.name LIKE ? OR 
+                b.phone_no LIKE ? OR 
+                b.email LIKE ? OR
+                d.name LIKE ? OR
+                vt.name LIKE ?
+            )`;
+            const searchParam = `%${search}%`;
+            params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
+        }
 
-        // Data query
+        // Data query with all related data
         const dataQuery = `
-            SELECT * ${baseQuery}
-            ORDER BY booking_date DESC, id DESC
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_photo as driver_photo,
+                vt.id as vehicle_type_id,
+                vt.name as vehicle_name,
+                vt.image as vehicle_image,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name
+            ${baseQuery}
+            ORDER BY b.booking_date DESC, b.id DESC
             LIMIT ? OFFSET ?
         `;
 
         const [bookings] = await db.query(dataQuery, [...params, limitNum, offset]);
+
+        // Format the response to include nested objects
+        const formattedBookings = bookings.map(booking => {
+            const {
+                driver_id, driver_name, driver_email, driver_phone, driver_photo,
+                vehicle_type_id, vehicle_name, vehicle_image,
+                sub_company_id, sub_company_name,
+                ...bookingData
+            } = booking;
+
+            return {
+                ...bookingData,
+                driverDetail: driver_id ? {
+                    id: driver_id,
+                    name: driver_name,
+                    email: driver_email,
+                    phone_no: driver_phone,
+                    profile_photo: driver_photo
+                } : null,
+                vehicleDetail: vehicle_type_id ? {
+                    id: vehicle_type_id,
+                    name: vehicle_name,
+                    image: vehicle_image
+                } : null,
+                subCompanyDetail: sub_company_id ? {
+                    id: sub_company_id,
+                    name: sub_company_name
+                } : null
+            };
+        });
 
         // Count query
         const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
@@ -254,7 +314,7 @@ app.get("/bookings", async (req, res) => {
 
         return res.json({
             success: true,
-            data: bookings,
+            data: formattedBookings,
             pagination: {
                 total,
                 page: pageNum,
@@ -296,6 +356,160 @@ app.get("/bookings/:id", async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching booking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.put("/bookings/:id/status", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { booking_status, cancel_reason, cancelled_by } = req.body;
+
+        if (!booking_status) {
+            return res.status(400).json({
+                success: false,
+                message: "booking_status is required"
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        // Check if booking exists
+        const [bookings] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [id]
+        );
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        // Build update query
+        let updateQuery = "UPDATE bookings SET booking_status = ?";
+        const params = [booking_status];
+
+        // Add cancel-related fields if status is cancelled
+        if (booking_status === 'cancelled') {
+            if (cancel_reason) {
+                updateQuery += ", cancel_reason = ?";
+                params.push(cancel_reason);
+            }
+            if (cancelled_by) {
+                updateQuery += ", cancelled_by = ?";
+                params.push(cancelled_by);
+            }
+        }
+
+        updateQuery += " WHERE id = ?";
+        params.push(id);
+
+        // Update booking status
+        await db.query(updateQuery, params);
+
+        // If driver is assigned, update driver status based on booking status
+        if (booking.driver) {
+            let driverStatus = null;
+
+            if (booking_status === 'cancelled' || booking_status === 'completed' || booking_status === 'no_show') {
+                driverStatus = 'idle';
+            } else if (booking_status === 'ongoing' || booking_status === 'started' || booking_status === 'arrived') {
+                driverStatus = 'busy';
+            }
+
+            if (driverStatus) {
+                await db.query(
+                    "UPDATE drivers SET driving_status = ? WHERE id = ?",
+                    [driverStatus, booking.driver]
+                );
+            }
+        }
+
+        // Fetch updated booking with related data
+        const [updatedBookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_photo as driver_photo,
+                vt.id as vehicle_type_id,
+                vt.name as vehicle_name,
+                vt.image as vehicle_image,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE b.id = ?
+        `, [id]);
+
+        const updatedBooking = updatedBookings[0];
+        const {
+            driver_id, driver_name, driver_email, driver_phone, driver_photo,
+            vehicle_type_id, vehicle_name, vehicle_image,
+            sub_company_id, sub_company_name,
+            ...bookingData
+        } = updatedBooking;
+
+        const formattedBooking = {
+            ...bookingData,
+            driverDetail: driver_id ? {
+                id: driver_id,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_photo: driver_photo
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                name: vehicle_name,
+                image: vehicle_image
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name
+            } : null
+        };
+
+        // Emit socket events based on status change
+        if (booking.user_id) {
+            const userSocketId = userSockets.get(booking.user_id.toString());
+            if (userSocketId) {
+                io.to(userSocketId).emit("user-ride-status-event", {
+                    status: booking_status,
+                    booking: formattedBooking
+                });
+            }
+        }
+
+        if (booking.driver) {
+            const driverSocketId = driverSockets.get(booking.driver.toString());
+            if (driverSocketId) {
+                io.to(driverSocketId).emit("driver-ride-status-event", {
+                    status: booking_status,
+                    booking: formattedBooking
+                });
+            }
+        }
+
+        return res.json({
+            success: true,
+            message: "Booking status updated successfully",
+            data: formattedBooking
+        });
+
+    } catch (error) {
+        console.error("Error updating booking status:", error);
         return res.status(500).json({
             success: false,
             error: error.message

@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use App\Jobs\AutoDispatchPlotJob;
 use App\Jobs\SendBiddingFixedFareNotificationJob;
 use App\Jobs\AutoDispatchNearestDriverJob;
+use Illuminate\Support\Facades\Http;
 
 class BookingController extends Controller
 {
