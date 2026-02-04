@@ -147,50 +147,61 @@ app.use(cors({
 }));
 
 // app.use("/", router)
-app.post("/bookings/notify", async (req, res) => {
+
+app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
-        const { booking } = req.body;
+        const db = getConnection(req.tenantDb);
 
-        console.log(`🔔 New booking notification received: ${booking.booking_id}`);
+        const query = `
+            SELECT
+                COUNT(CASE 
+                    WHEN DATE(booking_date) = CURDATE() 
+                    THEN 1 
+                END) AS todays_booking,
 
-        // Broadcast to all dispatchers
-        let sentCount = 0;
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("new-booking-event", booking);
-            sentCount++;
-        });
+                COUNT(CASE 
+                    WHEN DATE(booking_date) > CURDATE() 
+                    THEN 1 
+                END) AS pre_bookings,
 
-        // Broadcast to admin sockets
-        adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("new-booking-event", booking);
-            sentCount++;
-        });
+                COUNT(CASE 
+                    WHEN booking_status = 'completed' 
+                    THEN 1 
+                END) AS completed,
 
-        // Also emit to bookings-list-update for real-time list updates
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("bookings-list-update", {
-                action: 'new',
-                booking: booking
-            });
-        });
+                COUNT(CASE 
+                    WHEN booking_status = 'no_show' 
+                    THEN 1 
+                END) AS no_show,
 
-        adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("bookings-list-update", {
-                action: 'new',
-                booking: booking
-            });
-        });
+                COUNT(CASE 
+                    WHEN booking_status = 'cancelled' 
+                    THEN 1 
+                END) AS cancelled,
 
-        console.log(`✅ Booking ${booking.booking_id} broadcasted to ${sentCount} clients`);
+                COUNT(CASE 
+                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
+                    THEN 1 
+                END) AS recent_jobs
+            FROM bookings
+        `;
+
+        const [[counts]] = await db.query(query);
 
         return res.json({
             success: true,
-            message: 'Booking broadcasted successfully',
-            sent_to: sentCount
+            data: {
+                todaysBooking: counts.todays_booking,
+                preBookings: counts.pre_bookings,
+                recentJobs: counts.recent_jobs,
+                completed: counts.completed,
+                noShow: counts.no_show,
+                cancelled: counts.cancelled
+            }
         });
 
     } catch (error) {
-        console.error("Error broadcasting booking:", error);
+        console.error("Dashboard count error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -285,67 +296,6 @@ app.get("/bookings/:id", async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching booking:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.get("/bookings/dashboard-counts", async (req, res) => {
-    try {
-        const db = getConnection(req.tenantDb);
-
-        const query = `
-            SELECT
-                COUNT(CASE 
-                    WHEN DATE(booking_date) = CURDATE() 
-                    THEN 1 
-                END) AS todays_booking,
-
-                COUNT(CASE 
-                    WHEN DATE(booking_date) > CURDATE() 
-                    THEN 1 
-                END) AS pre_bookings,
-
-                COUNT(CASE 
-                    WHEN booking_status = 'completed' 
-                    THEN 1 
-                END) AS completed,
-
-                COUNT(CASE 
-                    WHEN booking_status = 'no_show' 
-                    THEN 1 
-                END) AS no_show,
-
-                COUNT(CASE 
-                    WHEN booking_status = 'cancelled' 
-                    THEN 1 
-                END) AS cancelled,
-
-                COUNT(CASE 
-                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
-                    THEN 1 
-                END) AS recent_jobs
-            FROM bookings
-        `;
-
-        const [[counts]] = await db.query(query);
-
-        return res.json({
-            success: true,
-            data: {
-                todaysBooking: counts.todays_booking,
-                preBookings: counts.pre_bookings,
-                recentJobs: counts.recent_jobs,
-                completed: counts.completed,
-                noShow: counts.no_show,
-                cancelled: counts.cancelled
-            }
-        });
-
-    } catch (error) {
-        console.error("Dashboard count error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
