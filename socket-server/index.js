@@ -4,6 +4,8 @@ const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
 const { getConnection } = require("./db")
+const transporter = require("./utils/Emailconfig");
+const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 // const router = require("./router/router");
 
 const app = express();
@@ -211,7 +213,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        let { status, date, user_id, driver_id, sub_company, search, page = 1, limit = 10 } = req.query;
+        let { status, date, user_id, driver_id, sub_company, search, filter, page = 1, limit = 10 } = req.query;
 
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
@@ -227,6 +229,30 @@ app.get("/bookings", async (req, res) => {
             WHERE 1=1
         `;
         const params = [];
+
+        // Dashboard card filters
+        if (filter) {
+            switch (filter) {
+                case 'todays_booking':
+                    baseQuery += ` AND DATE(b.booking_date) = CURDATE()`;
+                    break;
+                case 'pre_bookings':
+                    baseQuery += ` AND DATE(b.booking_date) > CURDATE()`;
+                    break;
+                case 'completed':
+                    baseQuery += ` AND b.booking_status = 'completed'`;
+                    break;
+                case 'no_show':
+                    baseQuery += ` AND b.booking_status = 'no_show'`;
+                    break;
+                case 'cancelled':
+                    baseQuery += ` AND b.booking_status = 'cancelled'`;
+                    break;
+                case 'recent_jobs':
+                    baseQuery += ` AND b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+                    break;
+            }
+        }
 
         if (status) {
             baseQuery += ` AND b.booking_status = ?`;
@@ -368,6 +394,113 @@ app.get("/bookings/:id", async (req, res) => {
     }
 });
 
+app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id,
+                vt.vehicle_type_name as vehicle_type_name,
+                vt.vehicle_type_service as vehicle_type_service,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE b.id = ?
+        `, [id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        if (!booking.email) {
+            return res.status(400).json({
+                success: false,
+                message: "Booking does not have an email address"
+            });
+        }
+
+        const {
+            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
+            ...bookingData
+        } = booking;
+
+        const formattedBooking = {
+            ...bookingData,
+            driverDetail: driver_id ? {
+                id: driver_id,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_image: driver_profile_image
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                vehicle_type_name: vehicle_type_name,
+                vehicle_type_service: vehicle_type_service
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name,
+                email: sub_company_email
+            } : null
+        };
+
+        const emailHtml = getBookingConfirmationEmail(formattedBooking);
+
+        const mailOptions = {
+            from: {
+                name: 'Cabifyit',
+                address: process.env.MAIL_FROM_ADDRESS || 'support@cabifyit.com'
+            },
+            to: booking.email,
+            subject: `Booking Confirmation - ${booking.booking_id}`,
+            html: emailHtml
+        };
+
+        // Send email
+        const info = await transporter.sendMail(mailOptions);
+
+        console.log(`✅ Email sent successfully to ${booking.email}`);
+        console.log('Message ID:', info.messageId);
+
+        return res.json({
+            success: true,
+            message: "Booking confirmation email sent successfully",
+            data: {
+                booking_id: booking.booking_id,
+                email: booking.email,
+                messageId: info.messageId
+            }
+        });
+
+    } catch (error) {
+        console.error("Error sending confirmation email:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
@@ -382,7 +515,6 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        // Check if booking exists
         const [bookings] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
             [id]
@@ -397,11 +529,9 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         const booking = bookings[0];
 
-        // Build update query
         let updateQuery = "UPDATE bookings SET booking_status = ?";
         const params = [booking_status];
 
-        // Add cancel-related fields if status is cancelled
         if (booking_status === 'cancelled') {
             if (cancel_reason) {
                 updateQuery += ", cancel_reason = ?";
@@ -416,10 +546,8 @@ app.put("/bookings/:id/status", async (req, res) => {
         updateQuery += " WHERE id = ?";
         params.push(id);
 
-        // Update booking status
         await db.query(updateQuery, params);
 
-        // If driver is assigned, update driver status based on booking status
         if (booking.driver) {
             let driverStatus = null;
 
@@ -437,7 +565,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // Fetch updated booking with related data
         const [updatedBookings] = await db.query(`
             SELECT 
                 b.*,
@@ -445,12 +572,13 @@ app.put("/bookings/:id/status", async (req, res) => {
                 d.name as driver_name,
                 d.email as driver_email,
                 d.phone_no as driver_phone,
-                d.profile_photo as driver_photo,
+                d.profile_image as driver_profile_image,
                 vt.id as vehicle_type_id,
-                vt.name as vehicle_name,
-                vt.image as vehicle_image,
+                vt.vehicle_type_name as vehicle_type_name,
+                vt.vehicle_type_service as vehicle_type_service,
                 sc.id as sub_company_id,
-                sc.name as sub_company_name
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
             FROM bookings b
             LEFT JOIN drivers d ON b.driver = d.id
             LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
@@ -460,9 +588,9 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         const updatedBooking = updatedBookings[0];
         const {
-            driver_id, driver_name, driver_email, driver_phone, driver_photo,
-            vehicle_type_id, vehicle_name, vehicle_image,
-            sub_company_id, sub_company_name,
+            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
             ...bookingData
         } = updatedBooking;
 
@@ -473,16 +601,17 @@ app.put("/bookings/:id/status", async (req, res) => {
                 name: driver_name,
                 email: driver_email,
                 phone_no: driver_phone,
-                profile_photo: driver_photo
+                profile_image: driver_profile_image
             } : null,
             vehicleDetail: vehicle_type_id ? {
                 id: vehicle_type_id,
-                name: vehicle_name,
-                image: vehicle_image
+                vehicle_type_name: vehicle_type_name,
+                vehicle_type_service: vehicle_type_service
             } : null,
             subCompanyDetail: sub_company_id ? {
                 id: sub_company_id,
-                name: sub_company_name
+                name: sub_company_name,
+                email: sub_company_email
             } : null
         };
 
