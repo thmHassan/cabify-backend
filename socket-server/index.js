@@ -3,7 +3,7 @@ const cors = require("cors")
 const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
-const {getConnection} = require("./db")
+const { getConnection } = require("./db")
 // const router = require("./router/router");
 
 const app = express();
@@ -200,76 +200,57 @@ app.post("/bookings/notify", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        const { status, date, user_id, driver_id, page = 1, limit = 10 } = req.query;
-        const offset = (page - 1) * limit;
+        let { status, date, user_id, driver_id, page = 1, limit = 10 } = req.query;
+
+        const pageNum = Math.max(parseInt(page) || 1, 1);
+        const limitNum = Math.max(parseInt(limit) || 10, 1);
+        const offset = (pageNum - 1) * limitNum;
 
         const db = getConnection(req.tenantDb);
 
-        let query = `SELECT * FROM bookings WHERE 1=1`;
-        const queryParams = [];
+        let baseQuery = `FROM bookings WHERE 1=1`;
+        const params = [];
 
         if (status) {
-            query += ` AND booking_status = ?`;
-            queryParams.push(status);
+            baseQuery += ` AND booking_status = ?`;
+            params.push(status);
         }
         if (date) {
-            query += ` AND DATE(booking_date) = ?`;
-            queryParams.push(date);
+            baseQuery += ` AND DATE(booking_date) = ?`;
+            params.push(date);
         }
         if (user_id) {
-            query += ` AND user_id = ?`;
-            queryParams.push(user_id);
+            baseQuery += ` AND user_id = ?`;
+            params.push(user_id);
         }
         if (driver_id) {
-            query += ` AND driver = ?`;
-            queryParams.push(driver_id);
+            baseQuery += ` AND driver = ?`;
+            params.push(driver_id);
         }
 
-        query += ` ORDER BY booking_date DESC, id DESC LIMIT ? OFFSET ?`;
-        queryParams.push(parseInt(limit), parseInt(offset));
+        // Data query
+        const dataQuery = `
+            SELECT * ${baseQuery}
+            ORDER BY booking_date DESC, id DESC
+            LIMIT ? OFFSET ?
+        `;
 
-        const [bookings] = await db.query(query, queryParams);
+        const [bookings] = await db.query(dataQuery, [...params, limitNum, offset]);
 
-        let countQuery = `SELECT COUNT(*) as total FROM bookings WHERE 1=1`;
-        const countParams = [];
-
-        if (status) {
-            countQuery += ` AND booking_status = ?`;
-            countParams.push(status);
-        }
-        if (date) {
-            countQuery += ` AND DATE(booking_date) = ?`;
-            countParams.push(date);
-        }
-        if (user_id) {
-            countQuery += ` AND user_id = ?`;
-            countParams.push(user_id);
-        }
-        if (driver_id) {
-            countQuery += ` AND driver = ?`;
-            countParams.push(driver_id);
-        }
-
-        const [countResult] = await db.query(countQuery, countParams);
-        const total = countResult[0].total;
-
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("bookings-list-update", {
-                bookings: bookings,
-                total: total,
-                page: parseInt(page),
-                limit: parseInt(limit)
-            });
-        });
+        // Count query
+        const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+        const [[{ total }]] = await db.query(countQuery, params);
 
         return res.json({
             success: true,
             data: bookings,
             pagination: {
-                total: total,
-                page: parseInt(page),
-                limit: parseInt(limit),
-                total_pages: Math.ceil(total / limit)
+                total,
+                page: pageNum,
+                limit: limitNum,
+                total_pages: Math.ceil(total / limitNum),
+                hasNext: pageNum * limitNum < total,
+                hasPrev: pageNum > 1
             }
         });
 
@@ -304,6 +285,67 @@ app.get("/bookings/:id", async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching booking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.get("/bookings/dashboard-counts", async (req, res) => {
+    try {
+        const db = getConnection(req.tenantDb);
+
+        const query = `
+            SELECT
+                COUNT(CASE 
+                    WHEN DATE(booking_date) = CURDATE() 
+                    THEN 1 
+                END) AS todays_booking,
+
+                COUNT(CASE 
+                    WHEN DATE(booking_date) > CURDATE() 
+                    THEN 1 
+                END) AS pre_bookings,
+
+                COUNT(CASE 
+                    WHEN booking_status = 'completed' 
+                    THEN 1 
+                END) AS completed,
+
+                COUNT(CASE 
+                    WHEN booking_status = 'no_show' 
+                    THEN 1 
+                END) AS no_show,
+
+                COUNT(CASE 
+                    WHEN booking_status = 'cancelled' 
+                    THEN 1 
+                END) AS cancelled,
+
+                COUNT(CASE 
+                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
+                    THEN 1 
+                END) AS recent_jobs
+            FROM bookings
+        `;
+
+        const [[counts]] = await db.query(query);
+
+        return res.json({
+            success: true,
+            data: {
+                todaysBooking: counts.todays_booking,
+                preBookings: counts.pre_bookings,
+                recentJobs: counts.recent_jobs,
+                completed: counts.completed,
+                noShow: counts.no_show,
+                cancelled: counts.cancelled
+            }
+        });
+
+    } catch (error) {
+        console.error("Dashboard count error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
