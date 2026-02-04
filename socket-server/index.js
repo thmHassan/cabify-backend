@@ -6,7 +6,6 @@ const axios = require("axios");
 const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
-// const router = require("./router/router");
 
 const app = express();
 const server = http.createServer(app);
@@ -147,8 +146,6 @@ app.use(cors({
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
-
-// app.use("/", router)
 
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
@@ -501,6 +498,160 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
     }
 });
 
+app.put("/bookings/:id/assign-driver", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { driver_id } = req.body;
+
+        if (!driver_id) {
+            return res.status(400).json({
+                success: false,
+                message: "driver_id is required"
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [id]
+        );
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+        const oldDriverId = booking.driver;
+
+        const [drivers] = await db.query(
+            "SELECT * FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+
+        if (drivers.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found"
+            });
+        }
+
+        await db.query(
+            "UPDATE bookings SET driver = ? WHERE id = ?",
+            [driver_id, id]
+        );
+
+        if (oldDriverId && oldDriverId !== null) {
+            await db.query(
+                "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
+                [oldDriverId]
+            );
+
+            const oldDriverSocketId = driverSockets.get(oldDriverId.toString());
+            if (oldDriverSocketId) {
+                io.to(oldDriverSocketId).emit("driver-unassigned-event", {
+                    booking_id: booking.id,
+                    message: "You have been unassigned from this booking"
+                });
+            }
+        }
+
+        await db.query(
+            "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
+            [driver_id]
+        );
+
+        const [updatedBookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id,
+                vt.vehicle_type_name as vehicle_type_name,
+                vt.vehicle_type_service as vehicle_type_service,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE b.id = ?
+        `, [id]);
+
+        const updatedBooking = updatedBookings[0];
+        const {
+            driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
+            ...bookingData
+        } = updatedBooking;
+
+        const formattedBooking = {
+            ...bookingData,
+            driverDetail: dId ? {
+                id: dId,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_image: driver_profile_image
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                vehicle_type_name: vehicle_type_name,
+                vehicle_type_service: vehicle_type_service
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name,
+                email: sub_company_email
+            } : null
+        };
+
+        const newDriverSocketId = driverSockets.get(driver_id.toString());
+        if (newDriverSocketId) {
+            io.to(newDriverSocketId).emit("new-ride", formattedBooking);
+        }
+
+        if (booking.user_id) {
+            const userSocketId = userSockets.get(booking.user_id.toString());
+            if (userSocketId) {
+                const message = oldDriverId
+                    ? "Your driver has been changed"
+                    : "Driver has been assigned to your booking";
+
+                io.to(userSocketId).emit("driver-changed-event", {
+                    booking: formattedBooking,
+                    message: message
+                });
+            }
+        }
+
+        const responseMessage = oldDriverId
+            ? "Driver changed successfully"
+            : "Driver assigned successfully";
+
+        return res.json({
+            success: true,
+            message: responseMessage,
+            data: formattedBooking
+        });
+
+    } catch (error) {
+        console.error("Error assigning driver:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
@@ -644,6 +795,158 @@ app.put("/bookings/:id/status", async (req, res) => {
 
     } catch (error) {
         console.error("Error updating booking status:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.post("/bookings/:id/follow-driver", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                d.latitude as driver_latitude,
+                d.longitude as driver_longitude,
+                d.driving_status as driver_status
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            WHERE b.id = ?
+        `, [id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        if (!booking.driver) {
+            return res.status(400).json({
+                success: false,
+                message: "No driver assigned to this booking"
+            });
+        }
+
+        const driverInfo = {
+            id: booking.driver_id,
+            name: booking.driver_name,
+            email: booking.driver_email,
+            phone_no: booking.driver_phone,
+            profile_image: booking.driver_profile_image,
+            latitude: booking.driver_latitude,
+            longitude: booking.driver_longitude,
+            status: booking.driver_status
+        };
+
+        const driverSocketId = driverSockets.get(booking.driver.toString());
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("start-location-tracking", {
+                booking_id: booking.id,
+                message: "Location tracking started for this booking"
+            });
+        }
+
+        if (booking.dispatcher_id) {
+            const dispatcherSocketId = dispatcherSockets.get(booking.dispatcher_id.toString());
+            if (dispatcherSocketId) {
+                io.to(dispatcherSocketId).emit("driver-location-tracking-started", {
+                    booking_id: booking.id,
+                    driver: driverInfo
+                });
+            }
+        }
+
+        adminSockets.forEach((socketId) => {
+            io.to(socketId).emit("driver-location-tracking-started", {
+                booking_id: booking.id,
+                driver: driverInfo
+            });
+        });
+
+        return res.json({
+            success: true,
+            message: "Driver location tracking started",
+            data: {
+                booking_id: booking.id,
+                driver: driverInfo
+            }
+        });
+
+    } catch (error) {
+        console.error("Error starting driver tracking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.get("/bookings/:id/driver-location", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(`
+            SELECT 
+                b.id as booking_id,
+                b.booking_id as booking_reference,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.latitude as driver_latitude,
+                d.longitude as driver_longitude,
+                d.driving_status as driver_status,
+                d.updated_at as last_location_update
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            WHERE b.id = ?
+        `, [id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        if (!booking.driver_id) {
+            return res.status(400).json({
+                success: false,
+                message: "No driver assigned to this booking"
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                booking_id: booking.booking_id,
+                booking_reference: booking.booking_reference,
+                driver: {
+                    id: booking.driver_id,
+                    name: booking.driver_name,
+                    latitude: booking.driver_latitude,
+                    longitude: booking.driver_longitude,
+                    status: booking.driver_status,
+                    last_update: booking.last_location_update
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Error fetching driver location:", error);
         return res.status(500).json({
             success: false,
             error: error.message
