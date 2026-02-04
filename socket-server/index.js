@@ -3,7 +3,8 @@ const cors = require("cors")
 const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
-const router = require("./router/router");
+const {getConnection} = require("./db")
+// const router = require("./router/router");
 
 const app = express();
 const server = http.createServer(app);
@@ -136,14 +137,241 @@ app.use(cors({
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
-        "https://91.98.41.165/"
+        "https://clientadmin.cabifyit.com",
+        "https://admin.cabifyit.com",
+        "https://dispatcher.cabifyit.com"
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
 
-app.use("/", router)
+// app.use("/", router)
+app.post("/bookings/notify", async (req, res) => {
+    try {
+        const { booking } = req.body;
+
+        console.log(`🔔 New booking notification received: ${booking.booking_id}`);
+
+        // Broadcast to all dispatchers
+        let sentCount = 0;
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        // Broadcast to admin sockets
+        adminSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        // Also emit to bookings-list-update for real-time list updates
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("bookings-list-update", {
+                action: 'new',
+                booking: booking
+            });
+        });
+
+        adminSockets.forEach((socketId) => {
+            io.to(socketId).emit("bookings-list-update", {
+                action: 'new',
+                booking: booking
+            });
+        });
+
+        console.log(`✅ Booking ${booking.booking_id} broadcasted to ${sentCount} clients`);
+
+        return res.json({
+            success: true,
+            message: 'Booking broadcasted successfully',
+            sent_to: sentCount
+        });
+
+    } catch (error) {
+        console.error("Error broadcasting booking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.get("/bookings", async (req, res) => {
+    try {
+        const { status, date, user_id, driver_id, page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const db = getConnection(req.tenantDb);
+
+        let query = `SELECT * FROM bookings WHERE 1=1`;
+        const queryParams = [];
+
+        if (status) {
+            query += ` AND booking_status = ?`;
+            queryParams.push(status);
+        }
+        if (date) {
+            query += ` AND DATE(booking_date) = ?`;
+            queryParams.push(date);
+        }
+        if (user_id) {
+            query += ` AND user_id = ?`;
+            queryParams.push(user_id);
+        }
+        if (driver_id) {
+            query += ` AND driver = ?`;
+            queryParams.push(driver_id);
+        }
+
+        query += ` ORDER BY booking_date DESC, id DESC LIMIT ? OFFSET ?`;
+        queryParams.push(parseInt(limit), parseInt(offset));
+
+        const [bookings] = await db.query(query, queryParams);
+
+        let countQuery = `SELECT COUNT(*) as total FROM bookings WHERE 1=1`;
+        const countParams = [];
+
+        if (status) {
+            countQuery += ` AND booking_status = ?`;
+            countParams.push(status);
+        }
+        if (date) {
+            countQuery += ` AND DATE(booking_date) = ?`;
+            countParams.push(date);
+        }
+        if (user_id) {
+            countQuery += ` AND user_id = ?`;
+            countParams.push(user_id);
+        }
+        if (driver_id) {
+            countQuery += ` AND driver = ?`;
+            countParams.push(driver_id);
+        }
+
+        const [countResult] = await db.query(countQuery, countParams);
+        const total = countResult[0].total;
+
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("bookings-list-update", {
+                bookings: bookings,
+                total: total,
+                page: parseInt(page),
+                limit: parseInt(limit)
+            });
+        });
+
+        return res.json({
+            success: true,
+            data: bookings,
+            pagination: {
+                total: total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total_pages: Math.ceil(total / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error("Error fetching bookings:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.get("/bookings/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const query = `SELECT * FROM bookings WHERE id = ?`;
+        const [bookings] = await db.query(query, [id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: bookings[0]
+        });
+
+    } catch (error) {
+        console.error("Error fetching booking:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.post("/bookings/broadcast", async (req, res) => {
+    try {
+        const { booking_id, tenantDb } = req.body;
+        const DB_PREFIX = "tenant";
+
+        const finalDb = `${DB_PREFIX}${tenantDb}`;
+
+        console.log("📂 Using DB:", finalDb);
+
+        const db = getConnection(finalDb);
+
+
+        const [rows] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [booking_id]
+        );
+
+        if (!rows.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = rows[0];
+        let sentCount = 0;
+
+        console.log("📢 Broadcasting booking:", booking.id);
+        console.log("Dispatchers:", dispatcherSockets.size);
+        console.log("Admins:", adminSockets.size);
+        console.log("Clients:", clientSockets.size);
+
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        adminSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        clientSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        return res.json({
+            success: true,
+            sent_to: sentCount,
+            booking
+        });
+
+    } catch (error) {
+        console.error("❌ Broadcast error:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
 app.post("/send-new-ride", (req, res) => {
     const { drivers, booking } = req.body;
