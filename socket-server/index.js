@@ -211,7 +211,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        let { status, date, user_id, driver_id, search, page = 1, limit = 10 } = req.query;
+        let { status, date, user_id, driver_id, sub_company, search, page = 1, limit = 10 } = req.query;
 
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
@@ -244,6 +244,10 @@ app.get("/bookings", async (req, res) => {
             baseQuery += ` AND b.driver = ?`;
             params.push(driver_id);
         }
+        if (sub_company) {
+            baseQuery += ` AND b.sub_company = ?`;
+            params.push(sub_company);
+        }
         if (search) {
             baseQuery += ` AND (
                 b.booking_id LIKE ? OR 
@@ -257,7 +261,6 @@ app.get("/bookings", async (req, res) => {
             params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
         }
 
-        // Data query with all related data
         const dataQuery = `
             SELECT 
                 b.*,
