@@ -3,7 +3,7 @@ const cors = require("cors")
 const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
-const { getConnection } = require("./db");
+const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 
@@ -118,9 +118,9 @@ io.on("connection", (socket) => {
     });
 });
 
-app.use((req, res, next) => {
-    next();
-});
+// app.use((req, res, next) => {
+//     next();
+// });
 
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
@@ -130,6 +130,16 @@ app.use((req, res, next) => {
     }
     next();
 });
+
+// app.use((req, res, next) => {
+//     const databaseHeader = req.headers['database'];
+//     if (databaseHeader) {
+//         req.tenantDb = `tenant${databaseHeader}`;
+//     } else {
+//         req.tenantDb = process.env.DB_DATABASE;
+//     }
+//     next();
+// });
 
 app.use(express.json());
 

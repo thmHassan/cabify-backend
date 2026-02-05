@@ -1,8 +1,6 @@
 const path = require("path");
 const mysql = require("mysql2");
-require("dotenv").config({
-    path: path.resolve(__dirname, "../laravel-backend/.env")
-});
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const REQUIRED_ENVS = [
     "DB_HOST",
