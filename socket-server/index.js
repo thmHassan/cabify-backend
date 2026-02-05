@@ -118,25 +118,15 @@ io.on("connection", (socket) => {
     });
 });
 
-// app.use((req, res, next) => {
-//     next();
-// });
-
-// app.use((req, res, next) => {
-//     const databaseHeader = req.headers['database'];
-//     if (databaseHeader) {
-//         req.tenantDb = `tenant${databaseHeader}`;
-//         console.log(`📂 Using database: ${req.tenantDb}`);
-//     }
-//     next();
-// });
+app.use((req, res, next) => {
+    next();
+});
 
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
         req.tenantDb = `tenant${databaseHeader}`;
-    } else {
-        req.tenantDb = process.env.DB_DATABASE;
+        console.log(`📂 Using database: ${req.tenantDb}`);
     }
     next();
 });
