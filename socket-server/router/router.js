@@ -229,4 +229,65 @@ router.post("/bookings/broadcast", async (req, res) => {
     }
 });
 
+app.get("/bookings/:id/driver-location", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(`
+            SELECT 
+                b.id as booking_id,
+                b.booking_id as booking_reference,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.latitude as driver_latitude,
+                d.longitude as driver_longitude,
+                d.driving_status as driver_status,
+                d.updated_at as last_location_update
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            WHERE b.id = ?
+        `, [id]);
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        if (!booking.driver_id) {
+            return res.status(400).json({
+                success: false,
+                message: "No driver assigned to this booking"
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                booking_id: booking.booking_id,
+                booking_reference: booking.booking_reference,
+                driver: {
+                    id: booking.driver_id,
+                    name: booking.driver_name,
+                    latitude: booking.driver_latitude,
+                    longitude: booking.driver_longitude,
+                    status: booking.driver_status,
+                    last_update: booking.last_location_update
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Error fetching driver location:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 module.exports = router;
