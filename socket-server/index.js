@@ -168,6 +168,36 @@ io.on("connection", (socket) => {
         }
     });
 
+    socket.on("get-driver-location", async (data) => {
+        try {
+            var dataArray;
+            if (typeof data === "string") {
+                dataArray = JSON.parse(data);
+            } else {
+                dataArray = data;
+            }
+            const response = await axios.post(
+                "https://backend.cabifyit.com/api/driver/get-location",
+                dataArray,
+                {
+                    headers: {
+                        Authorization: `Bearer ${socket.token}`,
+                        database: `${dataArray.database}`,
+                    }
+                }
+            );
+
+            const location = response.data;
+
+            socket.emit("get-driver-location-on-user", {
+                success: true,
+                data: location,
+            });
+        } catch (err) {
+            console.error("Laravel Socket error", err);
+        }
+    });
+
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());

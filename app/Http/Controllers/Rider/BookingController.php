@@ -391,8 +391,8 @@ class BookingController extends Controller
             $distance = $request->distance;
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
-            $newBooking->pickup_time = 'asap';
-            $newBooking->booking_date = date("Y-m-d");
+            $newBooking->pickup_time = (isset($request->pickup_time) && $request->pickup_time != NULL) ? $request->pickup_time : now()->format('H:i:s');
+            $newBooking->booking_date = (isset($request->booking_date) && $request->booking_date != NULL) ? $request->booking_date : date("Y-m-d");
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
             $newBooking->pickup_plot_id = $request->pickup_plot_id;
