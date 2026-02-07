@@ -37,6 +37,8 @@ class CheckUpcomingRide extends Command
         foreach($bookings as $booking){
             $booking->booking_status = "started";
             $booking->save();
+
+            \Log::info("upcoming to current booking ". $booking->id);
         }
     }
 }
