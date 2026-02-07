@@ -328,4 +328,22 @@ class SettingController extends Controller
             ], 500);
         }
     }
+
+    public function notificationList(){
+        try{
+            $list = CompanyNotification::where("user_type", 'rider')->where("user_id", auth("rider")->user()->id)->orderBy("id", "DESC")->get();
+
+            return response()->json([
+                'success' => 1,
+                'list' => $list,
+                'message' => 'Notification list fetched successfully'
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

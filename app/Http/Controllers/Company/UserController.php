@@ -10,6 +10,8 @@ use Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Http;
 use App\Models\TenantUser;
+use App\Models\CompanyNotification;
+use App\Services\FCMService;
 
 class UserController extends Controller
 {
@@ -227,18 +229,24 @@ class UserController extends Controller
 
             $user = CompanyUser::where("id", $request->user_id)->first();
 
-            if(!isset($user->device_token) || $user->device_token == NULL){
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'User is not logged in to App'
-                ], 400);
+            $tokens = CompanyToken::where("user_id", $request->user_id)->where("user_type", "rider")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        $request->title,
+                        $request->body,
+                    );
+                }
             }
 
-            // FCMService::sendToDevice(
-            //     $user->device_token,
-            //     $request->title,
-            //     $request->body
-            // );
+            $record = new CompanyNotification;
+            $record->user_type = "rider";
+            $record->user_id = $user->id;
+            $record->title = $title;
+            $record->message = $body;
+            $record->save();
 
             return response()->json([
                 'success' => 1,

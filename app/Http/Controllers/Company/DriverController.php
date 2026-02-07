@@ -8,6 +8,7 @@ use App\Models\CompanyDriver;
 use Illuminate\Validation\Rule;
 use App\Models\DriverDocument;
 use App\Models\CompanyBooking;
+use App\Models\CompanyNotification;
 use App\Services\FCMService;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
@@ -268,6 +269,12 @@ class DriverController extends Controller
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
             $driver->vehicle_change_request = 2;
+            $driver->change_vehicle_service = $driver->vehicle_service;
+            $driver->change_vehicle_type = $driver->vehicle_type;
+            $driver->change_color = $driver->color;
+            $driver->change_seats = $driver->seats;
+            $driver->change_plate_no = $driver->plate_no;
+            $driver->change_vehicle_registration_date = $driver->vehicle_registration_date;
             $driver->save();
 
             return response()->json([
@@ -465,18 +472,24 @@ class DriverController extends Controller
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
-            if(!isset($driver->device_token) || $driver->device_token == NULL){
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Driver is not logged in to App'
-                ], 400);
+            $tokens = CompanyToken::where("driver_id", $request->driver_id)->where("user_type", "driver")->get();
+
+            if(isset($tokens) && $tokens != NULL){
+                foreach($tokens as $key => $token){
+                    FCMService::sendToDevice(
+                        $token->device_token,
+                        $request->title,
+                        $request->body,
+                    );
+                }
             }
 
-            // FCMService::sendToDevice(
-            //     $driver->device_token,
-            //     $request->title,
-            //     $request->body
-            // );
+            $record = new CompanyNotification;
+            $record->user_type = "driver";
+            $record->user_id = $driver->id;
+            $record->title = $title;
+            $record->message = $body;
+            $record->save();
 
             return response()->json([
                 'success' => 1,

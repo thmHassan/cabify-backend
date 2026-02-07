@@ -68,6 +68,7 @@ Route::post('/company/forgot-password', [CompanyController::class, 'forgotPasswo
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
 Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/location', [DriverAuthController::class, 'setLocation']);
+    Route::post('/driver/get-location', [DriverAuthController::class, 'getLocation']);
 });
 
 Route::group(['middleware' => ['auth:api']], function () {
@@ -288,6 +289,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/send-message', [DriverSettingController::class, 'sendMessage']);
         Route::get('/driver/message-list', [DriverSettingController::class, 'messageList']);
         Route::get('/driver/message-history', [DriverSettingController::class, 'messageHistory']);
+        Route::get('/driver/notification-list', [DriverSettingController::class, 'notificationList']);
    
         Route::post('/driver/create-contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
@@ -319,6 +321,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
         Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
+        Route::post('/driver/change-vehicle-information', [DriverVehicleController::class, 'changeVehicleInformation']);
         
         Route::post('/driver/store-token', [DriverAuthController::class, 'storeToken']);
         Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
@@ -348,6 +351,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/rider/send-message', [RiderSettingController::class, 'sendMessage']);
         Route::get('/rider/message-list', [RiderSettingController::class, 'messageList']);
         Route::get('/rider/message-history', [RiderSettingController::class, 'messageHistory']);
+        Route::get('/rider/notification-list', [RiderSettingController::class, 'notificationList']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);

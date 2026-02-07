@@ -485,6 +485,7 @@ class SettingController extends Controller
                 'title' => $request->title,
                 'body' => $request->body,
                 'users' => $users,
+                'user_type' => $request->user_type
             ]);
             return response()->json([
                 'success' => 1,

@@ -47,7 +47,7 @@ class AuthController extends Controller
                 ]);
             }
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->where("cpuntry_code", $request->country_code)->first();
+            $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->where("country_code", $request->country_code)->first();
             
             if(isset($user) && $user != NULL){
                 return response()->json([
@@ -449,5 +449,25 @@ class AuthController extends Controller
             if ($intersect) $inside = !$inside;
         }
         return $inside;
+    }
+
+    public function getLocation(Request $request){
+        try{
+            $driver = CompanyDriver::where("driver", $request->driver_id)->first();
+
+            return response()->json([
+                'success' => 1,
+                'data' => [
+                    'latitude' => $driver->latitude,
+                    'longitude' => $driver->longitude
+                ]
+            ]);
+        }
+        catch(Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => 'SOmething went wrong'
+            ]);
+        }
     }
 }

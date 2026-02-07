@@ -26,7 +26,6 @@ class VehicleController extends Controller
             $driver->seats = $request->seats;
             $driver->plate_no = $request->plate_no;
             $driver->vehicle_registration_date = $request->vehicle_registration_date;
-            $driver->vehicle_change_request = 1;
             $driver->save();
 
             return response()->json([
@@ -65,6 +64,31 @@ class VehicleController extends Controller
             return response()->json([
                 'success' => 1,
                 'list' => $vehicleTypeList
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function changeVehicleInformation(Request $request){
+        try{
+            $driver = CompanyDriver::where("id", auth('driver')->user()->id)->first();
+            $driver->change_vehicle_service = $request->vehicle_service;
+            $driver->change_vehicle_type = $request->vehicle_type;
+            $driver->change_color = $request->color;
+            $driver->change_seats = $request->seats;
+            $driver->change_plate_no = $request->plate_no;
+            $driver->change_vehicle_registration_date = $request->vehicle_registration_date;
+            $driver->vehicle_change_request = 1;
+            $driver->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Vehicle change request sent to client'
             ]);
         }
         catch(\Exception $e){
