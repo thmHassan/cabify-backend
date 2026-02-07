@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\CompanyBooking;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class CheckUpcomingRide extends Command
 {
