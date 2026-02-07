@@ -13,7 +13,7 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         // $schedule->command('inspire')->hourly();
-        $schedule->command('check:pickup-delay')
+        $schedule->command('app:check-upcoming-ride')
                  ->everyMinute()
                  ->withoutOverlapping();
     }
