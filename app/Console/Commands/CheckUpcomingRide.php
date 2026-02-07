@@ -63,6 +63,7 @@ class CheckUpcomingRide extends Command
                             'error'  => $e->getMessage()
                         ]);
                 }
+            \Log::info("complete cron");
          }
     }
 
