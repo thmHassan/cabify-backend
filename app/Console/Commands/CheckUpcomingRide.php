@@ -38,7 +38,7 @@ class CheckUpcomingRide extends Command
 
             try {
                 // 2️⃣ Switch tenant database
-                $this->setTenantDatabase($tenant->database);
+                $this->setTenantDatabase($tenant->id);
 
                 $bookings = CompanyBooking::on('tenant')
                     ->whereDate('booking_date', Carbon::today())
@@ -68,7 +68,7 @@ class CheckUpcomingRide extends Command
 
     private function setTenantDatabase($database)
     {
-        config(['database.connections.tenant.database' => $database]);
+        config(['database.connections.tenant.database' => "tenant".$database]);
 
         DB::purge('tenant');
         DB::reconnect('tenant');
