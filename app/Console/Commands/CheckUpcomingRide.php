@@ -29,16 +29,47 @@ class CheckUpcomingRide extends Command
     {
         $now = Carbon::now();
 
-        $bookings = CompanyBooking::where("booking_date", date("Y-m-d"))
-                    ->where("booking_status", "pending")
-                    ->whereTime('pickup_time', '<=', $now->subMinutes(5)->format('H:i:s'))
+        $tenants = DB::connection('central')
+            ->table('tenants')
+            ->get();
+
+         foreach ($tenants as $tenant) {
+
+            try {
+                // 2️⃣ Switch tenant database
+                $this->setTenantDatabase($tenant->database);
+
+                $bookings = CompanyBooking::on('tenant')
+                    ->whereDate('booking_date', Carbon::today())
+                    ->where('booking_status', 'pending')
+                    ->whereTime(
+                        'pickup_time',
+                        '<=',
+                        $now->copy()->subMinutes(5)->format('H:i:s')
+                    )
                     ->get();
 
-        foreach($bookings as $booking){
-            $booking->booking_status = "started";
-            $booking->save();
+                    foreach($bookings as $booking){
+                        $booking->booking_status = "started";
+                        $booking->save();
+            
+                        \Log::info("upcoming to current booking ". $booking->id);
+                    }
 
-            \Log::info("upcoming to current booking ". $booking->id);
-        }
+                } catch (\Throwable $e) {
+                        \Log::error('Tenant cron failed', [
+                            'tenant' => $tenant->database,
+                            'error'  => $e->getMessage()
+                        ]);
+                }
+         }
+    }
+
+    private function setTenantDatabase($database)
+    {
+        config(['database.connections.tenant.database' => $database]);
+
+        DB::purge('tenant');
+        DB::reconnect('tenant');
     }
 }
