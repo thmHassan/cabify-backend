@@ -181,8 +181,7 @@ io.on("connection", (socket) => {
                 dataArray,
                 {
                     headers: {
-                        Authorization: `Bearer ${socket.token}`,
-                        database: `${dataArray.database}`,
+                        database: `tenant${dataArray.database}`,
                     }
                 }
             );

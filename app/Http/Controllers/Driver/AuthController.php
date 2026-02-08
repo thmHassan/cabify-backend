@@ -453,7 +453,7 @@ class AuthController extends Controller
 
     public function getLocation(Request $request){
         try{
-            $driver = CompanyDriver::where("driver", $request->driver_id)->first();
+            $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
             return response()->json([
                 'success' => 1,
