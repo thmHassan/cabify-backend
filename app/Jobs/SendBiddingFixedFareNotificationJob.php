@@ -75,6 +75,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                                 'user_profile' => $booking->userDetail->profile_image,
                                 'pickup_location' => $booking->pickup_location,
                                 'destination_location' => $booking->destination_location,
+                                'note' => $booking->note,
                             ]
                         ]);
 
