@@ -269,12 +269,12 @@ class DriverController extends Controller
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
             $driver->vehicle_change_request = 2;
-            $driver->change_vehicle_service = $driver->vehicle_service;
-            $driver->change_vehicle_type = $driver->vehicle_type;
-            $driver->change_color = $driver->color;
-            $driver->change_seats = $driver->seats;
-            $driver->change_plate_no = $driver->plate_no;
-            $driver->change_vehicle_registration_date = $driver->vehicle_registration_date;
+            $driver->vehicle_service = $driver->change_vehicle_service;
+            $driver->vehicle_type = $driver->change_vehicle_type;
+            $driver->color = $driver->change_color;
+            $driver->seats = $driver->change_seats;
+            $driver->plate_no = $driver->change_plate_no;
+            $driver->vehicle_registration_date = $driver->change_vehicle_registration_date;
             $driver->save();
 
             return response()->json([
