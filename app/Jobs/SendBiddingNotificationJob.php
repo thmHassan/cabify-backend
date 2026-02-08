@@ -14,6 +14,7 @@ use App\Models\CompanyNotification;
 use App\Models\CompanyDriver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use App\Models\CompanySendNewRide;
 
 class SendBiddingNotificationJob implements ShouldQueue
 {
@@ -73,6 +74,11 @@ class SendBiddingNotificationJob implements ShouldQueue
                                 'destination_location' => $booking->destination_location,
                             ]
                         ]);
+
+                        $sendRide = new CompanySendNewRide;
+                        $sendRide->booking_id = $booking->id;
+                        $sendRide->driver_id = $driver->id;
+                        $sendRide->save();
 
                         $notification = new CompanyNotification;
                         $notification->user_type = "driver";
