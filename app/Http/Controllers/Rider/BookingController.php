@@ -591,7 +591,7 @@ class BookingController extends Controller
                 $booking->save();
             }
 
-            $driversList = CompanySendNewRide::where("booking_id", $booking->id)->get();
+            $driversList = CompanySendNewRide::where("booking_id", $booking->id)->pluck("id");
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
