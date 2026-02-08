@@ -14,7 +14,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Remove non-deploy folders
-        run: rm -rf .github .git node_modules tests vendor
+        run: | 
+            rm -rf .github .git node_modules tests vendor
+            rm -rf storage bootstrap/cache
         
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -44,10 +46,16 @@ jobs:
           port: ${{ secrets.SERVER_SSH_PORT }}
           script: |
             cd /var/www/html/backend.cabifyit.com
+            # Ensure required folders exist
+            mkdir -p storage bootstrap/cache
+
+            # Correct ownership (adjust user if not www-data)
+            sudo chown -R www-data:www-data storage bootstrap/cache
+
+            # Correct permissions
+            sudo chmod -R 775 storage bootstrap/cache public
+
             composer install --no-dev --optimize-autoloader --prefer-dist
-            sudo chmod -R 775 /var/www/html/backend.cabifyit.com/storage
-            sudo chmod -R 775 /var/www/html/backend.cabifyit.com/bootstrap/cache
-            sudo chmod -R 775 /var/www/html/backend.cabifyit.com/public
             php artisan migrate
             php artisan tenants:migrate --path=database/migrations/tenant
             php artisan db:seed
