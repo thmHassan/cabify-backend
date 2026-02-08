@@ -12,6 +12,7 @@ use App\Models\CompanyBid;
 use App\Models\CompanyPlot;
 use App\Models\CompanyToken;
 use App\Models\CompanyNotification;
+use App\Models\CompanySendNewRide;
 use App\Services\FCMService;
 use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
@@ -589,6 +590,24 @@ class BookingController extends Controller
                 $booking->booking_status = "cancelled";
                 $booking->save();
             }
+
+            $driversList = CompanySendNewRide::where("booking_id", $booking->id)->get();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/change-cancel-ride', [
+                'drivers' => $driversList,
+                'status' => "cancel_ride",
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'destination_point' => $booking->destination_point,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'type' => 'auto_dispatch_plot'
+                ]
+            ]);
 
             return response()->json([
                 'success' => 1,

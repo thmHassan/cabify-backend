@@ -1163,6 +1163,23 @@ app.post("/change-driver-ride-status", (req, res) => {
     });
 });
 
+app.post("/change-cancel-ride", (req, res) => {
+    const { drivers, status, booking } = req.body;
+    let sentCount = 0;
+    drivers.forEach(driverId => {
+        const socketId = driverSockets.get(driverId.toString());
+        if (socketId) {
+            io.to(socketId).emit("driver-ride-status-event", { status, booking });
+            sentCount++;
+        }
+    });
+    return res.json({
+        success: true,
+        sent_to: sentCount
+    });
+});
+
+
 app.post("/on-job-driver", (req, res) => {
     const { clientId, driverName } = req.body;
     const socketId = clientSockets.get(clientId.toString());
