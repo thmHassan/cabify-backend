@@ -16,6 +16,10 @@ class Kernel extends ConsoleKernel
         $schedule->command('app:check-upcoming-ride')
                  ->everyMinute()
                  ->withoutOverlapping();
+        
+        $schedule->command('app:make-cancel-ride-zero')
+                 ->everyDay()
+                 ->withoutOverlapping();
     }
 
     /**

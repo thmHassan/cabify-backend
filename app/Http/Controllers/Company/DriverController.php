@@ -161,6 +161,9 @@ class DriverController extends Controller
             elseif(isset($request->status)){
                 $drivers->where("status", $request->status);
             }
+            elseif(isset($request->sub_company)){
+                $drivers->where("sub_company", $request->sub_company);
+            }
             if(isset($request->search) && $request->search != NULL){
                 $drivers->where(function($query) use ($request){
                     $query->where("name", "LIKE" ,"%".$request->search."%")

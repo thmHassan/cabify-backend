@@ -173,51 +173,51 @@ class CompanyController extends Controller
                     'stripe_payment' => $tenant->stripe_enable == "yes" ? "enable" : "disable",
                 ]);
 
-                $centralDocuments = \DB::connection('central')->table('document_types')->get();
+                // $centralDocuments = \DB::connection('central')->table('document_types')->get();
 
-                foreach ($centralDocuments as $doc) {
-                    \DB::table('documents')->insert([
-                        'document_name' => $doc->document_name,
-                        'front_photo' => $doc->front_photo,
-                        'back_photo' => $doc->back_photo,
-                        'profile_photo' => $doc->profile_photo,
-                        'has_issue_date' => $doc->has_issue_date,
-                        'has_expiry_date' => $doc->has_expiry_date,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]);
-                }
+                // foreach ($centralDocuments as $doc) {
+                //     \DB::table('documents')->insert([
+                //         'document_name' => $doc->document_name,
+                //         'front_photo' => $doc->front_photo,
+                //         'back_photo' => $doc->back_photo,
+                //         'profile_photo' => $doc->profile_photo,
+                //         'has_issue_date' => $doc->has_issue_date,
+                //         'has_expiry_date' => $doc->has_expiry_date,
+                //         'created_at' => now(),
+                //         'updated_at' => now()
+                //     ]);
+                // }
 
-                $centralDocuments = \DB::connection('central')->table('vehicle_types')->get();
+                // $centralDocuments = \DB::connection('central')->table('vehicle_types')->get();
 
-                foreach ($centralDocuments as $doc) {
-                    \DB::table('vehicle_types')->insert([
-                        'vehicle_type_name' => $doc->vehicle_type_name,
-                        'vehicle_type_service' => $doc->vehicle_type_service,
-                        'recommended_price' => $doc->recommended_price,
-                        'minimum_price' => $doc->minimum_price,
-                        'minimum_distance' => $doc->minimum_distance,
-                        'base_fare_less_than_x_miles' => $doc->base_fare_less_than_x_miles,
-                        'base_fare_less_than_x_price' => $doc->base_fare_less_than_x_price,
-                        'base_fare_from_x_miles' => $doc->base_fare_from_x_miles,
-                        'base_fare_to_x_miles' => $doc->base_fare_to_x_miles,
-                        'base_fare_from_to_price' => $doc->base_fare_from_to_price,
-                        'base_fare_greater_than_x_miles' => $doc->base_fare_greater_than_x_miles,
-                        'base_fare_greater_than_x_price' => $doc->base_fare_greater_than_x_price,
-                        'first_mile_km' => $doc->first_mile_km,
-                        'second_mile_km' => $doc->second_mile_km,
-                        'order_no' => $doc->order_no,
-                        'vehicle_image' => $doc->vehicle_image,
-                        'backup_bid_vehicle_type' => $doc->backup_bid_vehicle_type,
-                        'base_fare_system_status' => $doc->base_fare_system_status,
-                        'mileage_system' => $doc->mileage_system,
-                        'from_array' => $doc->from_array,
-                        'to_array' => $doc->to_array,
-                        'price_array' => $doc->price_array,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]);
-                }
+                // foreach ($centralDocuments as $doc) {
+                //     \DB::table('vehicle_types')->insert([
+                //         'vehicle_type_name' => $doc->vehicle_type_name,
+                //         'vehicle_type_service' => $doc->vehicle_type_service,
+                //         'recommended_price' => $doc->recommended_price,
+                //         'minimum_price' => $doc->minimum_price,
+                //         'minimum_distance' => $doc->minimum_distance,
+                //         'base_fare_less_than_x_miles' => $doc->base_fare_less_than_x_miles,
+                //         'base_fare_less_than_x_price' => $doc->base_fare_less_than_x_price,
+                //         'base_fare_from_x_miles' => $doc->base_fare_from_x_miles,
+                //         'base_fare_to_x_miles' => $doc->base_fare_to_x_miles,
+                //         'base_fare_from_to_price' => $doc->base_fare_from_to_price,
+                //         'base_fare_greater_than_x_miles' => $doc->base_fare_greater_than_x_miles,
+                //         'base_fare_greater_than_x_price' => $doc->base_fare_greater_than_x_price,
+                //         'first_mile_km' => $doc->first_mile_km,
+                //         'second_mile_km' => $doc->second_mile_km,
+                //         'order_no' => $doc->order_no,
+                //         'vehicle_image' => $doc->vehicle_image,
+                //         'backup_bid_vehicle_type' => $doc->backup_bid_vehicle_type,
+                //         'base_fare_system_status' => $doc->base_fare_system_status,
+                //         'mileage_system' => $doc->mileage_system,
+                //         'from_array' => $doc->from_array,
+                //         'to_array' => $doc->to_array,
+                //         'price_array' => $doc->price_array,
+                //         'created_at' => now(),
+                //         'updated_at' => now()
+                //     ]);
+                // }
 
 
             });
@@ -402,6 +402,33 @@ class CompanyController extends Controller
                 $tenant->picture = 'pictures/'.$filename;
             }
             $tenant->save();
+
+            $tenant->run(function () use ($tenant) {
+
+                $system = "bidding";
+                if($tenant->uber_plot_hybrid == "auto"){
+                    $system = "auto_dispatch";
+                }
+                elseif($tenant->uber_plot_hybrid == "both"){
+                    $system = "both";
+                }
+                else if($tenant->uber_plot_hybrid == "both"){
+                    $system = "bidding";
+                }
+
+                \DB::table('settings')->insert([
+                    'company_name' => $tenant->company_name,
+                    'company_email' => $tenant->email,
+                    'company_phone_no' => $tenant->phone,
+                    'company_timezone' => $tenant->time_zone,
+                    'google_api_keys' => $tenant->google_api_key,
+                    'barikoi_api_keys' => $tenant->barikoi_api_key,
+                    'company_currency' => $tenant->currency,
+                    'company_admin_dispatch_sytem' => $system,
+                    'map_settings' => $tenant->enable_smtp == "yes" ? 'default' : 'custom',
+                    'stripe_payment' => $tenant->stripe_enable == "yes" ? "enable" : "disable",
+                ]);
+            });
 
             return response()->json([
                 'success' => 1,

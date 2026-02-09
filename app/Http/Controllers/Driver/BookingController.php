@@ -218,6 +218,15 @@ class BookingController extends Controller
                 'cancel_reason' => 'required',
             ]);
 
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            if($setting->cancellation_per_day <= auth("driver")->user()->cancel_rides_per_day){
+                return response()->json([
+                    'error' => 1,
+                    'message' => "You have reached cancellation limit per day"
+                ], 400);
+            }
+
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
 
             if(isset($booking) && $booking != NULL){
@@ -267,6 +276,7 @@ class BookingController extends Controller
 
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->driving_status = "idle";
+            $driver->cancel_rides_per_day += 1;
             $driver->save();
 
             Http::withHeaders([
