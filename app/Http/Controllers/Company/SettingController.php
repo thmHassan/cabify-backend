@@ -551,7 +551,8 @@ class SettingController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'company_booking_system' => $company_booking_system
+                'company_booking_system' => $company_booking_system,
+                'company_admin_dispatch_sytem' => $company_admin_dispatch_sytem,
             ]);
         }
         catch(\Exception $e){
