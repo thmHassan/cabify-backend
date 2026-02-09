@@ -26,22 +26,30 @@ class FCMService
         string $deviceToken,
         string $title,
         string $body,
-        array $data = []
+        array $data = null
     ) {
         $accessToken = self::getAccessToken();
+
+        $message = [
+            'token' => $deviceToken,
+            'notification' => [
+                'title' => $title,
+                'body'  => $body,
+            ],
+        ];
+
+        // ✅ DO NOT send data if empty
+        if (is_array($data) && !empty($data)) {
+            $message['data'] = collect($data)
+                ->map(fn ($v) => (string) $v)
+                ->toArray();
+        }
 
          $response = Http::withToken($accessToken)
         ->post(
             'https://fcm.googleapis.com/v1/projects/' . env('FIREBASE_PROJECT_ID') . '/messages:send',
             [
-                'message' => [
-                    'token' => $deviceToken,
-                    'notification' => [
-                        'title' => $title,
-                        'body'  => $body,
-                    ],
-                    'data' => $data,
-                ],
+                'message' => $message
             ]
         );
         \Log::info('FCM RESPONSE', [
