@@ -633,7 +633,7 @@ class DriverController extends Controller
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
-            $tokens = CompanyToken::where("driver_id", $request->driver_id)->where("user_type", "driver")->get();
+            $tokens = CompanyToken::where("user_id", $request->driver_id)->where("user_type", "driver")->get();
 
             if(isset($tokens) && $tokens != NULL){
                 foreach($tokens as $key => $token){
