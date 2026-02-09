@@ -15,6 +15,7 @@ use App\Services\FCMService;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use App\Models\CompanyToken;
 
 class DriverController extends Controller
 {
