@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Http;
 use App\Models\TenantUser;
 use App\Models\CompanyNotification;
 use App\Services\FCMService;
+use App\Models\CompanyToken;
 
 class UserController extends Controller
 {
