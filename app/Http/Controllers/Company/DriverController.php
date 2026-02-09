@@ -243,7 +243,7 @@ class DriverController extends Controller
             $driver->save();
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
-            if($settingData->map_setting == "default"){
+            if($settingData->map_settings == "default"){
             
                 $centralData = (new Setting)
                     ->setConnection('central')
