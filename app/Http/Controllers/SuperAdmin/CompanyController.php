@@ -153,6 +153,9 @@ class CompanyController extends Controller
                 if($tenant->uber_plot_hybrid == "auto"){
                     $system = "auto_dispatch";
                 }
+                elseif($tenant->uber_plot_hybrid == "both"){
+                    $system = "both";
+                }
                 else if($tenant->uber_plot_hybrid == "both"){
                     $system = "bidding";
                 }

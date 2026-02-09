@@ -181,6 +181,9 @@ class SettingController extends Controller
             if($company_booking_system == "auto"){
                 $company_booking_system = "auto_dispatch";
             }
+            elseif($company_booking_system == "both"){
+                $company_booking_system = "both";
+            }
             else{
                 $company_booking_system = "bidding";
             }
