@@ -249,8 +249,6 @@ class DriverController extends Controller
                     ->setConnection('central')
                     ->orderBy("id", "DESC")
                     ->first();
-
-                dd($centralData);
                     
                 $mail_server = $centralData->smtp_host;
                 $mail_from = $centralData->smtp_from_address;
