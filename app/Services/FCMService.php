@@ -44,11 +44,9 @@ class FCMService
                 ],
             ]
         );
-
         \Log::info('FCM RESPONSE', [
-            'token' => $deviceToken,
-            'response' => $response->json(),
             'status' => $response->status(),
+            'body' => $response->body(),
         ]);
     }
 }
