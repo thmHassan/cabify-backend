@@ -235,7 +235,7 @@ class UserController extends Controller
             if(isset($tokens) && $tokens != NULL){
                 foreach($tokens as $key => $token){
                     FCMService::sendToDevice(
-                        $token->device_token,
+                        $token->fcm_token,
                         $request->title,
                         $request->body,
                     );

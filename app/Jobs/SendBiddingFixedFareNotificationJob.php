@@ -96,7 +96,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                         if(isset($tokens) && $tokens != NULL){
                             foreach($tokens as $key => $token){
                                 FCMService::sendToDevice(
-                                    $token->device_token,
+                                    $token->fcm_token,
                                     'New Ride Available for Bidding 🚖',
                                     'Place your bid now',
                                     [
