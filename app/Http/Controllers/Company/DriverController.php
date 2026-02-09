@@ -648,8 +648,8 @@ class DriverController extends Controller
             $record = new CompanyNotification;
             $record->user_type = "driver";
             $record->user_id = $driver->id;
-            $record->title = $title;
-            $record->message = $body;
+            $record->title = $request->title;
+            $record->message = $request->body;
             $record->save();
 
             return response()->json([
