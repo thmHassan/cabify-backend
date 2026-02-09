@@ -13,6 +13,8 @@ use App\Models\CompanyPlot;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use App\Models\CompanySetting;
+use App\Models\Setting;
 
 class AuthController extends Controller
 {
@@ -69,6 +71,37 @@ class AuthController extends Controller
             $user->otp_expires_at = $expiresAt;
             $user->save();
 
+            $settingData = CompanySetting::orderBy("id", "DESC")->first();
+            if($settingData->map_settings == "default"){
+            
+                $centralData = (new Setting)
+                    ->setConnection('central')
+                    ->orderBy("id", "DESC")
+                    ->first();
+                    
+                $mail_server = $centralData->smtp_host;
+                $mail_from = $centralData->smtp_from_address;
+                $mail_user_name = $centralData->smtp_user_name;
+                $mail_password = $centralData->smtp_password;
+                $mail_port = 587;
+            }
+            else{
+                $mail_server = $settingData->mail_server;
+                $mail_from = $settingData->mail_from;
+                $mail_user_name = $settingData->mail_user_name;
+                $mail_password = $settingData->mail_password;
+                $mail_port = $settingData->mail_port;
+            }
+
+            config([
+                'mail.mailers.smtp.host' => $mail_server,
+                'mail.mailers.smtp.port' => $mail_port,
+                'mail.mailers.smtp.username' => $mail_user_name,
+                'mail.mailers.smtp.password' => $mail_password,
+                'mail.from.address' => $mail_from,
+                'mail.from.name' => $mail_user_name,
+            ]);
+
             Mail::send('emails.send-otp', [
                 'name' => $user->name ?? 'User',
                 'otp' => $otp
@@ -111,6 +144,37 @@ class AuthController extends Controller
             $user->otp = $otp;
             $user->otp_expires_at = $expiresAt;
             $user->save();
+
+            $settingData = CompanySetting::orderBy("id", "DESC")->first();
+            if($settingData->map_settings == "default"){
+            
+                $centralData = (new Setting)
+                    ->setConnection('central')
+                    ->orderBy("id", "DESC")
+                    ->first();
+                    
+                $mail_server = $centralData->smtp_host;
+                $mail_from = $centralData->smtp_from_address;
+                $mail_user_name = $centralData->smtp_user_name;
+                $mail_password = $centralData->smtp_password;
+                $mail_port = 587;
+            }
+            else{
+                $mail_server = $settingData->mail_server;
+                $mail_from = $settingData->mail_from;
+                $mail_user_name = $settingData->mail_user_name;
+                $mail_password = $settingData->mail_password;
+                $mail_port = $settingData->mail_port;
+            }
+
+            config([
+                'mail.mailers.smtp.host' => $mail_server,
+                'mail.mailers.smtp.port' => $mail_port,
+                'mail.mailers.smtp.username' => $mail_user_name,
+                'mail.mailers.smtp.password' => $mail_password,
+                'mail.from.address' => $mail_from,
+                'mail.from.name' => $mail_user_name,
+            ]);
 
             Mail::send('emails.send-otp', [
                 'name' => $user->name ?? 'User',

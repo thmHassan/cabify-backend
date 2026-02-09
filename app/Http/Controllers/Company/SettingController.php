@@ -547,6 +547,7 @@ class SettingController extends Controller
             $setting = CompanySetting::orderBy("id", "DESC")->first();
 
             $company_booking_system = $setting->company_booking_system;
+            $company_admin_dispatch_sytem = $setting->company_admin_dispatch_sytem;
 
             return response()->json([
                 'success' => 1,
