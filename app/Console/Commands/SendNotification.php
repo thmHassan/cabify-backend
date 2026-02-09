@@ -41,7 +41,7 @@ class SendNotification extends Command
                     $tokens = CompanyToken::where("user_id", $user->id)->where("user_type", "rider")->get();
                 }
                 else{
-                    $tokens = CompanyToken::where("driver_id", $user->id)->where("user_type", "driver")->get();
+                    $tokens = CompanyToken::where("user_id", $user->id)->where("user_type", "driver")->get();
                 }
                 \Log::info("UserId for notification--------". $user->id);
 
