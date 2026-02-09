@@ -9,6 +9,8 @@ use Illuminate\Validation\Rule;
 use App\Models\DriverDocument;
 use App\Models\CompanyBooking;
 use App\Models\CompanyNotification;
+use App\Models\CompanySetting;
+use App\Models\Setting;
 use App\Services\FCMService;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
@@ -239,6 +241,37 @@ class DriverController extends Controller
             $driver = CompanyDriver::where("id", $request->id)->first();
             $driver->wallet_balance += $request->amount;
             $driver->save();
+
+            $settingData = CompanySetting::orderBy("id", "DESC")->first();
+            if($settingData->map_setting == "default"){
+            
+                $centralData = (new Setting)
+                    ->setConnection('central')
+                    ->orderBy("id", "DESC")
+                    ->first();
+                    
+                $mail_server = $centralData->smtp_host;
+                $mail_from = $centralData->smtp_from_address;
+                $mail_user_name = $centralData->smtp_user_name;
+                $mail_password = $centralData->smtp_password;
+                $mail_port = 587;
+            }
+            else{
+                $mail_server = $settingData->mail_server;
+                $mail_from = $settingData->mail_from;
+                $mail_user_name = $settingData->mail_user_name;
+                $mail_password = $settingData->mail_password;
+                $mail_port = $settingData->mail_port;
+            }
+
+             config([
+                'mail.mailers.smtp.host' => $mail_server,
+                'mail.mailers.smtp.port' => $mail_port,
+                'mail.mailers.smtp.username' => $mail_user_name,
+                'mail.mailers.smtp.password' => $mail_password,
+                'mail.from.address' => $mail_from,
+                'mail.from.name' => $mail_user_name,
+            ]);
 
             Mail::send('emails.wallet-topup', [
                 'name' => $driver->name ?? 'User',
