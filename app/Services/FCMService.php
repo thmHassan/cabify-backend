@@ -30,19 +30,25 @@ class FCMService
     ) {
         $accessToken = self::getAccessToken();
 
-        return Http::withToken($accessToken)
-            ->post(
-                'https://fcm.googleapis.com/v1/projects/' . env('FIREBASE_PROJECT_ID') . '/messages:send',
-                [
-                    'message' => [
-                        'token' => $deviceToken,
-                        'notification' => [
-                            'title' => $title,
-                            'body'  => $body,
-                        ],
-                        'data' => $data,
+         $response = Http::withToken($accessToken)
+        ->post(
+            'https://fcm.googleapis.com/v1/projects/' . env('FIREBASE_PROJECT_ID') . '/messages:send',
+            [
+                'message' => [
+                    'token' => $deviceToken,
+                    'notification' => [
+                        'title' => $title,
+                        'body'  => $body,
                     ],
-                ]
-            );
+                    'data' => $data,
+                ],
+            ]
+        );
+
+        \Log::info('FCM RESPONSE', [
+            'token' => $deviceToken,
+            'response' => $response->json(),
+            'status' => $response->status(),
+        ]);
     }
 }
