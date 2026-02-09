@@ -521,7 +521,7 @@ class BookingController extends Controller
                 if(isset($tokens) && $tokens != NULL){
                     foreach($tokens as $key => $token){
                         FCMService::sendToDevice(
-                            $token->device_token,
+                            $token->fcm_token,
                             'Accept Bid',
                             'Your bid for ride has been accepted',
                             [
@@ -669,7 +669,7 @@ class BookingController extends Controller
                 if(isset($tokens) && $tokens != NULL){
                     foreach($tokens as $key => $token){
                         FCMService::sendToDevice(
-                            $token->device_token,
+                            $token->fcm_token,
                             'Cancel Ride',
                             'Your ride has been cancelled by Rider',
                             [

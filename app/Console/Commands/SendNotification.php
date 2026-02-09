@@ -48,7 +48,7 @@ class SendNotification extends Command
                 if(isset($tokens) && $tokens != NULL){
                     foreach($tokens as $key => $token){
                         FCMService::sendToDevice(
-                            $token->device_token,
+                            $token->fcm_token,
                             $title,
                             $body
                         );  
