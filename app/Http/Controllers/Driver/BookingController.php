@@ -153,6 +153,50 @@ class BookingController extends Controller
                 'amount' => 'required'
             ]);
 
+            $latestPackages = Package::where("driver_id", auth("driver")->user()->id)->whereIn('id', function ($query) {
+                $query->selectRaw('MAX(id)')
+                    ->from('packages')
+                    ->where("driver_id", auth("driver")->user()->id)
+                    ->groupBy('package_type');
+            })->get();
+
+            $canAcceptRide = false;
+            foreach($latestPackages as $package){
+                if($package->package_type == "per_ride_commission_topup"){
+                    if($package->pending_rides >= 1){
+                        $package->pending_rides -= 1;
+                        $package->save();
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+                elseif($package->package_type == "per_ride_commission_potpaid"){
+                    if($package->expire_date >= date("Y-m-d")){
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+                elseif($package->package_type == "packages_postpaid"){
+                    if($package->expire_date >= date("Y-m-d")){
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+                elseif($package->package_type == "packages_topup"){
+                    if($package->expire_date >= date("Y-m-d")){
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+            }
+
+            if(! $canAcceptRide){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Your package validity to accept ride is over'
+                ], 400);
+            }
+
             $newBid = new CompanyBid;
             $newBid->booking_id = $request->booking_id;
             $newBid->driver_id = auth("driver")->user()->id;
@@ -317,6 +361,51 @@ class BookingController extends Controller
 
     public function acceptRide(Request $request){
         try{
+
+            $latestPackages = Package::where("driver_id", auth("driver")->user()->id)->whereIn('id', function ($query) {
+                $query->selectRaw('MAX(id)')
+                    ->from('packages')
+                    ->where("driver_id", auth("driver")->user()->id)
+                    ->groupBy('package_type');
+            })->get();
+
+            $canAcceptRide = false;
+            foreach($latestPackages as $package){
+                if($package->package_type == "per_ride_commission_topup"){
+                    if($package->pending_rides >= 1){
+                        $package->pending_rides -= 1;
+                        $package->save();
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+                elseif($package->package_type == "per_ride_commission_potpaid"){
+                    if($package->expire_date >= date("Y-m-d")){
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+                elseif($package->package_type == "packages_postpaid"){
+                    if($package->expire_date >= date("Y-m-d")){
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+                elseif($package->package_type == "packages_topup"){
+                    if($package->expire_date >= date("Y-m-d")){
+                        $canAcceptRide = true;
+                        break;
+                    }
+                }
+            }
+
+            if(! $canAcceptRide){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Your package validity to accept ride is over'
+                ], 400);
+            }
+
             $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
             $booking->booking_status = "ongoing";
             $booking->booking_amount = $booking->offered_amount;
