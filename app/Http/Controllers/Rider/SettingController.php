@@ -20,6 +20,7 @@ use App\Models\CompanyToken;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\DB;
 use App\Models\Setting;
+use App\Models\TenantUser;
 
 class SettingController extends Controller
 {
@@ -286,23 +287,30 @@ class SettingController extends Controller
                 'chat' => $chat
             ]);
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "driver";
-            $notification->user_id = $request->driver_id;
-            $notification->title = 'Message Alert';
-            $notification->message = 'New message arrived from passenger';
-            $notification->save();
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-            $tokens = CompanyToken::where("user_id", $request->driver_id)->where("user_type", "driver")->get();
+            if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
+                $notification = new CompanyNotification;
+                $notification->user_type = "driver";
+                $notification->user_id = $request->driver_id;
+                $notification->title = 'Message Alert';
+                $notification->message = 'New message arrived from passenger';
+                $notification->save();
 
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'Message Alert',
-                        'New message arrived from passenger',
-                        []
-                    );
+                $tokens = CompanyToken::where("user_id", $request->driver_id)->where("user_type", "driver")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->fcm_token,
+                            'Message Alert',
+                            'New message arrived from passenger',
+                            []
+                        );
+                    }
                 }
             }
 

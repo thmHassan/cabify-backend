@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
 use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanySendNewRide;
+use App\Models\TenantUser;
 
 class AutoDispatchNearestDriverJob implements ShouldQueue
 {

@@ -18,6 +18,7 @@ use App\Models\CompanyToken;
 use App\Services\FCMService;
 use App\Models\CompanyNotification;
 use App\Models\Setting;
+use App\Models\TenantUser;
 
 class BookingController extends Controller
 {
@@ -176,25 +177,32 @@ class BookingController extends Controller
                 ]
             ]);
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "rider";
-            $notification->user_id = $booking->user_id;
-            $notification->title = 'New Bid';
-            $notification->message = 'New bid is placed by driver';
-            $notification->save();
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
-
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'New Bid',
-                        'New bid is placed by driver',
-                        [
-                            'bid_id' => $newBid->id,
-                        ]
-                    );
+            if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $booking->user_id;
+                $notification->title = 'New Bid';
+                $notification->message = 'New bid is placed by driver';
+                $notification->save();
+    
+                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+    
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->fcm_token,
+                            'New Bid',
+                            'New bid is placed by driver',
+                            [
+                                'bid_id' => $newBid->id,
+                            ]
+                        );
+                    }
                 }
             }
 
@@ -251,25 +259,32 @@ class BookingController extends Controller
                     ]
                 ]);
 
-                $notification = new CompanyNotification;
-                $notification->user_type = "rider";
-                $notification->user_id = $booking->user_id;
-                $notification->title = 'Cancel Ride';
-                $notification->message = 'Your ride has been cancelled by driver';
-                $notification->save();
+                $dataCheck = (new TenantUser)
+                    ->setConnection('central')
+                    ->where("id", $request->header('database'))
+                    ->first();
 
-                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+                if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
+                    $notification = new CompanyNotification;
+                    $notification->user_type = "rider";
+                    $notification->user_id = $booking->user_id;
+                    $notification->title = 'Cancel Ride';
+                    $notification->message = 'Your ride has been cancelled by driver';
+                    $notification->save();
 
-                if(isset($tokens) && $tokens != NULL){
-                    foreach($tokens as $key => $token){
-                        FCMService::sendToDevice(
-                            $token->fcm_token,
-                            'Cancel Ride',
-                            'Your ride has been cancelled by driver',
-                            [
-                                'booking_id' => $booking->id,
-                            ]
-                        );
+                    $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+                    if(isset($tokens) && $tokens != NULL){
+                        foreach($tokens as $key => $token){
+                            FCMService::sendToDevice(
+                                $token->fcm_token,
+                                'Cancel Ride',
+                                'Your ride has been cancelled by driver',
+                                [
+                                    'booking_id' => $booking->id,
+                                ]
+                            );
+                        }
                     }
                 }
             }
@@ -332,25 +347,32 @@ class BookingController extends Controller
                 ]
             ]);
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "rider";
-            $notification->user_id = $booking->user_id;
-            $notification->title = 'Accept Ride';
-            $notification->message = 'Your ride has been accepted by driver';
-            $notification->save();
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+            if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $booking->user_id;
+                $notification->title = 'Accept Ride';
+                $notification->message = 'Your ride has been accepted by driver';
+                $notification->save();
 
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'Accept Ride',
-                        'Your ride has been accepted by driver',
-                        [
-                            'booking_id' => $booking->id,
-                        ]
-                    );
+                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->fcm_token,
+                            'Accept Ride',
+                            'Your ride has been accepted by driver',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
                 }
             }
 
@@ -422,25 +444,32 @@ class BookingController extends Controller
                 ]
             ]);
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "rider";
-            $notification->user_id = $booking->user_id;
-            $notification->title = 'Arrived Ride';
-            $notification->message = 'Driver is arrived at your pickup location';
-            $notification->save();
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
-
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'Arrived Driver',
-                        'Driver is arrived at your pickup location',
-                        [
-                            'booking_id' => $booking->id,
-                        ]
-                    );
+            if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $booking->user_id;
+                $notification->title = 'Arrived Ride';
+                $notification->message = 'Driver is arrived at your pickup location';
+                $notification->save();
+    
+                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+    
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->fcm_token,
+                            'Arrived Driver',
+                            'Driver is arrived at your pickup location',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
                 }
             }
 
@@ -554,28 +583,34 @@ class BookingController extends Controller
                     ]
                 ]);
 
-                $notification = new CompanyNotification;
-                $notification->user_type = "rider";
-                $notification->user_id = $booking->user_id;
-                $notification->title = 'Ride Start';
-                $notification->message = 'Your ride has been started to your destination';
-                $notification->save();
+                $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+                if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){ 
+                    $notification = new CompanyNotification;
+                    $notification->user_type = "rider";
+                    $notification->user_id = $booking->user_id;
+                    $notification->title = 'Ride Start';
+                    $notification->message = 'Your ride has been started to your destination';
+                    $notification->save();
 
-                if(isset($tokens) && $tokens != NULL){
-                    foreach($tokens as $key => $token){
-                        FCMService::sendToDevice(
-                            $token->fcm_token,
-                            'Ride Start',
-                            'Your ride has been started to your destination',
-                            [
-                                'booking_id' => $booking->id,
-                            ]
-                        );
+                    $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+                    if(isset($tokens) && $tokens != NULL){
+                        foreach($tokens as $key => $token){
+                            FCMService::sendToDevice(
+                                $token->fcm_token,
+                                'Ride Start',
+                                'Your ride has been started to your destination',
+                                [
+                                    'booking_id' => $booking->id,
+                                ]
+                            );
+                        }
                     }
                 }
-
                 return response()->json([
                     'success' => 1,
                     'message' => 'OTP verified successfully'
@@ -619,25 +654,33 @@ class BookingController extends Controller
                 ]
             ]);
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "rider";
-            $notification->user_id = $booking->user_id;
-            $notification->title = 'Ride Completed';
-            $notification->message = 'Your ride has been completed. Please rate application';
-            $notification->save();
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-            $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+            if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
 
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'Ride completed',
-                        'Your ride has been completed. Please rate application',
-                        [
-                            'booking_id' => $booking->id,
-                        ]
-                    );
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $booking->user_id;
+                $notification->title = 'Ride Completed';
+                $notification->message = 'Your ride has been completed. Please rate application';
+                $notification->save();
+
+                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->fcm_token,
+                            'Ride completed',
+                            'Your ride has been completed. Please rate application',
+                            [
+                                'booking_id' => $booking->id,
+                            ]
+                        );
+                    }
                 }
             }
 
