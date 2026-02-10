@@ -496,4 +496,21 @@ class SettingController extends Controller
         }
     }
 
+    public function getPurchasePackage(Request $request){
+        try{
+            $package = DriverPackage::orderBy("updated_at", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'message' => "package information fetched successfully",
+                'package' => $package
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
