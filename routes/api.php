@@ -290,6 +290,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/message-list', [DriverSettingController::class, 'messageList']);
         Route::get('/driver/message-history', [DriverSettingController::class, 'messageHistory']);
         Route::get('/driver/notification-list', [DriverSettingController::class, 'notificationList']);
+        Route::get('/driver/get-purchase-package', [DriverSettingController::class, 'getPurchasePackage']);
    
         Route::post('/driver/create-contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
