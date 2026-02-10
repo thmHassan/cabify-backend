@@ -416,7 +416,11 @@ class CompanyController extends Controller
                     $system = "bidding";
                 }
 
-                \DB::table('settings')->insert([
+                $latestSetting = \DB::table('settings')
+                    ->orderByDesc('id')
+                    ->first();
+
+                $data = [
                     'company_name' => $tenant->company_name,
                     'company_email' => $tenant->email,
                     'company_phone_no' => $tenant->phone,
@@ -425,9 +429,19 @@ class CompanyController extends Controller
                     'barikoi_api_keys' => $tenant->barikoi_api_key,
                     'company_currency' => $tenant->currency,
                     'company_admin_dispatch_sytem' => $system,
-                    'map_settings' => $tenant->enable_smtp == "yes" ? 'default' : 'custom',
-                    'stripe_payment' => $tenant->stripe_enable == "yes" ? "enable" : "disable",
-                ]);
+                    'map_settings' => $tenant->enable_smtp === "yes" ? 'default' : 'custom',
+                    'stripe_payment' => $tenant->stripe_enable === "yes" ? "enable" : "disable",
+                ];
+
+                if ($latestSetting) {
+                    // ✅ Update latest row
+                    \DB::table('settings')
+                        ->where('id', $latestSetting->id)
+                        ->update($data);
+                } else {
+                    // ✅ No row exists → create new
+                    \DB::table('settings')->insert($data);
+                }
             });
 
             return response()->json([

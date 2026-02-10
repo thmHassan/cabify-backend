@@ -153,6 +153,11 @@ class AutoDispatchPlotJob implements ShouldQueue
                 }
             }
 
+            if($booking->pickup_time > now()->format('H:i:s')){
+                $pickup_time = $booking->pickup_time;
+                $booking_date = $booking->booking_date;
+            }
+
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
@@ -170,6 +175,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                     'pickup_location' => $booking->pickup_location,
                     'destination_location' => $booking->destination_location,
                     'note' => $booking->note,
+                    'pickup_time' => (isset($pickup_time) && $pickup_time != NULL) ? $pickup_time : NULL,
+                    'booking_date' => (isset($booking_date) && $booking_date != NULL) ? $booking_date : NULL,
                 ]
             ]);
 
@@ -178,27 +185,27 @@ class AutoDispatchPlotJob implements ShouldQueue
             $sendRide->driver_id = $driver->id;
             $sendRide->save();
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "driver";
-            $notification->user_id = $driver->id;
-            $notification->title = 'New Ride Available for Bidding';
-            $notification->message = 'Place your bid now';
-            $notification->save();
+            // $notification = new CompanyNotification;
+            // $notification->user_type = "driver";
+            // $notification->user_id = $driver->id;
+            // $notification->title = 'New Ride Available for Bidding';
+            // $notification->message = 'Place your bid now';
+            // $notification->save();
 
-            $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
+            // $tokens = CompanyToken::where("user_id", $driver->id)->where("user_type", "driver")->get();
 
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'New Ride Available for Bidding 🚖',
-                        'Place your bid now',
-                        [
-                            'booking_id' => $booking->id,
-                        ]
-                    );
-                }
-            }
+            // if(isset($tokens) && $tokens != NULL){
+            //     foreach($tokens as $key => $token){
+            //         FCMService::sendToDevice(
+            //             $token->fcm_token,
+            //             'New Ride Available for Bidding 🚖',
+            //             'Place your bid now',
+            //             [
+            //                 'booking_id' => $booking->id,
+            //             ]
+            //         );
+            //     }
+            // }
             \Log::info($response->status());
             \Log::info($response->json());    
             \Log::info("Driver Id");
