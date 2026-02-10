@@ -13,6 +13,7 @@ use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
 use App\Models\CompanyBooking;
 use App\Models\CompanyUser;
+use App\Models\TenantUser;
 use App\Models\CompanyNotification;
 use App\Models\PackageSetting;
 use Illuminate\Support\Facades\Http;
@@ -299,23 +300,31 @@ class SettingController extends Controller
                 'chat' => $chat
             ]);
 
-            $notification = new CompanyNotification;
-            $notification->user_type = "rider";
-            $notification->user_id = $request->user_id;
-            $notification->title = 'Message Alert';
-            $notification->message = 'New message arrived from your driver';
-            $notification->save();
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
 
-            $tokens = CompanyToken::where("user_id", $request->user_id)->where("user_type", "rider")->get();
+            if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
 
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
-                    FCMService::sendToDevice(
-                        $token->fcm_token,
-                        'Message Alert',
-                        'New message arrived from your driver',
-                        []
-                    );
+                $notification = new CompanyNotification;
+                $notification->user_type = "rider";
+                $notification->user_id = $request->user_id;
+                $notification->title = 'Message Alert';
+                $notification->message = 'New message arrived from your driver';
+                $notification->save();
+
+                $tokens = CompanyToken::where("user_id", $request->user_id)->where("user_type", "rider")->get();
+
+                if(isset($tokens) && $tokens != NULL){
+                    foreach($tokens as $key => $token){
+                        FCMService::sendToDevice(
+                            $token->fcm_token,
+                            'Message Alert',
+                            'New message arrived from your driver',
+                            []
+                        );
+                    }
                 }
             }
 
