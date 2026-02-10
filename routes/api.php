@@ -295,6 +295,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
+        Route::post('/driver/purchase-package', [DriverSettingController::class, 'purchasePackage']);
 
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);

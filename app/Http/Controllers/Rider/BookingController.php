@@ -724,7 +724,7 @@ class BookingController extends Controller
 
     public function upcomingRide(Request $request){
         try{
-            $query = CompanyBooking::where("booking_status", "pending")->where("driver", auth('rider')->user()->id);
+            $query = CompanyBooking::where("booking_status", "pending")->where("user_id", auth('rider')->user()->id);
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }

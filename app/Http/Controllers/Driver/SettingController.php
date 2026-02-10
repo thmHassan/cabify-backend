@@ -8,6 +8,7 @@ use App\Models\CompanyDriver;
 use App\Models\CompanyContactUs;
 use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
+use App\Models\DriverPackage;
 use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
 use App\Models\CompanyBooking;
@@ -393,4 +394,97 @@ class SettingController extends Controller
             ], 500);
         }
     }
+
+    public function purchasePackage(Request $request)
+    {
+        try {
+            $request->validate([
+                'package_type' => 'required|string',
+                'days' => 'nullable|integer|min:1',
+                'commission_per' => 'nullable|numeric|min:0',
+                'post_paid_amount' => 'nullable|numeric|min:0',
+                'package_duration' => 'nullable|in:day,week,month',
+            ]);
+
+            $driverId = auth('driver')->user()->id;
+
+            switch ($request->package_type) {
+
+                case 'per_ride_commission_topup':
+
+                    $package = DriverPackage::firstOrNew([
+                        'driver_id' => $driverId,
+                        'package_type' => 'per_ride_commission_topup',
+                    ]);
+
+                    $package->pending_rides = ($package->pending_rides ?? 0) + 1;
+                    $package->save();
+                    break;
+
+                case 'per_ride_commission_potpaid':
+
+                    DriverPackage::where('driver_id', $driverId)
+                        ->where('package_type', 'per_ride_commission_potpaid')
+                        ->where('expire_date', '>=', now())
+                        ->update(['expire_date' => now()->subDay()]);
+
+                    DriverPackage::create([
+                        'driver_id' => $driverId,
+                        'package_type' => 'per_ride_commission_potpaid',
+                        'start_date' => now()->toDateString(),
+                        'expire_date' => now()->addDays($request->days)->toDateString(),
+                        'commission_per' => $request->commission_per,
+                    ]);
+                    break;
+
+                case 'packages_postpaid':
+
+                    DriverPackage::create([
+                        'driver_id' => $driverId,
+                        'package_type' => 'packages_postpaid',
+                        'start_date' => now()->toDateString(),
+                        'expire_date' => now()->addDays($request->days)->toDateString(),
+                        'post_paid_amount' => $request->post_paid_amount,
+                    ]);
+                    break;
+
+                case 'packages_topup':
+
+                    $days = match ($request->package_duration) {
+                        'week' => 7,
+                        'month' => 30,
+                        default => 1,
+                    };
+
+                    DriverPackage::create([
+                        'driver_id' => $driverId,
+                        'package_type' => 'packages_topup',
+                        'start_date' => now()->toDateString(),
+                        'expire_date' => now()->addDays($days)->toDateString(),
+                        'package_top_up_id' => $request->package_top_up_id,
+                        'package_top_up_name' => $request->package_top_up_name,
+                        'package_top_up_amount' => $request->package_top_up_amount,
+                    ]);
+                    break;
+
+                default:
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Invalid package type'
+                    ], 422);
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package purchased successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }
