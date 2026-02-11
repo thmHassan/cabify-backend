@@ -495,6 +495,20 @@ class BookingController extends Controller
                 $booking->save();
                 $message = "Bid accepted successfully";
 
+                $driver = CompanyDriver::where("id", $bid->driver_id)->first();
+                $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+                if($companySetting->package_type == "per_ride_commission_topup"){
+                    $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
+                    if($driver->wallet_balance < $checkAmount){
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver does not have sufficient balance to accept this ride'
+                        ], 400);
+                    }
+                    $driver->wallet_balance -= $checkAmount;
+                    $driver->save();
+                }
+
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/bid-accept', [
