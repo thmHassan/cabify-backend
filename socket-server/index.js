@@ -168,35 +168,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("get-driver-location", async (data) => {
-        try {
-            var dataArray;
-            if (typeof data === "string") {
-                dataArray = JSON.parse(data);
-            } else {
-                dataArray = data;
-            }
-            const response = await axios.post(
-                "https://backend.cabifyit.com/api/driver/get-location",
-                dataArray,
-                {
-                    headers: {
-                        database: `${dataArray.database}`,
-                    }
-                }
-            );
-
-            const location = response.data;
-
-            socket.emit("get-driver-location-on-user", {
-                success: true,
-                data: location,
-            });
-        } catch (err) {
-            console.error("Laravel Socket error", err);
-        }
-    });
-
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());
@@ -1162,22 +1133,6 @@ app.post("/change-driver-ride-status", (req, res) => {
     });
 });
 
-app.post("/change-cancel-ride", (req, res) => {
-    const { drivers, status, booking } = req.body;
-    let sentCount = 0;
-    drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
-        if (socketId) {
-            io.to(socketId).emit("driver-ride-status-event", { status, booking });
-            sentCount++;
-        }
-    });
-    return res.json({
-        success: true,
-        sent_to: sentCount
-    });
-});
-
 app.post("/on-job-driver", (req, res) => {
     const { clientId, driverName } = req.body;
     const socketId = clientSockets.get(clientId.toString());
@@ -1211,72 +1166,52 @@ app.post("/waiting-driver", (req, res) => {
 //     });
 // });
 
-// =====================================================
-// FIXED SEND-REMINDER API
-// =====================================================
-
 app.post("/send-reminder", async (req, res) => {
     try {
-        const { clientId, title, description } = req.body;
+        const { clientId, title, description, user_type = "client" } = req.body;
 
-        // Validation
         if (!clientId || !title || !description) {
             return res.status(400).json({
                 success: false,
-                message: "clientId, title, and description are required"
-            });
-        }
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
+                message: "clientId, title and description are required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
-        // Insert notification into database
         const insertQuery = `
-            INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at)
+            INSERT INTO notifications 
+            (user_type, user_id, title, message, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, 'unread', NOW(), NOW())
         `;
 
-        const [result] = await db.query(insertQuery, ['client', clientId, title, description]);
-
-        const notificationId = result.insertId;
-
-        // Prepare notification data
-        const notificationData = {
-            id: notificationId,
-            user_type: 'client',
-            user_id: clientId,
+        const [result] = await db.query(insertQuery, [
+            user_type,
+            clientId.toString(),
             title,
-            message: description,
-            status: 'unread',
-            created_at: new Date(),
-            updated_at: new Date()
-        };
+            description
+        ]);
 
-        // Send via socket
+        console.log("Reminder stored in DB with ID:", result.insertId);
+
         const socketId = clientSockets.get(clientId.toString());
         if (socketId) {
-            // Emit to BOTH event names for compatibility
-            io.to(socketId).emit("send-reminder", notificationData);
-            io.to(socketId).emit("send-notification", notificationData);
-            console.log(`✅ Notification sent to client ${clientId} via socket`);
-        } else {
-            console.log(`⚠️ Client ${clientId} is not connected (notification saved to DB)`);
+            io.to(socketId).emit("send-reminder", {
+                id: result.insertId,
+                title,
+                description,
+                status: "unread"
+            });
         }
 
         return res.json({
             success: true,
-            message: "Notification sent and stored successfully",
-            data: notificationData
+            message: "Reminder sent and stored successfully",
+            notification_id: result.insertId
         });
 
     } catch (error) {
-        console.error("❌ Error sending notification:", error);
+        console.error("Error sending reminder:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -1284,245 +1219,45 @@ app.post("/send-reminder", async (req, res) => {
     }
 });
 
-/**
- * Get all notifications for a client
- * GET /notifications?user_type=client&user_id=123&status=unread
- */
-app.get("/notifications", async (req, res) => {
-    try {
-        const { user_type, user_id, status } = req.query;
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        let query = "SELECT * FROM notifications WHERE 1=1";
-        const params = [];
-
-        if (user_type) {
-            query += " AND user_type = ?";
-            params.push(user_type);
-        }
-
-        if (user_id) {
-            query += " AND user_id = ?";
-            params.push(user_id);
-        }
-
-        if (status) {
-            query += " AND status = ?";
-            params.push(status);
-        }
-
-        query += " ORDER BY created_at DESC";
-
-        const [notifications] = await db.query(query, params);
-
-        return res.json({
-            success: true,
-            data: notifications
-        });
-
-    } catch (error) {
-        console.error("Error fetching notifications:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * Get single notification
- * GET /notifications/:id
- */
-app.get("/notifications/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const query = "SELECT * FROM notifications WHERE id = ?";
-        const [notifications] = await db.query(query, [id]);
-
-        if (notifications.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Notification not found"
-            });
-        }
-
-        return res.json({
-            success: true,
-            data: notifications[0]
-        });
-
-    } catch (error) {
-        console.error("Error fetching notification:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * Mark notification as read
- * PUT /notifications/:id/mark-read
- */
-app.put("/notifications/:id/mark-read", async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const checkQuery = "SELECT * FROM notifications WHERE id = ?";
-        const [notifications] = await db.query(checkQuery, [id]);
-
-        if (notifications.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Notification not found"
-            });
-        }
-
-        const updateQuery = "UPDATE notifications SET status = 'read', updated_at = NOW() WHERE id = ?";
-        await db.query(updateQuery, [id]);
-
-        const [updatedNotifications] = await db.query(checkQuery, [id]);
-
-        console.log(`✅ Notification ${id} marked as read`);
-
-        return res.json({
-            success: true,
-            message: "Notification marked as read",
-            data: updatedNotifications[0]
-        });
-
-    } catch (error) {
-        console.error("Error marking notification as read:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * Mark all notifications as read
- * PUT /notifications/mark-all-read
- */
-app.put("/notifications/mark-all-read", async (req, res) => {
-    try {
-        const { user_type, user_id } = req.body;
-
-        if (!user_type || !user_id) {
-            return res.status(400).json({
-                success: false,
-                message: "user_type and user_id are required"
-            });
-        }
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const updateQuery = `
-            UPDATE notifications 
-            SET status = 'read', updated_at = NOW() 
-            WHERE user_type = ? AND user_id = ? AND status = 'unread'
-        `;
-
-        const [result] = await db.query(updateQuery, [user_type, user_id]);
-
-        console.log(`✅ ${result.affectedRows} notifications marked as read for ${user_type} ${user_id}`);
-
-        return res.json({
-            success: true,
-            message: `${result.affectedRows} notification(s) marked as read`,
-            data: {
-                updated_count: result.affectedRows,
-                user_type,
-                user_id
-            }
-        });
-
-    } catch (error) {
-        console.error("Error marking all notifications as read:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * Delete notification
- * DELETE /notifications/:id
- */
 app.delete("/notifications/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
-        if (!req.tenantDb) {
+        if (!id) {
             return res.status(400).json({
                 success: false,
-                message: "Database header is required"
+                message: "Notification ID is required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
-        const checkQuery = "SELECT * FROM notifications WHERE id = ?";
-        const [notifications] = await db.query(checkQuery, [id]);
+        // Check if notification exists
+        const [rows] = await db.query(
+            "SELECT * FROM notifications WHERE id = ?",
+            [id]
+        );
 
-        if (notifications.length === 0) {
+        if (!rows.length) {
             return res.status(404).json({
                 success: false,
                 message: "Notification not found"
             });
         }
 
-        const deleteQuery = "DELETE FROM notifications WHERE id = ?";
-        await db.query(deleteQuery, [id]);
-
-        console.log(`✅ Notification ${id} deleted successfully`);
+        // Delete notification
+        await db.query(
+            "DELETE FROM notifications WHERE id = ?",
+            [id]
+        );
 
         return res.json({
             success: true,
-            message: "Notification deleted successfully",
-            data: {
-                id: parseInt(id),
-                deleted: true
-            }
+            message: "Notification deleted successfully"
         });
 
     } catch (error) {
-        console.error("Error deleting notification:", error);
+        console.error("❌ Delete notification error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -1530,97 +1265,32 @@ app.delete("/notifications/:id", async (req, res) => {
     }
 });
 
-/**
- * Delete multiple notifications
- * DELETE /notifications/bulk
- */
-app.delete("/notifications/bulk", async (req, res) => {
+app.delete("/notifications/user/:userId", async (req, res) => {
     try {
-        const { ids } = req.body;
+        const { userId } = req.params;
+        const { user_type } = req.query;
 
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        if (!userId || !user_type) {
             return res.status(400).json({
                 success: false,
-                message: "ids array is required and must not be empty"
-            });
-        }
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
+                message: "userId and user_type are required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
-        const placeholders = ids.map(() => '?').join(',');
-        const deleteQuery = `DELETE FROM notifications WHERE id IN (${placeholders})`;
-        const [result] = await db.query(deleteQuery, ids);
-
-        console.log(`✅ ${result.affectedRows} notifications deleted successfully`);
-
-        return res.json({
-            success: true,
-            message: `${result.affectedRows} notification(s) deleted successfully`,
-            data: {
-                deleted_count: result.affectedRows,
-                ids: ids
-            }
-        });
-
-    } catch (error) {
-        console.error("Error deleting notifications:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * Get unread notification count
- * GET /notifications/unread/count?user_type=client&user_id=123
- */
-app.get("/notifications/unread/count", async (req, res) => {
-    try {
-        const { user_type, user_id } = req.query;
-
-        if (!user_type || !user_id) {
-            return res.status(400).json({
-                success: false,
-                message: "user_type and user_id are required"
-            });
-        }
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const query = `
-            SELECT COUNT(*) as unread_count 
-            FROM notifications 
-            WHERE user_type = ? AND user_id = ? AND status = 'unread'
-        `;
-
-        const [[result]] = await db.query(query, [user_type, user_id]);
+        await db.query(
+            "DELETE FROM notifications WHERE user_id = ? AND user_type = ?",
+            [userId, user_type]
+        );
 
         return res.json({
             success: true,
-            data: {
-                user_type,
-                user_id,
-                unread_count: result.unread_count
-            }
+            message: "All notifications deleted for this user"
         });
 
     } catch (error) {
-        console.error("Error getting unread count:", error);
+        console.error("❌ Delete user notifications error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
