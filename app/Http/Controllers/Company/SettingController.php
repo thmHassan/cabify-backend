@@ -582,110 +582,88 @@ class SettingController extends Controller
         }
     }
 
-    public function setDispatchSystem(Request $request){
-        try{
-            $settings = CompanyDispatchSystem::orderBy("id", "DESC")->get();
+    public function setDispatchSystem(Request $request)
+    {
+        try {
 
-            foreach($settings as $key => $setting){
-                if($setting->dispatch_system == "auto_dispatch_plot_base" && $setting->steps == "immediately_show_on_dispatcher_panel" && isset($request->auto_dispatch_plot_base['immediately_show_on_dispatcher_panel'])){
-                    $setting->status = $request->auto_dispatch_plot_base['immediately_show_on_dispatcher_panel'];
-                    $setting->priority = $request->auto_dispatch_plot_base['priority'];
+            $map = [
+                'auto_dispatch_plot_base' => [
+                    'immediately_show_on_dispatcher_panel',
+                    'show_only_after_not_selected_in_auto_dispatch_first_try',
+                    'show_only_after_not_selected_in_auto_dispatch_second_try',
+                    'show_only_after_not_selected_in_auto_dispatch_third_try',
+                    'put_in_bidding_panel',
+                ],
+
+                'bidding_fixed_fare_plot_base' => [
+                    'wait_time_seconds',
+                    'immediately_show_on_dispatcher_panel',
+                    'shows_up_after_first_rejection_or_wait_time_elapsed',
+                ],
+
+                'auto_dispatch_nearest_driver' => [
+                    'immediately_show_on_dispatcher_panel',
+                    'show_only_after_not_selected_in_auto_dispatch_first_try',
+                    'show_only_after_not_selected_in_auto_dispatch_second_try',
+                    'show_only_after_not_selected_in_auto_dispatch_third_try',
+                    'put_in_bidding_panel',
+                ],
+
+                'bidding' => [
+                    'immediately_show_on_dispatcher_panel',
+                    'if_not_received_bid_in_first_10_seconds',
+                    'show_only_after_not_selected_in_auto_dispatch_first_try',
+                    'show_only_after_not_selected_in_auto_dispatch_second_try',
+                    'show_only_after_not_selected_in_auto_dispatch_third_try',
+                ],
+
+                'bidding_fixed_fare_nearest_driver' => [
+                    'wait_time_seconds',
+                    'immediately_show_on_dispatcher_panel',
+                    'shows_up_after_first_rejection_or_wait_time_elapsed',
+                ],
+            ];
+
+            foreach ($map as $dispatchSystem => $steps) {
+
+                if (!$request->has($dispatchSystem)) {
+                    continue;
                 }
-                elseif($setting->dispatch_system == "auto_dispatch_plot_base" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_first_try" && isset($request->auto_dispatch_plot_base['show_only_after_not_selected_in_auto_dispatch_first_try'])){
-                    $setting->status = $request->auto_dispatch_plot_base['show_only_after_not_selected_in_auto_dispatch_first_try'];
-                    $setting->priority = $request->auto_dispatch_plot_base['priority'];
+
+                $priority = $request->$dispatchSystem['priority'] ?? null;
+
+                foreach ($steps as $step) {
+
+                    if (!isset($request->$dispatchSystem[$step])) {
+                        continue;
+                    }
+
+                    CompanyDispatchSystem::where('dispatch_system', $dispatchSystem)
+                        ->where('steps', $step)
+                        ->update([
+                            'status'   => $request->$dispatchSystem[$step],
+                            'priority' => $priority,
+                        ]);
                 }
-                elseif($setting->dispatch_system == "auto_dispatch_plot_base" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_second_try" && isset($request->auto_dispatch_plot_base['show_only_after_not_selected_in_auto_dispatch_second_try'])){
-                    $setting->status = $request->auto_dispatch_plot_base['show_only_after_not_selected_in_auto_dispatch_second_try'];
-                    $setting->priority = $request->auto_dispatch_plot_base['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_plot_base" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_third_try" && isset($request->auto_dispatch_plot_base['show_only_after_not_selected_in_auto_dispatch_third_try'])){
-                    $setting->status = $request->auto_dispatch_plot_base['show_only_after_not_selected_in_auto_dispatch_third_try'];
-                    $setting->priority = $request->auto_dispatch_plot_base['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_plot_base" && $setting->steps == "put_in_bidding_panel" && isset($request->auto_dispatch_plot_base['put_in_bidding_panel'])){
-                    $setting->status = $request->auto_dispatch_plot_base['put_in_bidding_panel'];
-                    $setting->priority = $request->auto_dispatch_plot_base['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding_fixed_fare_plot_base" && $setting->steps == "wait_time_seconds" && isset($request->bidding_fixed_fare_plot_base['wait_time_seconds'])){
-                    $setting->status = $request->bidding_fixed_fare_plot_base['wait_time_seconds'];
-                    $setting->priority = $request->bidding_fixed_fare_plot_base['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding_fixed_fare_plot_base" && $setting->steps == "immediately_show_on_dispatcher_panel" && isset($request->bidding_fixed_fare_plot_base['immediately_show_on_dispatcher_panel'])){
-                    $setting->status = $request->bidding_fixed_fare_plot_base['immediately_show_on_dispatcher_panel'];
-                    $setting->priority = $request->bidding_fixed_fare_plot_base['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding_fixed_fare_plot_base" && $setting->steps == "shows_up_after_first_rejection_or_wait_time_elapsed" && isset($request->bidding_fixed_fare_plot_base['shows_up_after_first_rejection_or_wait_time_elapsed'])){
-                    $setting->status = $request->bidding_fixed_fare_plot_base['shows_up_after_first_rejection_or_wait_time_elapsed'];
-                    $setting->priority = $request->bidding_fixed_fare_plot_base['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_nearest_driver" && $setting->steps == "immediately_show_on_dispatcher_panel" && isset($request->auto_dispatch_nearest_driver['immediately_show_on_dispatcher_panel'])){
-                    $setting->status = $request->auto_dispatch_nearest_driver['immediately_show_on_dispatcher_panel'];
-                    $setting->priority = $request->auto_dispatch_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_nearest_driver" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_first_try" && isset($request->auto_dispatch_nearest_driver['show_only_after_not_selected_in_auto_dispatch_first_try'])){
-                    $setting->status = $request->auto_dispatch_nearest_driver['show_only_after_not_selected_in_auto_dispatch_first_try'];
-                    $setting->priority = $request->auto_dispatch_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_nearest_driver" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_second_try" && isset($request->auto_dispatch_nearest_driver['show_only_after_not_selected_in_auto_dispatch_second_try'])){
-                    $setting->status = $request->auto_dispatch_nearest_driver['show_only_after_not_selected_in_auto_dispatch_second_try'];
-                    $setting->priority = $request->auto_dispatch_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_nearest_driver" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_third_try" && isset($request->auto_dispatch_nearest_driver['show_only_after_not_selected_in_auto_dispatch_third_try'])){
-                    $setting->status = $request->auto_dispatch_nearest_driver['show_only_after_not_selected_in_auto_dispatch_third_try'];
-                    $setting->priority = $request->auto_dispatch_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "auto_dispatch_nearest_driver" && $setting->steps == "put_in_bidding_panel" && isset($request->auto_dispatch_nearest_driver['put_in_bidding_panel'])){
-                    $setting->status = $request->auto_dispatch_nearest_driver['put_in_bidding_panel'];
-                    $setting->priority = $request->auto_dispatch_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "manual_dispatch_only" && isset($request->manual_dispatch_only)){
-                    $setting->status = $request->manual_dispatch_only['status'];
-                    $setting->priority = $request->manual_dispatch_only['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding" && $setting->steps == "immediately_show_on_dispatcher_panel" && isset($request->bidding['immediately_show_on_dispatcher_panel'])){
-                    $setting->status = $request->bidding['immediately_show_on_dispatcher_panel'];
-                    $setting->priority = $request->bidding['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding" && $setting->steps == "if_not_received_bid_in_first_10_seconds" && isset($request->bidding['if_not_received_bid_in_first_10_seconds'])){
-                    $setting->status = $request->bidding['if_not_received_bid_in_first_10_seconds'];
-                    $setting->priority = $request->bidding['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_first_try" && isset($request->bidding['show_only_after_not_selected_in_auto_dispatch_first_try'])){
-                    $setting->status = $request->bidding['show_only_after_not_selected_in_auto_dispatch_first_try'];
-                    $setting->priority = $request->bidding['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_second_try" && isset($request->bidding['show_only_after_not_selected_in_auto_dispatch_second_try'])){
-                    $setting->status = $request->bidding['show_only_after_not_selected_in_auto_dispatch_second_try'];
-                    $setting->priority = $request->bidding['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding" && $setting->steps == "show_only_after_not_selected_in_auto_dispatch_third_try" && isset($request->bidding['show_only_after_not_selected_in_auto_dispatch_third_try'])){
-                    $setting->status = $request->bidding['show_only_after_not_selected_in_auto_dispatch_third_try'];
-                    $setting->priority = $request->bidding['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding_fixed_fare_nearest_driver" && $setting->steps == "wait_time_seconds" && isset($request->bidding_fixed_fare_nearest_driver['wait_time_seconds'])){
-                    $setting->status = $request->bidding_fixed_fare_nearest_driver['wait_time_seconds'];
-                    $setting->priority = $request->bidding_fixed_fare_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding_fixed_fare_nearest_driver" && $setting->steps == "immediately_show_on_dispatcher_panel" && isset($request->bidding_fixed_fare_nearest_driver['immediately_show_on_dispatcher_panel'])){
-                    $setting->status = $request->bidding_fixed_fare_nearest_driver['immediately_show_on_dispatcher_panel'];
-                    $setting->priority = $request->bidding_fixed_fare_nearest_driver['priority'];
-                }
-                elseif($setting->dispatch_system == "bidding_fixed_fare_nearest_driver" && $setting->steps == "shows_up_after_first_rejection_or_wait_time_elapsed" && isset($request->bidding_fixed_fare_nearest_driver['shows_up_after_first_rejection_or_wait_time_elapsed'])){
-                    $setting->status = $request->bidding_fixed_fare_nearest_driver['shows_up_after_first_rejection_or_wait_time_elapsed'];
-                    $setting->priority = $request->bidding_fixed_fare_nearest_driver['priority'];
-                }
-                $setting->save();
             }
+
+            if ($request->has('manual_dispatch_only')) {
+                CompanyDispatchSystem::where('dispatch_system', 'manual_dispatch_only')
+                    ->update([
+                        'status'   => $request->manual_dispatch_only['status'],
+                        'priority' => $request->manual_dispatch_only['priority'],
+                    ]);
+            }
+
             return response()->json([
                 'success' => 1,
-                'message' => 'Data saved successfully'
+                'message' => 'Data updated successfully',
             ]);
-        }
-        catch(\Exception $e){
+
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ]);
         }
     }
