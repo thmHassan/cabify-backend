@@ -18,14 +18,18 @@ class CheckAppAvailibility
     {
         $setting = CompanySetting::orderBy("id", "DESC")->first();
 
-        if(auth("driver") && $setting->driver_app == "disable"){
+        if (!$setting) {
+            return $next($request);
+        }
+
+        if(auth("driver")->check() && $setting->driver_app == "disable"){
             return response()->json([
                 'error' => 1,
                 'message' => 'Driver App is not allowed by Company Admin'
             ], 400);
         }
 
-        if(auth("rider") && $setting->customer_app == "disable"){
+        if(auth("rider")->check() && $setting->customer_app == "disable"){
             return response()->json([
                 'error' => 1,
                 'message' => 'Rider App is not allowed by Company Admin'
