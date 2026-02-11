@@ -425,8 +425,6 @@ class CompanyController extends Controller
                     'company_email' => $tenant->email,
                     'company_phone_no' => $tenant->phone,
                     'company_timezone' => $tenant->time_zone,
-                    'google_api_keys' => $tenant->google_api_key,
-                    'barikoi_api_keys' => $tenant->barikoi_api_key,
                     'company_currency' => $tenant->currency,
                     'company_admin_dispatch_sytem' => $system,
                     'map_settings' => $tenant->enable_smtp === "yes" ? 'default' : 'custom',
