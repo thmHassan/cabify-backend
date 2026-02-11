@@ -10,6 +10,7 @@ use App\Models\CompanyBid;
 use App\Models\CompanySetting;
 use App\Models\CompanyDriver;
 use App\Models\VehicleType;
+use App\Models\DriverPackage;
 use App\Models\CompanyWaitingTimeLog;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
@@ -153,48 +154,36 @@ class BookingController extends Controller
                 'amount' => 'required'
             ]);
 
-            $latestPackages = Package::where("driver_id", auth("driver")->user()->id)->whereIn('id', function ($query) {
-                $query->selectRaw('MAX(id)')
-                    ->from('packages')
-                    ->where("driver_id", auth("driver")->user()->id)
-                    ->groupBy('package_type');
-            })->get();
+            $existBid = CompanyBid::where('booking_id', $request->booking_id)
+            ->where('driver_id', $driver->id)
+            ->exists();
 
-            $canAcceptRide = false;
-            foreach($latestPackages as $package){
-                if($package->package_type == "per_ride_commission_topup"){
-                    if($package->pending_rides >= 1){
-                        $package->pending_rides -= 1;
-                        $package->save();
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-                elseif($package->package_type == "per_ride_commission_potpaid"){
-                    if($package->expire_date >= date("Y-m-d")){
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-                elseif($package->package_type == "packages_postpaid"){
-                    if($package->expire_date >= date("Y-m-d")){
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-                elseif($package->package_type == "packages_topup"){
-                    if($package->expire_date >= date("Y-m-d")){
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-            }
-
-            if(! $canAcceptRide){
+            if($existBid){
                 return response()->json([
                     'error' => 1,
-                    'message' => 'Your package validity to accept ride is over'
+                    'message' => 'You have already placed a bid for this booking'
                 ], 400);
+            }
+
+            $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+            if($companySetting->package_type == "per_ride_commission_topup"){
+                $checkAmount = ($request->amount * $companySetting->package_amount) / 100;
+                if($checkAmount > auth("driver")->user()->wallet_balance){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your wallet balance is not sufficient'
+                    ], 400);
+                }
+            }
+            if($companySetting->package_type == "packages_topup"){
+                $package = DriverPackage::where("driver_id", auth("driver")->user()->id)->where("package_type", "packages_topup")->orderBy("id", "DESC")->first();
+
+                if(!isset($package) || (isset($package) && $package->expire_date < date("Y-m-d"))){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your wallet balance is not sufficient'
+                    ], 400);
+                }
             }
 
             $newBid = new CompanyBid;
@@ -361,52 +350,36 @@ class BookingController extends Controller
 
     public function acceptRide(Request $request){
         try{
+            $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
 
-            $latestPackages = Package::where("driver_id", auth("driver")->user()->id)->whereIn('id', function ($query) {
-                $query->selectRaw('MAX(id)')
-                    ->from('packages')
-                    ->where("driver_id", auth("driver")->user()->id)
-                    ->groupBy('package_type');
-            })->get();
-
-            $canAcceptRide = false;
-            foreach($latestPackages as $package){
-                if($package->package_type == "per_ride_commission_topup"){
-                    if($package->pending_rides >= 1){
-                        $package->pending_rides -= 1;
-                        $package->save();
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-                elseif($package->package_type == "per_ride_commission_potpaid"){
-                    if($package->expire_date >= date("Y-m-d")){
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-                elseif($package->package_type == "packages_postpaid"){
-                    if($package->expire_date >= date("Y-m-d")){
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-                elseif($package->package_type == "packages_topup"){
-                    if($package->expire_date >= date("Y-m-d")){
-                        $canAcceptRide = true;
-                        break;
-                    }
-                }
-            }
-
-            if(! $canAcceptRide){
+            if ($booking->booking_status !== 'pending') {
                 return response()->json([
                     'error' => 1,
-                    'message' => 'Your package validity to accept ride is over'
+                    'message' => 'Ride already accepted or cancelled'
                 ], 400);
+            }    
+
+            $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+            if($companySetting->package_type == "per_ride_commission_topup"){
+                $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
+                if($checkAmount > auth("driver")->user()->wallet_balance){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your wallet balance is not sufficient'
+                    ], 400);
+                }
+            }
+            if($companySetting->package_type == "packages_topup"){
+                $package = DriverPackage::where("driver_id", auth("driver")->user()->id)->where("package_type", "packages_topup")->orderBy("id", "DESC")->first();
+
+                if(!isset($package) || (isset($package) && $package->expire_date < date("Y-m-d"))){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your wallet balance is not sufficient'
+                    ], 400);
+                }
             }
 
-            $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
             $booking->booking_status = "ongoing";
             $booking->booking_amount = $booking->offered_amount;
             $booking->driver = auth("driver")->user()->id;
@@ -414,6 +387,10 @@ class BookingController extends Controller
 
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->driving_status = "busy";
+            if($companySetting->package_type == "per_ride_commission_topup"){
+                $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
+                $driver->wallet_balance -= $checkAmount;
+            }
             $driver->save();
 
             Http::withHeaders([
