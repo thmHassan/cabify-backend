@@ -280,7 +280,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
     Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
 
-    Route::group(['middleware' => ['auth.driver.jwt']], function () {
+    Route::group(['middleware' => ['auth.driver.jwt', 'check.app.availibility']], function () {
         Route::get('/driver/get-profile', [DriverAuthController::class, 'getProfile']);
         Route::post('/driver/update-profile', [DriverAuthController::class, 'updateProfile']);
 
@@ -338,7 +338,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
     Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
 
-    Route::group(['middleware' => ['auth.rider.jwt']], function () {
+    Route::group(['middleware' => ['auth.rider.jwt', 'check.app.availibility']], function () {
         Route::post('/rider/add-emergency-contact', [RiderEmergencyContactController::class, 'addEmergencyContact']);
         Route::post('/rider/edit-emergency-contact', [RiderEmergencyContactController::class, 'editEmergencyContact']);
         Route::get('/rider/delete-emergency-contact', [RiderEmergencyContactController::class, 'deleteEmergencyContact']);

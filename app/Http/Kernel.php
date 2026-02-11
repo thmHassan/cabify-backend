@@ -71,6 +71,7 @@ class Kernel extends HttpKernel
         'auth.dispatcher.jwt' => \App\Http\Middleware\DispatcherAuthenticate::class,
         'auth.driver.jwt' => \App\Http\Middleware\DriverAuthenticate::class,
         'auth.rider.jwt' => \App\Http\Middleware\RiderAuthenticate::class,
+        'check.app.availibility' => \App\Http\Middleware\CheckAppAvailibility::class,
         'tenant.db' => \App\Http\Middleware\SetTenantDatabase::class,
     ];
 }
