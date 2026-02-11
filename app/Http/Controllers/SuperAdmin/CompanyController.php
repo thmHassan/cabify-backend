@@ -1173,14 +1173,14 @@ class CompanyController extends Controller
         $record->type = "login";
         $record->save();
 
-        $company = Tenant::where('id', $user->tenant_id)->first();
+       $company = Tenant::where('database', 'tenant_' . $request->header('database'))->first();
 
-        return response()->json([
-            'message' => 'Dispatcher login successful',
-            'token' => $token,
-            'user' => $user,
-            'tenant_id' => $company?->id,
-            'company_data' => $company?->data,
+       return response()->json([
+           'message' => 'Dispatcher login successful',
+           'token' => $token,
+           'user' => $user,
+           'tenant_id' => $company?->id,
+            'company_data' => $company,  
         ]);
     }
     catch(\Exception $e){
@@ -1190,7 +1190,7 @@ class CompanyController extends Controller
         ]);
     }
    }
-   
+
     public function dispatcherLogout()
     {
         $record = new CompanyDispatcherLog;
