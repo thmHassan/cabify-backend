@@ -10,4 +10,6 @@ class CompanyDispatchSystem extends Model
     use HasFactory;
 
     protected $table = "dispatch_system";
+    protected $primaryKey = 'id';
+
 }
