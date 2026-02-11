@@ -1103,48 +1103,94 @@ class CompanyController extends Controller
         }
     }
 
+    // public function dispatcherLogin(Request $request){
+    //     try{
+    //         $request->validate([
+    //             'email' => 'required',
+    //             'password' => 'required'
+    //         ]);
+
+    //         $user = Dispatcher::where('email', $request->email)->first();
+            
+    //         if (!$user) {
+    //             return response()->json([
+    //                 'error' => 1,
+    //                 'message' => 'Dispatcher not found'
+    //             ], 404);
+    //         }
+
+    //         if (!Hash::check($request->password, $user->password)) {
+    //             return response()->json(['message' => 'Invalid credentials'], 401);
+    //         }
+            
+    //         $token = JWTAuth::fromUser($user);
+
+    //         $record = new CompanyDispatcherLog;
+    //         $record->dispatcher_id = $user->id;
+    //         $record->datetime = date("Y-m-d H:i:s");
+    //         $record->type = "login";
+    //         $record->save();
+
+    //         return response()->json([
+    //             'message' => 'Dispatcher login successful',
+    //             'token' => $token,
+    //             'user' => $user
+    //         ]);
+    //     }
+    //     catch(\Exception $e){
+    //         return response()->json([
+    //             'error' => 1,
+    //             'message' => $e->getMessage()
+    //         ]);
+    //     }
+    // }
+
     public function dispatcherLogin(Request $request){
-        try{
-            $request->validate([
-                'email' => 'required',
-                'password' => 'required'
-            ]);
+    try{
+        $request->validate([
+            'email' => 'required',
+            'password' => 'required'
+        ]);
 
-            $user = Dispatcher::where('email', $request->email)->first();
-            
-            if (!$user) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Dispatcher not found'
-                ], 404);
-            }
-
-            if (!Hash::check($request->password, $user->password)) {
-                return response()->json(['message' => 'Invalid credentials'], 401);
-            }
-            
-            $token = JWTAuth::fromUser($user);
-
-            $record = new CompanyDispatcherLog;
-            $record->dispatcher_id = $user->id;
-            $record->datetime = date("Y-m-d H:i:s");
-            $record->type = "login";
-            $record->save();
-
-            return response()->json([
-                'message' => 'Dispatcher login successful',
-                'token' => $token,
-                'user' => $user
-            ]);
-        }
-        catch(\Exception $e){
+        $user = Dispatcher::where('email', $request->email)->first();
+        
+        if (!$user) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage()
-            ]);
+                'message' => 'Dispatcher not found'
+            ], 404);
         }
-    }
 
+        if (!Hash::check($request->password, $user->password)) {
+            return response()->json(['message' => 'Invalid credentials'], 401);
+        }
+        
+        $token = JWTAuth::fromUser($user);
+
+        $record = new CompanyDispatcherLog;
+        $record->dispatcher_id = $user->id;
+        $record->datetime = date("Y-m-d H:i:s");
+        $record->type = "login";
+        $record->save();
+
+        $company = Tenant::where('id', $user->tenant_id)->first();
+
+        return response()->json([
+            'message' => 'Dispatcher login successful',
+            'token' => $token,
+            'user' => $user,
+            'tenant_id' => $company?->id,
+            'company_data' => $company?->data,
+        ]);
+    }
+    catch(\Exception $e){
+        return response()->json([
+            'error' => 1,
+            'message' => $e->getMessage()
+        ]);
+    }
+   }
+   
     public function dispatcherLogout()
     {
         $record = new CompanyDispatcherLog;
