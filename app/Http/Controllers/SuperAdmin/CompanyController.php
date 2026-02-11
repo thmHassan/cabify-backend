@@ -1173,7 +1173,7 @@ class CompanyController extends Controller
         $record->type = "login";
         $record->save();
 
-       $company = Tenant::where('database', 'tenant_' . $request->header('database'))->first();
+       $company = Tenant::where('id',  $request->header('database'))->first();
 
        return response()->json([
            'message' => 'Dispatcher login successful',
