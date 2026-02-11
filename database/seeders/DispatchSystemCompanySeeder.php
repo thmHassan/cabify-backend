@@ -19,11 +19,30 @@ class DispatchSystemCompanySeeder extends Seeder
 
         foreach ($tenants as $tenant) {
             tenancy()->initialize($tenant);
-            DB::table('dispatch_system')->upsert(
-                $this->dispatchData(),
-                ['dispatch_system', 'steps'],
-                ['priority', 'sub_priority', 'status']
-            );
+            foreach ($this->dispatchData() as $row) {
+                $query = DB::table('dispatch_system')
+                    ->where('dispatch_system', $row['dispatch_system']);
+
+                if (is_null($row['steps'])) {
+                    $query->whereNull('steps');
+                } else {
+                    $query->where('steps', $row['steps']);
+                }
+
+                $exists = $query->first();
+
+                if ($exists) {
+                    DB::table('dispatch_system')
+                        ->where('id', $exists->id)
+                        ->update([
+                            'priority' => $row['priority'],
+                            'sub_priority' => $row['sub_priority'],
+                            'status' => $row['status'],
+                        ]);
+                } else {
+                    DB::table('dispatch_system')->insert($row);
+                }
+            }
             tenancy()->end();
         }
     }
@@ -125,7 +144,7 @@ class DispatchSystemCompanySeeder extends Seeder
             [
                 'dispatch_system' => 'manual_dispatch_only',
                 'priority' => '4',
-                'steps' => NULL,
+                'steps' => 'manual_only',
                 'sub_priority' => NULL,
                 'status' => "disable",
             ],
