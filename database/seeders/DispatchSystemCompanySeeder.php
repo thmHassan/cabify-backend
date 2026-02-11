@@ -17,7 +17,7 @@ class DispatchSystemCompanySeeder extends Seeder
     {
         $tenants = Tenant::get();
 
-        foreach ($tenants as $tenant) {
+        foreach ($tenants as $tenant) { 
             tenancy()->initialize($tenant);
             foreach ($this->dispatchData() as $row) {
                 $query = DB::table('dispatch_system')
