@@ -21,8 +21,8 @@ class DispatchSystemCompanySeeder extends Seeder
             tenancy()->initialize($tenant);
             DB::table('dispatch_system')->upsert(
                 $this->dispatchData(),
-                ['dispatch_system', 'priority', 'sub_priority'],
-                ['steps', 'status']
+                ['dispatch_system', 'steps'],
+                ['priority', 'sub_priority', 'status']
             );
             tenancy()->end();
         }
