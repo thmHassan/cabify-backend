@@ -20,6 +20,7 @@ use App\Services\FCMService;
 use App\Models\CompanyNotification;
 use App\Models\Setting;
 use App\Models\TenantUser;
+use App\Models\CompanyUser;
 
 class BookingController extends Controller
 {
@@ -393,6 +394,15 @@ class BookingController extends Controller
             }
             $driver->save();
 
+            $user = CompanyUser::where("phone_no", $booking->phone_no)->first();
+            if(!isset($user) || $user == NULL){
+                $user = new CompanyUser;
+                $user->name = $booking->name;
+                $user->email = $booking->email;
+                $user->phone_no = $booking->phone_no;
+                $user->save();
+            }
+
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
@@ -407,7 +417,7 @@ class BookingController extends Controller
                     'distance' => $booking->distance,
                     'user_id' => $booking->user_id,
                     'user_name' => $booking->name,
-                    'user_profile' => $booking->userDetail->profile_image,
+                    'user_profile' => $user->profile_image,
                     'pickup_location' => $booking->pickup_location,
                     'destination_location' => $booking->destination_location,
                 ]
