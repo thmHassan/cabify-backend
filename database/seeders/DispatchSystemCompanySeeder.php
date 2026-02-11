@@ -30,7 +30,7 @@ class DispatchSystemCompanySeeder extends Seeder
 
     private function dispatchData(): array
     {
-        return [
+        return [ 
             [
                 'dispatch_system' => 'auto_dispatch_plot_base',
                 'priority' => '1',
