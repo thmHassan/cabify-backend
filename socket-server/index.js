@@ -168,35 +168,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("get-driver-location", async (data) => {
-        try {
-            var dataArray;
-            if (typeof data === "string") {
-                dataArray = JSON.parse(data);
-            } else {
-                dataArray = data;
-            }
-            const response = await axios.post(
-                "https://backend.cabifyit.com/api/driver/get-location",
-                dataArray,
-                {
-                    headers: {
-                        database: `${dataArray.database}`,
-                    }
-                }
-            );
-
-            const location = response.data;
-
-            socket.emit("get-driver-location-on-user", {
-                success: true,
-                data: location,
-            });
-        } catch (err) {
-            console.error("Laravel Socket error", err);
-        }
-    });
-
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());
@@ -1162,22 +1133,6 @@ app.post("/change-driver-ride-status", (req, res) => {
     });
 });
 
-app.post("/change-cancel-ride", (req, res) => {
-    const { drivers, status, booking } = req.body;
-    let sentCount = 0;
-    drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
-        if (socketId) {
-            io.to(socketId).emit("driver-ride-status-event", { status, booking });
-            sentCount++;
-        }
-    });
-    return res.json({
-        success: true,
-        sent_to: sentCount
-    });
-});
-
 app.post("/on-job-driver", (req, res) => {
     const { clientId, driverName } = req.body;
     const socketId = clientSockets.get(clientId.toString());
@@ -1213,53 +1168,46 @@ app.post("/waiting-driver", (req, res) => {
 
 app.post("/send-reminder", async (req, res) => {
     try {
-        const { clientId, title, description } = req.body;
+        const { clientId, title, description, user_type = "client" } = req.body;
 
         if (!clientId || !title || !description) {
             return res.status(400).json({
                 success: false,
-                message: "clientId, title, and description are required"
-            });
-        }
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
+                message: "clientId, title and description are required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
         const insertQuery = `
-            INSERT INTO reminders (client_id, title, description, created_at)
-            VALUES (?, ?, ?, NOW())
+            INSERT INTO notifications 
+            (user_type, user_id, title, message, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'unread', NOW(), NOW())
         `;
 
-        const [result] = await db.query(insertQuery, [clientId, title, description]);
-
-        const reminderId = result.insertId;
-
-        const reminderData = {
-            id: reminderId,
-            client_id: clientId,
+        const [result] = await db.query(insertQuery, [
+            user_type,
+            clientId.toString(),
             title,
-            description,
-            created_at: new Date()
-        };
+            description
+        ]);
+
+        console.log("Reminder stored in DB with ID:", result.insertId);
 
         const socketId = clientSockets.get(clientId.toString());
         if (socketId) {
-            io.to(socketId).emit("send-reminder", reminderData);
-            console.log(`Reminder sent to client ${clientId} via socket`);
-        } else {
-            console.log(`Client ${clientId} is not connected`);
+            io.to(socketId).emit("send-reminder", {
+                id: result.insertId,
+                title,
+                description,
+                status: "unread"
+            });
         }
 
         return res.json({
             success: true,
             message: "Reminder sent and stored successfully",
-            data: reminderData
+            notification_id: result.insertId
         });
 
     } catch (error) {
@@ -1271,75 +1219,45 @@ app.post("/send-reminder", async (req, res) => {
     }
 });
 
-app.get("/reminders", async (req, res) => {
-    try {
-        const { client_id } = req.query;
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        let query = "SELECT * FROM reminders WHERE 1=1";
-        const params = [];
-
-        if (client_id) {
-            query += " AND client_id = ?";
-            params.push(client_id);
-        }
-
-        query += " ORDER BY created_at DESC";
-
-        const [reminders] = await db.query(query, params);
-
-        return res.json({
-            success: true,
-            data: reminders
-        });
-
-    } catch (error) {
-        console.error("Error fetching reminders:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.get("/reminders/:id", async (req, res) => {
+app.delete("/notifications/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
-        if (!req.tenantDb) {
+        if (!id) {
             return res.status(400).json({
                 success: false,
-                message: "Database header is required"
+                message: "Notification ID is required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
-        const query = "SELECT * FROM reminders WHERE id = ?";
-        const [reminders] = await db.query(query, [id]);
+        // Check if notification exists
+        const [rows] = await db.query(
+            "SELECT * FROM notifications WHERE id = ?",
+            [id]
+        );
 
-        if (reminders.length === 0) {
+        if (!rows.length) {
             return res.status(404).json({
                 success: false,
-                message: "Reminder not found"
+                message: "Notification not found"
             });
         }
 
+        // Delete notification
+        await db.query(
+            "DELETE FROM notifications WHERE id = ?",
+            [id]
+        );
+
         return res.json({
             success: true,
-            data: reminders[0]
+            message: "Notification deleted successfully"
         });
 
     } catch (error) {
-        console.error("Error fetching reminder:", error);
+        console.error("❌ Delete notification error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -1347,89 +1265,32 @@ app.get("/reminders/:id", async (req, res) => {
     }
 });
 
-app.delete("/reminders/:id", async (req, res) => {
+app.delete("/notifications/user/:userId", async (req, res) => {
     try {
-        const { id } = req.params;
+        const { userId } = req.params;
+        const { user_type } = req.query;
 
-        if (!req.tenantDb) {
+        if (!userId || !user_type) {
             return res.status(400).json({
                 success: false,
-                message: "Database header is required"
+                message: "userId and user_type are required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
-        const checkQuery = "SELECT * FROM reminders WHERE id = ?";
-        const [reminders] = await db.query(checkQuery, [id]);
-
-        if (reminders.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Reminder not found"
-            });
-        }
-
-        const deleteQuery = "DELETE FROM reminders WHERE id = ?";
-        await db.query(deleteQuery, [id]);
-
-        console.log(`✅ Reminder ${id} deleted successfully`);
+        await db.query(
+            "DELETE FROM notifications WHERE user_id = ? AND user_type = ?",
+            [userId, user_type]
+        );
 
         return res.json({
             success: true,
-            message: "Reminder deleted successfully",
-            data: {
-                id: parseInt(id),
-                deleted: true
-            }
+            message: "All notifications deleted for this user"
         });
 
     } catch (error) {
-        console.error("Error deleting reminder:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.delete("/reminders/bulk", async (req, res) => {
-    try {
-        const { ids } = req.body;
-
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "ids array is required and must not be empty"
-            });
-        }
-
-        if (!req.tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const placeholders = ids.map(() => '?').join(',');
-        const deleteQuery = `DELETE FROM reminders WHERE id IN (${placeholders})`;
-        const [result] = await db.query(deleteQuery, ids);
-
-        console.log(`✅ ${result.affectedRows} reminders deleted successfully`);
-
-        return res.json({
-            success: true,
-            message: `${result.affectedRows} reminder(s) deleted successfully`,
-            data: {
-                deleted_count: result.affectedRows,
-                ids: ids
-            }
-        });
-
-    } catch (error) {
-        console.error("Error deleting reminders:", error);
+        console.error("❌ Delete user notifications error:", error);
         return res.status(500).json({
             success: false,
             error: error.message

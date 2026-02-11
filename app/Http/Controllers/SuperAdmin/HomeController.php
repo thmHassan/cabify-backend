@@ -116,57 +116,123 @@ class HomeController extends Controller
         }
     }
 
-    public function usageMonitoring(){
-        try{
-            $activeCompanies = Tenant::where('data->status', 'active')->count();
-            $totalAPICalls =  19;
-            $companyList = [
-                [
-                    'company_name' => 'ABC',
-                    'api_calls_today' => '12500',
-                    'map_request' => '8500',
-                    'voip_minutes' => '1250',
-                    'dispatchers' => '5/10'
-                ],
-                [
-                    'company_name' => 'ABC',
-                    'api_calls_today' => '12500',
-                    'map_request' => '8500',
-                    'voip_minutes' => '1250',
-                    'dispatchers' => '5/10'
-                ],
-                [
-                    'company_name' => 'ABC',
-                    'api_calls_today' => '12500',
-                    'map_request' => '8500',
-                    'voip_minutes' => '1250',
-                    'dispatchers' => '5/10'
-                ],
-                [
-                    'company_name' => 'ABC',
-                    'api_calls_today' => '12500',
-                    'map_request' => '8500',
-                    'voip_minutes' => '1250',
-                    'dispatchers' => '5/10'
-                ]
-            ];
+    // public function usageMonitoring(){
+    //     try{
+    //         $activeCompanies = Tenant::where('data->status', 'active')->count();
+    //         $totalAPICalls =  19;
+    //         $companyList = [
+    //             [
+    //                 'company_name' => 'ABC',
+    //                 'api_calls_today' => '12500',
+    //                 'map_request' => '8500',
+    //                 'voip_minutes' => '1250',
+    //                 'dispatchers' => '5/10'
+    //             ],
+    //             [
+    //                 'company_name' => 'ABC',
+    //                 'api_calls_today' => '12500',
+    //                 'map_request' => '8500',
+    //                 'voip_minutes' => '1250',
+    //                 'dispatchers' => '5/10'
+    //             ],
+    //             [
+    //                 'company_name' => 'ABC',
+    //                 'api_calls_today' => '12500',
+    //                 'map_request' => '8500',
+    //                 'voip_minutes' => '1250',
+    //                 'dispatchers' => '5/10'
+    //             ],
+    //             [
+    //                 'company_name' => 'ABC',
+    //                 'api_calls_today' => '12500',
+    //                 'map_request' => '8500',
+    //                 'voip_minutes' => '1250',
+    //                 'dispatchers' => '5/10'
+    //             ]
+    //         ];
 
-            return response()->json([
-                'success' => 1,
-                'data' => [
-                    'activeCompanies' => $activeCompanies,
-                    'totalAPICalls' => $totalAPICalls
-                ],
-                'company_list' => $companyList
-            ]);
+    //         return response()->json([
+    //             'success' => 1,
+    //             'data' => [
+    //                 'activeCompanies' => $activeCompanies,
+    //                 'totalAPICalls' => $totalAPICalls
+    //             ],
+    //             'company_list' => $companyList
+    //         ]);
+    //     }
+    //     catch(\Exception $e){
+    //         return response()->json([
+    //             'error' => 1,
+    //             'message' => $e->getMessage()
+    //         ], 500);
+    //     }
+    // }
+    public function usageMonitoring()
+{
+    try {
+
+        $tenants = Tenant::where('status', 'active')->get();
+
+        $activeCompanies = $tenants->count();
+        $totalAPICalls = 0;
+        $companyList = [];
+
+        foreach ($tenants as $tenant) {
+
+            $apiCallsToday = 0;
+            $mapRequests = 0;
+            $voipMinutes = 0;
+            $dispatchersUsed = 0;
+
+            $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
+
+                // ✅ Today's API Calls
+                $apiCallsToday = \DB::table('api_logs')
+                    ->whereDate('created_at', Carbon::today())
+                    ->count();
+
+                // ✅ Today's Map Requests
+                $mapRequests = \DB::table('map_logs')
+                    ->whereDate('created_at', Carbon::today())
+                    ->count();
+
+                // ✅ Today's VOIP Minutes
+                $voipMinutes = \DB::table('voip_logs')
+                    ->whereDate('created_at', Carbon::today())
+                    ->sum('minutes');
+
+                // ✅ Active Dispatchers
+                $dispatchersUsed = \DB::table('dispatchers')
+                    ->count();
+            });
+
+            $totalAPICalls += $apiCallsToday;
+
+            $companyList[] = [
+                'company_name' => $tenant->company_name,
+                'api_calls_today' => $apiCallsToday,
+                'map_request' => $mapRequests,
+                'voip_minutes' => $voipMinutes,
+                'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
+            ];
         }
-        catch(\Exception $e){
-            return response()->json([
-                'error' => 1,
-                'message' => $e->getMessage()
-            ], 500);
-        }
+
+        return response()->json([
+            'success' => 1,
+            'data' => [
+                'activeCompanies' => $activeCompanies,
+                'totalAPICalls' => $totalAPICalls
+            ],
+            'company_list' => $companyList
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 1,
+            'message' => $e->getMessage()
+        ], 500);
     }
+}
 
     public function getAPIKeys(){
         try{
