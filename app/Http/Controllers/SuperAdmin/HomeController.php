@@ -168,13 +168,14 @@ class HomeController extends Controller
     //     }
     // }
 
-    public function usageMonitoring()
+    public function usageMonitoring(Request $request)
     {
         try {
 
-            $tenants = Tenant::all();
+            $perPage = $request->get('per_page', 10);
 
-            $totalCompanies = $tenants->count();
+            $tenants = Tenant::paginate($perPage);
+
             $totalAPICalls = 0;
             $companyList = [];
 
@@ -186,7 +187,6 @@ class HomeController extends Controller
                 $dispatchersUsed = 0;
 
                 $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
-
 
                     if (\Schema::hasTable('bookings')) {
                         $apiCallsToday = \DB::table('bookings')
@@ -221,10 +221,16 @@ class HomeController extends Controller
             return response()->json([
                 'success' => 1,
                 'data' => [
-                    'totalCompanies' => $totalCompanies,
+                    'totalCompanies' => $tenants->total(),
                     'totalAPICalls' => $totalAPICalls
                 ],
-                'company_list' => $companyList
+                'company_list' => $companyList,
+                'pagination' => [
+                    'current_page' => $tenants->currentPage(),
+                    'last_page' => $tenants->lastPage(),
+                    'per_page' => $tenants->perPage(),
+                    'total' => $tenants->total()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -234,7 +240,7 @@ class HomeController extends Controller
             ], 500);
         }
     }
-    
+
     // public function usageMonitoring()
     // {
     //     try {

@@ -240,7 +240,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing)
+                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
                     THEN 1 
                 END) AS no_show,
 
