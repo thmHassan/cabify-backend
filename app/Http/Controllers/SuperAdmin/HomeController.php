@@ -272,15 +272,13 @@ class HomeController extends Controller
                         $dispatchersUsed = \DB::table('dispatcher')->count();
                     }
 
-                    // Get last activity from company admin in tenant database
                     if (\Schema::hasTable('users')) {
-                        $adminUser = \DB::table('users')
-                            ->where('role', 'admin')
+                        $user = \DB::table('users')
                             ->orderBy('updated_at', 'DESC')
                             ->first();
 
-                        if ($adminUser && isset($adminUser->updated_at)) {
-                            $lastLogin = Carbon::parse($adminUser->updated_at)->format('Y-m-d H:i:s');
+                        if ($user && isset($user->updated_at)) {
+                            $lastLogin = Carbon::parse($user->updated_at)->format('Y-m-d H:i:s');
                         }
                     }
                 });
