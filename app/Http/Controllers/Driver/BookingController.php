@@ -44,7 +44,6 @@ class BookingController extends Controller
             ], 400);
         }
     }
-
     public function cancelledRide(Request $request)
     {
         try {
@@ -65,7 +64,6 @@ class BookingController extends Controller
             ], 400);
         }
     }
-
     public function upcomingRide(Request $request)
     {
         try {
@@ -280,6 +278,14 @@ class BookingController extends Controller
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
+                ])->post(env('NODE_SOCKET_URL') . '/driver/cancel-ride', [
+                            'ride_id' => $booking->id,
+                            'cancel_reason' => $request->cancel_reason,
+                        ]);
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "cancel_confirm_ride",
@@ -385,12 +391,13 @@ class BookingController extends Controller
                 }
             }
 
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+
             $booking->booking_status = "ongoing";
             $booking->booking_amount = $booking->offered_amount;
-            $booking->driver = auth("driver")->user()->id;
+            $booking->driver = $driver->id;
             $booking->save();
 
-            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->driving_status = "busy";
             if ($companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
