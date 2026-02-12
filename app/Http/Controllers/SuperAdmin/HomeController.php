@@ -167,77 +167,77 @@ class HomeController extends Controller
     //         ], 500);
     //     }
     // }
-//     public function usageMonitoring()
-// {
-//     try {
 
-    //         $tenants = Tenant::where('status', 'active')->get();
+    // public function usageMonitoring()
+    // {
+    //     try {
 
-    //         $activeCompanies = $tenants->count();
-//         $totalAPICalls = 0;
-//         $companyList = [];
+    //         $tenants = Tenant::all();
+
+    //         $totalCompanies = $tenants->count();
+    //         $totalAPICalls = 0;
+    //         $companyList = [];
 
     //         foreach ($tenants as $tenant) {
 
     //             $apiCallsToday = 0;
-//             $mapRequests = 0;
-//             $voipMinutes = 0;
-//             $dispatchersUsed = 0;
+    //             $mapRequests = 0;
+    //             $voipMinutes = 0;
+    //             $dispatchersUsed = 0;
 
     //             $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
 
-    //                 // ✅ Today's API Calls
-//                 $apiCallsToday = \DB::table('api_logs')
-//                     ->whereDate('created_at', Carbon::today())
-//                     ->count();
 
-    //                 // ✅ Today's Map Requests
-//                 $mapRequests = \DB::table('map_logs')
-//                     ->whereDate('created_at', Carbon::today())
-//                     ->count();
+    //                 if (\Schema::hasTable('bookings')) {
+    //                     $apiCallsToday = \DB::table('bookings')
+    //                         ->whereDate('created_at', Carbon::today())
+    //                         ->count();
 
-    //                 // ✅ Today's VOIP Minutes
-//                 $voipMinutes = \DB::table('voip_logs')
-//                     ->whereDate('created_at', Carbon::today())
-//                     ->sum('minutes');
+    //                     $mapRequests = $apiCallsToday;
+    //                 }
 
-    //                 // ✅ Active Dispatchers
-//                 $dispatchersUsed = \DB::table('dispatchers')
-//                     ->count();
-//             });
+    //                 if (\Schema::hasTable('calls')) {
+    //                     $voipMinutes = \DB::table('calls')
+    //                         ->whereDate('created_at', Carbon::today())
+    //                         ->sum('duration'); 
+    //                 }
+
+    //                 if (\Schema::hasTable('dispatchers')) {
+    //                     $dispatchersUsed = \DB::table('dispatchers')->count();
+    //                 }
+    //             });
 
     //             $totalAPICalls += $apiCallsToday;
 
     //             $companyList[] = [
-//                 'company_name' => $tenant->company_name,
-//                 'api_calls_today' => $apiCallsToday,
-//                 'map_request' => $mapRequests,
-//                 'voip_minutes' => $voipMinutes,
-//                 'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
-//             ];
-//         }
+    //                 'company_name' => $tenant->company_name,
+    //                 'api_calls_today' => $apiCallsToday,
+    //                 'map_request' => $mapRequests,
+    //                 'voip_minutes' => $voipMinutes,
+    //                 'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
+    //             ];
+    //         }
 
     //         return response()->json([
-//             'success' => 1,
-//             'data' => [
-//                 'activeCompanies' => $activeCompanies,
-//                 'totalAPICalls' => $totalAPICalls
-//             ],
-//             'company_list' => $companyList
-//         ]);
+    //             'success' => 1,
+    //             'data' => [
+    //                 'totalCompanies' => $totalCompanies,
+    //                 'totalAPICalls' => $totalAPICalls
+    //             ],
+    //             'company_list' => $companyList
+    //         ]);
 
     //     } catch (\Exception $e) {
-//         return response()->json([
-//             'error' => 1,
-//             'message' => $e->getMessage()
-//         ], 500);
-//     }
-// }
+    //         return response()->json([
+    //             'error' => 1,
+    //             'message' => $e->getMessage()
+    //         ], 500);
+    //     }
+    // }
 
     public function usageMonitoring()
     {
         try {
-
             $tenants = Tenant::all();
 
             $totalCompanies = $tenants->count();
@@ -245,15 +245,25 @@ class HomeController extends Controller
             $companyList = [];
 
             foreach ($tenants as $tenant) {
-
                 $apiCallsToday = 0;
                 $mapRequests = 0;
                 $voipMinutes = 0;
                 $dispatchersUsed = 0;
+                $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
+                $lastLogin = null;
+
+                // Get company admin's last login from central database
+                $companyAdmin = User::where('tenant_id', $tenant->id)
+                    ->where('role', 'admin')
+                    ->orderBy('last_login_at', 'DESC')
+                    ->first();
+
+                if ($companyAdmin && $companyAdmin->last_login_at) {
+                    $lastLogin = Carbon::parse($companyAdmin->last_login_at)->format('Y-m-d H:i:s');
+                }
 
                 $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
 
-                
                     if (\Schema::hasTable('bookings')) {
                         $apiCallsToday = \DB::table('bookings')
                             ->whereDate('created_at', Carbon::today())
@@ -265,11 +275,11 @@ class HomeController extends Controller
                     if (\Schema::hasTable('calls')) {
                         $voipMinutes = \DB::table('calls')
                             ->whereDate('created_at', Carbon::today())
-                            ->sum('duration'); 
+                            ->sum('duration');
                     }
 
-                    if (\Schema::hasTable('dispatchers')) {
-                        $dispatchersUsed = \DB::table('dispatchers')->count();
+                    if (\Schema::hasTable('dispatcher')) {
+                        $dispatchersUsed = \DB::table('dispatcher')->count();
                     }
                 });
 
@@ -280,7 +290,10 @@ class HomeController extends Controller
                     'api_calls_today' => $apiCallsToday,
                     'map_request' => $mapRequests,
                     'voip_minutes' => $voipMinutes,
-                    'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
+                    'dispatchers_used' => $dispatchersUsed,
+                    'dispatchers_allowed' => $dispatchersAllowed,
+                    'dispatchers' => $dispatchersUsed . '/' . $dispatchersAllowed,
+                    'last_login' => $lastLogin ?? 'Never'
                 ];
             }
 
@@ -346,7 +359,6 @@ class HomeController extends Controller
             ], 500);
         }
     }
-
     public function paymentReminderList()
     {
         try {
