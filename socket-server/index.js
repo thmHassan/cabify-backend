@@ -755,39 +755,39 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         if (!driver_id) {
             return res.status(400).json({
                 success: false,
-                message: "driver_id is required"
+                message: "Driver ID is required"
             });
         }
 
         const db = getConnection(req.tenantDb);
 
-        const [bookings] = await db.query(
-            "SELECT * FROM bookings WHERE id = ?",
+        // Check booking
+        const [bookingRows] = await db.query(
+            "SELECT id, booking_status FROM bookings WHERE id = ?",
             [id]
         );
 
-        if (bookings.length === 0) {
+        if (bookingRows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "Booking not found"
             });
         }
 
-        const booking = bookings[0];
-
-        const [drivers] = await db.query(
-            "SELECT * FROM drivers WHERE id = ?",
+        // Check driver
+        const [driverRows] = await db.query(
+            "SELECT id, driving_status FROM drivers WHERE id = ?",
             [driver_id]
         );
 
-        if (drivers.length === 0) {
+        if (driverRows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "Driver not found"
             });
         }
 
-        // ✅ Just assign driver (status remains pending)
+        // Assign driver (status remains pending)
         await db.query(
             `UPDATE bookings 
              SET driver = ?, 
@@ -814,7 +814,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         console.error("Assign driver error:", error);
         return res.status(500).json({
             success: false,
-            error: error.message
+            message: "Something went wrong"
         });
     }
 });
@@ -827,7 +827,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
         if (!driver_id || !response) {
             return res.status(400).json({
                 success: false,
-                message: "driver_id and response are required"
+                message: "Driver ID and response are required"
             });
         }
 
@@ -840,12 +840,12 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        const [bookings] = await db.query(
-            "SELECT * FROM bookings WHERE id = ? AND driver = ?",
+        const [bookingRows] = await db.query(
+            "SELECT id FROM bookings WHERE id = ? AND driver = ?",
             [id, driver_id]
         );
 
-        if (bookings.length === 0) {
+        if (bookingRows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "Booking not found or driver mismatch"
@@ -869,7 +869,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
 
             io.emit("job-accepted-by-driver", {
                 booking_id: id,
-                driver_id: driver_id
+                driver_id
             });
 
             return res.json({
@@ -895,7 +895,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
 
             io.emit("job-rejected-by-driver", {
                 booking_id: id,
-                driver_id: driver_id
+                driver_id
             });
 
             return res.json({
@@ -908,7 +908,90 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
         console.error("Driver response error:", error);
         return res.status(500).json({
             success: false,
-            error: error.message
+            message: "Something went wrong"
+        });
+    }
+});
+
+app.post("/driver/accept-ride", async (req, res) => {
+    try {
+        const { ride_id } = req.body;
+        const driver_id = req.user.id;
+
+        const db = getConnection(req.tenantDb);
+
+        // 1️⃣ Booking check
+        const [bookings] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [ride_id]
+        );
+
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: 0,
+                message: "Ride not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        if (booking.booking_status !== "pending") {
+            return res.status(400).json({
+                success: 0,
+                message: "Ride already accepted or cancelled"
+            });
+        }
+
+        // 2️⃣ Update booking
+        await db.query(
+            `UPDATE bookings 
+             SET booking_status = 'ongoing',
+                 booking_amount = offered_amount,
+                 driver = ?
+             WHERE id = ?`,
+            [driver_id, ride_id]
+        );
+
+        // 3️⃣ Update driver
+        await db.query(
+            `UPDATE drivers 
+             SET driving_status = 'busy'
+             WHERE id = ?`,
+            [driver_id]
+        );
+
+        // 4️⃣ Emit socket for booking accepted (optional)
+        io.emit("ride-accepted-by-driver", {
+            booking_id: ride_id,
+            driver_id
+        });
+
+        // 5️⃣ 🔥 IMPORTANT: Call on-job-driver (LIKE LARAVEL)
+        const clientId = req.headers["database"];
+
+        const [driverRows] = await db.query(
+            "SELECT name FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+
+        const driverName = driverRows[0]?.name || "Driver";
+
+        // same logic as Laravel Http::post
+        const socketId = clientSockets.get(clientId.toString());
+        if (socketId) {
+            io.to(socketId).emit("on-job-driver-event", driverName);
+        }
+
+        return res.json({
+            success: 1,
+            message: "Ride accepted successfully"
+        });
+
+    } catch (error) {
+        console.error("Accept Ride Error:", error);
+        return res.status(500).json({
+            success: 0,
+            message: "Something went wrong"
         });
     }
 });
