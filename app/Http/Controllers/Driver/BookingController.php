@@ -372,7 +372,10 @@ class BookingController extends Controller
                 }
             }
             if ($companySetting->package_type == "packages_topup") {
-                $package = DriverPackage::where("driver_id", auth("driver")->user()->id)->where("package_type", "packages_topup")->orderBy("id", "DESC")->first();
+                $package = DriverPackage::where("driver_id", auth("driver")->user()->id)
+                    ->where("package_type", "packages_topup")
+                    ->orderBy("id", "DESC")
+                    ->first();
 
                 if (!isset($package) || (isset($package) && $package->expire_date < date("Y-m-d"))) {
                     return response()->json([
@@ -406,22 +409,9 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
-                        'userId' => $booking->user_id,
-                        'status' => "accept_ride",
-                        'booking' => [
-                            'id' => $booking->id,
-                            'booking_id' => $booking->booking_id,
-                            'pickup_point' => $booking->pickup_point,
-                            'destination_point' => $booking->destination_point,
-                            'offered_amount' => $booking->offered_amount,
-                            'distance' => $booking->distance,
-                            'user_id' => $booking->user_id,
-                            'user_name' => $booking->name,
-                            'user_profile' => $user->profile_image,
-                            'pickup_location' => $booking->pickup_location,
-                            'destination_location' => $booking->destination_location,
-                        ]
+                'database' => $request->header('database'),
+            ])->post(env('NODE_SOCKET_URL') . '/driver/accept-ride', [
+                        'ride_id' => $booking->id,
                     ]);
 
             $dataCheck = (new TenantUser)
@@ -437,7 +427,9 @@ class BookingController extends Controller
                 $notification->message = 'Your ride has been accepted by driver';
                 $notification->save();
 
-                $tokens = CompanyToken::where("user_id", $booking->user_id)->where("user_type", "rider")->get();
+                $tokens = CompanyToken::where("user_id", $booking->user_id)
+                    ->where("user_type", "rider")
+                    ->get();
 
                 if (isset($tokens) && $tokens != NULL) {
                     foreach ($tokens as $key => $token) {
@@ -452,19 +444,6 @@ class BookingController extends Controller
                     }
                 }
             }
-
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
-                        'clientId' => $request->header('database'),
-                        'driverName' => auth("driver")->user()->name,
-                    ]);
-
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/driver/accept-ride', [
-                        'ride_id' => $booking->id,
-                    ]);
 
             return response()->json([
                 'success' => 1,

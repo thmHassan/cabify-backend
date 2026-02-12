@@ -218,27 +218,6 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
 
-const ensureDriverResponseColumn = async (db) => {
-    try {
-        const [columns] = await db.query(`
-            SHOW COLUMNS FROM bookings LIKE 'driver_response'
-        `);
-
-        if (columns.length === 0) {
-            console.log("⚠️ driver_response column missing. Adding it...");
-
-            await db.query(`
-                ALTER TABLE bookings 
-                ADD COLUMN driver_response VARCHAR(20) NULL AFTER booking_status
-            `);
-
-            console.log("✅ driver_response column added successfully");
-        }
-    } catch (err) {
-        console.error("Error checking/adding driver_response column:", err);
-    }
-};
-
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
@@ -960,31 +939,104 @@ app.post("/driver/accept-ride", async (req, res) => {
             [driver_id]
         );
 
-        // 4️⃣ Emit socket for booking accepted (optional)
-        io.emit("ride-accepted-by-driver", {
-            booking_id: ride_id,
-            driver_id
-        });
-
-        // 5️⃣ 🔥 IMPORTANT: Call on-job-driver (LIKE LARAVEL)
-        const clientId = req.headers["database"];
-
+        // 4️⃣ Get driver details
         const [driverRows] = await db.query(
-            "SELECT name FROM drivers WHERE id = ?",
+            "SELECT name, profile_image FROM drivers WHERE id = ?",
             [driver_id]
         );
 
         const driverName = driverRows[0]?.name || "Driver";
+        const driverProfileImage = driverRows[0]?.profile_image || null;
 
-        // same logic as Laravel Http::post
+        // 5️⃣ Get updated booking with all details
+        const [updatedBookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id,
+                vt.vehicle_type_name as vehicle_type_name,
+                vt.vehicle_type_service as vehicle_type_service,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE b.id = ?
+        `, [ride_id]);
+
+        const updatedBooking = updatedBookings[0];
+        const {
+            driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
+            ...bookingData
+        } = updatedBooking;
+
+        const formattedBooking = {
+            ...bookingData,
+            driverDetail: dId ? {
+                id: dId,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_image: driver_profile_image
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                vehicle_type_name: vehicle_type_name,
+                vehicle_type_service: vehicle_type_service
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name,
+                email: sub_company_email
+            } : null
+        };
+
+        // 6️⃣ 🔥 Emit to dispatchers, admins, and clients
+        const eventData = {
+            booking_id: ride_id,
+            driver_id,
+            driver_name: driverName,
+            driver_profile_image: driverProfileImage,
+            booking: formattedBooking,
+            message: `${driverName} accepted the ride`
+        };
+
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("job-accepted-by-driver", eventData);
+        });
+
+        adminSockets.forEach((socketId) => {
+            io.to(socketId).emit("job-accepted-by-driver", eventData);
+        });
+
+        clientSockets.forEach((socketId) => {
+            io.to(socketId).emit("job-accepted-by-driver", eventData);
+        });
+
+        console.log(`✅ Ride ${ride_id} accepted by driver ${driver_id}`);
+
+        // 7️⃣ Call on-job-driver
+        const clientId = req.headers["database"];
         const socketId = clientSockets.get(clientId.toString());
         if (socketId) {
             io.to(socketId).emit("on-job-driver-event", driverName);
         }
 
+        // 8️⃣ Update dashboard cards
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+
         return res.json({
             success: 1,
-            message: "Ride accepted successfully"
+            message: "Ride accepted successfully",
+            data: formattedBooking
         });
 
     } catch (error) {
