@@ -234,7 +234,6 @@ class HomeController extends Controller
     //         ], 500);
     //     }
     // }
-
     public function usageMonitoring()
     {
         try {
@@ -252,17 +251,8 @@ class HomeController extends Controller
                 $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
                 $lastLogin = null;
 
-                // Get company admin's last login from central database
-                $companyAdmin = User::where('tenant_id', $tenant->id)
-                    ->where('role', 'admin')
-                    ->orderBy('last_login_at', 'DESC')
-                    ->first();
-
-                if ($companyAdmin && $companyAdmin->last_login_at) {
-                    $lastLogin = Carbon::parse($companyAdmin->last_login_at)->format('Y-m-d H:i:s');
-                }
-
-                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
+                // Get data from tenant's own database
+                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed, &$lastLogin) {
 
                     if (\Schema::hasTable('bookings')) {
                         $apiCallsToday = \DB::table('bookings')
@@ -281,6 +271,18 @@ class HomeController extends Controller
                     if (\Schema::hasTable('dispatcher')) {
                         $dispatchersUsed = \DB::table('dispatcher')->count();
                     }
+
+                    // Get last activity from company admin in tenant database
+                    if (\Schema::hasTable('users')) {
+                        $adminUser = \DB::table('users')
+                            ->where('role', 'admin')
+                            ->orderBy('updated_at', 'DESC')
+                            ->first();
+
+                        if ($adminUser && isset($adminUser->updated_at)) {
+                            $lastLogin = Carbon::parse($adminUser->updated_at)->format('Y-m-d H:i:s');
+                        }
+                    }
                 });
 
                 $totalAPICalls += $apiCallsToday;
@@ -293,7 +295,7 @@ class HomeController extends Controller
                     'dispatchers_used' => $dispatchersUsed,
                     'dispatchers_allowed' => $dispatchersAllowed,
                     'dispatchers' => $dispatchersUsed . '/' . $dispatchersAllowed,
-                    'last_login' => $lastLogin ?? 'Never'
+                    'last_activity' => $lastLogin ?? 'Never'
                 ];
             }
 
