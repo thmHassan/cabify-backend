@@ -761,9 +761,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        // ✅ Ensure column exists
-        await ensureDriverResponseColumn(db);
-
         const [bookings] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
             [id]
@@ -777,7 +774,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         }
 
         const booking = bookings[0];
-        const oldDriverId = booking.driver;
 
         const [drivers] = await db.query(
             "SELECT * FROM drivers WHERE id = ?",
@@ -791,40 +787,31 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
-        // ✅ Update booking to pending acceptance
+        // ✅ Just assign driver (status remains pending)
         await db.query(
             `UPDATE bookings 
              SET driver = ?, 
-                 booking_status = 'pending_acceptance',
                  driver_response = NULL
              WHERE id = ?`,
             [driver_id, id]
         );
 
-        // Reset old driver if exists
-        if (oldDriverId && oldDriverId !== null) {
-            await db.query(
-                "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
-                [oldDriverId]
-            );
-        }
-
-        // Notify new driver
-        const newDriverSocketId = driverSockets.get(driver_id.toString());
-        if (newDriverSocketId) {
-            io.to(newDriverSocketId).emit("job-assignment-request", {
+        // Notify driver
+        const driverSocketId = driverSockets.get(driver_id.toString());
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("job-assignment-request", {
                 booking_id: id,
-                message: "You have been assigned a new job. Please accept or reject."
+                message: "You have been assigned a new job. Accept or reject."
             });
         }
 
         return res.json({
             success: true,
-            message: "Driver assigned. Waiting for driver acceptance."
+            message: "Driver assigned successfully. Waiting for driver response."
         });
 
     } catch (error) {
-        console.error("Error assigning driver:", error);
+        console.error("Assign driver error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -847,12 +834,11 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
         if (!["accepted", "rejected"].includes(response)) {
             return res.status(400).json({
                 success: false,
-                message: "Response must be 'accepted' or 'rejected'"
+                message: "Response must be accepted or rejected"
             });
         }
 
         const db = getConnection(req.tenantDb);
-        await ensureDriverResponseColumn(db);
 
         const [bookings] = await db.query(
             "SELECT * FROM bookings WHERE id = ? AND driver = ?",
@@ -862,7 +848,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
         if (bookings.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "Booking not found or driver not assigned"
+                message: "Booking not found or driver mismatch"
             });
         }
 
@@ -870,7 +856,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
 
             await db.query(
                 `UPDATE bookings 
-                 SET booking_status = 'ongoing',
+                 SET booking_status = 'started',
                      driver_response = 'accepted'
                  WHERE id = ?`,
                 [id]
@@ -885,8 +871,6 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
                 booking_id: id,
                 driver_id: driver_id
             });
-
-            await broadcastDashboardCardsUpdate(req.tenantDb);
 
             return res.json({
                 success: true,
@@ -914,16 +898,14 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
                 driver_id: driver_id
             });
 
-            await broadcastDashboardCardsUpdate(req.tenantDb);
-
             return res.json({
                 success: true,
-                message: "Job rejected. Ready for reassignment."
+                message: "Job rejected successfully"
             });
         }
 
     } catch (error) {
-        console.error("Error processing driver response:", error);
+        console.error("Driver response error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
