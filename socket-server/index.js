@@ -218,6 +218,27 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
 
+const ensureDriverResponseColumn = async (db) => {
+    try {
+        const [columns] = await db.query(`
+            SHOW COLUMNS FROM bookings LIKE 'driver_response'
+        `);
+
+        if (columns.length === 0) {
+            console.log("⚠️ driver_response column missing. Adding it...");
+
+            await db.query(`
+                ALTER TABLE bookings 
+                ADD COLUMN driver_response VARCHAR(20) NULL AFTER booking_status
+            `);
+
+            console.log("✅ driver_response column added successfully");
+        }
+    } catch (err) {
+        console.error("Error checking/adding driver_response column:", err);
+    }
+};
+
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
@@ -740,6 +761,9 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
+        // ✅ Ensure column exists
+        await ensureDriverResponseColumn(db);
+
         const [bookings] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
             [id]
@@ -767,116 +791,36 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
+        // ✅ Update booking to pending acceptance
         await db.query(
-            "UPDATE bookings SET driver = ?, booking_status = 'pending_acceptance', driver_response = NULL WHERE id = ?",
+            `UPDATE bookings 
+             SET driver = ?, 
+                 booking_status = 'pending_acceptance',
+                 driver_response = NULL
+             WHERE id = ?`,
             [driver_id, id]
         );
 
+        // Reset old driver if exists
         if (oldDriverId && oldDriverId !== null) {
             await db.query(
                 "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
                 [oldDriverId]
             );
-
-            const oldDriverSocketId = driverSockets.get(oldDriverId.toString());
-            if (oldDriverSocketId) {
-                io.to(oldDriverSocketId).emit("driver-unassigned-event", {
-                    booking_id: booking.id,
-                    message: "You have been unassigned from this booking"
-                });
-            }
         }
 
-        const [updatedBookings] = await db.query(`
-            SELECT 
-                b.*,
-                d.id as driver_id,
-                d.name as driver_name,
-                d.email as driver_email,
-                d.phone_no as driver_phone,
-                d.profile_image as driver_profile_image,
-                vt.id as vehicle_type_id,
-                vt.vehicle_type_name as vehicle_type_name,
-                vt.vehicle_type_service as vehicle_type_service,
-                sc.id as sub_company_id,
-                sc.name as sub_company_name,
-                sc.email as sub_company_email
-            FROM bookings b
-            LEFT JOIN drivers d ON b.driver = d.id
-            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
-            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
-            WHERE b.id = ?
-        `, [id]);
-
-        const updatedBooking = updatedBookings[0];
-        const {
-            driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
-            vehicle_type_id, vehicle_type_name, vehicle_type_service,
-            sub_company_id, sub_company_name, sub_company_email,
-            ...bookingData
-        } = updatedBooking;
-
-        const formattedBooking = {
-            ...bookingData,
-            driverDetail: dId ? {
-                id: dId,
-                name: driver_name,
-                email: driver_email,
-                phone_no: driver_phone,
-                profile_image: driver_profile_image
-            } : null,
-            vehicleDetail: vehicle_type_id ? {
-                id: vehicle_type_id,
-                vehicle_type_name: vehicle_type_name,
-                vehicle_type_service: vehicle_type_service
-            } : null,
-            subCompanyDetail: sub_company_id ? {
-                id: sub_company_id,
-                name: sub_company_name,
-                email: sub_company_email
-            } : null
-        };
-
+        // Notify new driver
         const newDriverSocketId = driverSockets.get(driver_id.toString());
         if (newDriverSocketId) {
             io.to(newDriverSocketId).emit("job-assignment-request", {
-                booking: formattedBooking,
+                booking_id: id,
                 message: "You have been assigned a new job. Please accept or reject."
             });
         }
 
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("driver-assignment-pending", {
-                booking: formattedBooking,
-                driver_name: driver_name,
-                message: `Job assigned to ${driver_name}. Waiting for driver response.`
-            });
-        });
-
-        adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("driver-assignment-pending", {
-                booking: formattedBooking,
-                driver_name: driver_name,
-                message: `Job assigned to ${driver_name}. Waiting for driver response.`
-            });
-        });
-
-        clientSockets.forEach((socketId) => {
-            io.to(socketId).emit("driver-assignment-pending", {
-                booking: formattedBooking,
-                driver_name: driver_name,
-                message: `Job assigned to ${driver_name}. Waiting for driver response.`
-            });
-        });
-
-        const responseMessage = oldDriverId
-            ? "Driver changed successfully. Waiting for acceptance."
-            : "Driver assigned successfully. Waiting for acceptance.";
-
         return res.json({
             success: true,
-            message: responseMessage,
-            data: formattedBooking
+            message: "Driver assigned. Waiting for driver acceptance."
         });
 
     } catch (error) {
@@ -891,7 +835,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 app.put("/bookings/:id/driver-response", async (req, res) => {
     try {
         const { id } = req.params;
-        const { driver_id, response } = req.body; // response: 'accepted' or 'rejected'
+        const { driver_id, response } = req.body;
 
         if (!driver_id || !response) {
             return res.status(400).json({
@@ -900,7 +844,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
             });
         }
 
-        if (!['accepted', 'rejected'].includes(response)) {
+        if (!["accepted", "rejected"].includes(response)) {
             return res.status(400).json({
                 success: false,
                 message: "Response must be 'accepted' or 'rejected'"
@@ -908,6 +852,7 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
         }
 
         const db = getConnection(req.tenantDb);
+        await ensureDriverResponseColumn(db);
 
         const [bookings] = await db.query(
             "SELECT * FROM bookings WHERE id = ? AND driver = ?",
@@ -917,16 +862,17 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
         if (bookings.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "Booking not found or driver not assigned to this booking"
+                message: "Booking not found or driver not assigned"
             });
         }
 
-        const booking = bookings[0];
+        if (response === "accepted") {
 
-        if (response === 'accepted') {
-            // Driver accepted the job
             await db.query(
-                "UPDATE bookings SET booking_status = 'ongoing', driver_response = 'accepted' WHERE id = ?",
+                `UPDATE bookings 
+                 SET booking_status = 'ongoing',
+                     driver_response = 'accepted'
+                 WHERE id = ?`,
                 [id]
             );
 
@@ -935,66 +881,26 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
                 [driver_id]
             );
 
-            const [updatedBookings] = await db.query(`
-                SELECT 
-                    b.*,
-                    d.id as driver_id,
-                    d.name as driver_name,
-                    d.email as driver_email,
-                    d.phone_no as driver_phone,
-                    d.profile_image as driver_profile_image
-                FROM bookings b
-                LEFT JOIN drivers d ON b.driver = d.id
-                WHERE b.id = ?
-            `, [id]);
-
-            const updatedBooking = updatedBookings[0];
-
-            // Notify dispatcher/admin/client about acceptance
-            const notificationData = {
-                booking_id: booking.id,
-                driver_id: driver_id,
-                driver_name: updatedBooking.driver_name,
-                message: `Job accepted by ${updatedBooking.driver_name}`
-            };
-
-            dispatcherSockets.forEach((socketId) => {
-                io.to(socketId).emit("job-accepted-by-driver", notificationData);
+            io.emit("job-accepted-by-driver", {
+                booking_id: id,
+                driver_id: driver_id
             });
 
-            adminSockets.forEach((socketId) => {
-                io.to(socketId).emit("job-accepted-by-driver", notificationData);
-            });
-
-            clientSockets.forEach((socketId) => {
-                io.to(socketId).emit("job-accepted-by-driver", notificationData);
-            });
-
-            // Notify user if exists
-            if (booking.user_id) {
-                const userSocketId = userSockets.get(booking.user_id.toString());
-                if (userSocketId) {
-                    io.to(userSocketId).emit("driver-accepted-job", {
-                        booking_id: booking.id,
-                        driver_name: updatedBooking.driver_name,
-                        message: "Driver has accepted your booking"
-                    });
-                }
-            }
-
-            // Broadcast dashboard update
             await broadcastDashboardCardsUpdate(req.tenantDb);
 
             return res.json({
                 success: true,
-                message: "Job accepted successfully",
-                data: updatedBooking
+                message: "Job accepted successfully"
             });
 
         } else {
-            // Driver rejected the job
+
             await db.query(
-                "UPDATE bookings SET driver = NULL, booking_status = 'pending', driver_response = 'rejected' WHERE id = ?",
+                `UPDATE bookings 
+                 SET driver = NULL,
+                     booking_status = 'pending',
+                     driver_response = 'rejected'
+                 WHERE id = ?`,
                 [id]
             );
 
@@ -1003,44 +909,16 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
                 [driver_id]
             );
 
-            const [drivers] = await db.query(
-                "SELECT name FROM drivers WHERE id = ?",
-                [driver_id]
-            );
-
-            const driverName = drivers[0].name;
-
-            // Notify dispatcher/admin/client about rejection
-            const notificationData = {
-                booking_id: booking.id,
-                driver_id: driver_id,
-                driver_name: driverName,
-                message: `Job rejected by ${driverName}. Please assign another driver.`
-            };
-
-            dispatcherSockets.forEach((socketId) => {
-                io.to(socketId).emit("job-rejected-by-driver", notificationData);
+            io.emit("job-rejected-by-driver", {
+                booking_id: id,
+                driver_id: driver_id
             });
 
-            adminSockets.forEach((socketId) => {
-                io.to(socketId).emit("job-rejected-by-driver", notificationData);
-            });
-
-            clientSockets.forEach((socketId) => {
-                io.to(socketId).emit("job-rejected-by-driver", notificationData);
-            });
-
-            // Broadcast dashboard update
             await broadcastDashboardCardsUpdate(req.tenantDb);
 
             return res.json({
                 success: true,
-                message: "Job rejected. Booking is now available for reassignment.",
-                data: {
-                    booking_id: booking.id,
-                    driver_name: driverName,
-                    status: 'rejected'
-                }
+                message: "Job rejected. Ready for reassignment."
             });
         }
 
