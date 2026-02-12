@@ -168,75 +168,10 @@ class HomeController extends Controller
     //     }
     // }
 
-    // public function usageMonitoring()
-    // {
-    //     try {
-
-    //         $tenants = Tenant::all();
-
-    //         $totalCompanies = $tenants->count();
-    //         $totalAPICalls = 0;
-    //         $companyList = [];
-
-    //         foreach ($tenants as $tenant) {
-
-    //             $apiCallsToday = 0;
-    //             $mapRequests = 0;
-    //             $voipMinutes = 0;
-    //             $dispatchersUsed = 0;
-
-    //             $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
-
-
-    //                 if (\Schema::hasTable('bookings')) {
-    //                     $apiCallsToday = \DB::table('bookings')
-    //                         ->whereDate('created_at', Carbon::today())
-    //                         ->count();
-
-    //                     $mapRequests = $apiCallsToday;
-    //                 }
-
-    //                 if (\Schema::hasTable('calls')) {
-    //                     $voipMinutes = \DB::table('calls')
-    //                         ->whereDate('created_at', Carbon::today())
-    //                         ->sum('duration'); 
-    //                 }
-
-    //                 if (\Schema::hasTable('dispatchers')) {
-    //                     $dispatchersUsed = \DB::table('dispatchers')->count();
-    //                 }
-    //             });
-
-    //             $totalAPICalls += $apiCallsToday;
-
-    //             $companyList[] = [
-    //                 'company_name' => $tenant->company_name,
-    //                 'api_calls_today' => $apiCallsToday,
-    //                 'map_request' => $mapRequests,
-    //                 'voip_minutes' => $voipMinutes,
-    //                 'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
-    //             ];
-    //         }
-
-    //         return response()->json([
-    //             'success' => 1,
-    //             'data' => [
-    //                 'totalCompanies' => $totalCompanies,
-    //                 'totalAPICalls' => $totalAPICalls
-    //             ],
-    //             'company_list' => $companyList
-    //         ]);
-
-    //     } catch (\Exception $e) {
-    //         return response()->json([
-    //             'error' => 1,
-    //             'message' => $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
     public function usageMonitoring()
     {
         try {
+
             $tenants = Tenant::all();
 
             $totalCompanies = $tenants->count();
@@ -244,15 +179,14 @@ class HomeController extends Controller
             $companyList = [];
 
             foreach ($tenants as $tenant) {
+
                 $apiCallsToday = 0;
                 $mapRequests = 0;
                 $voipMinutes = 0;
                 $dispatchersUsed = 0;
-                $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
-                $lastLogin = null;
 
-                // Get data from tenant's own database
-                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed, &$lastLogin) {
+                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
+
 
                     if (\Schema::hasTable('bookings')) {
                         $apiCallsToday = \DB::table('bookings')
@@ -268,18 +202,8 @@ class HomeController extends Controller
                             ->sum('duration');
                     }
 
-                    if (\Schema::hasTable('dispatcher')) {
-                        $dispatchersUsed = \DB::table('dispatcher')->count();
-                    }
-
-                    if (\Schema::hasTable('users')) {
-                        $user = \DB::table('users')
-                            ->orderBy('updated_at', 'DESC')
-                            ->first();
-
-                        if ($user && isset($user->updated_at)) {
-                            $lastLogin = Carbon::parse($user->updated_at)->format('Y-m-d H:i:s');
-                        }
+                    if (\Schema::hasTable('dispatchers')) {
+                        $dispatchersUsed = \DB::table('dispatchers')->count();
                     }
                 });
 
@@ -290,10 +214,7 @@ class HomeController extends Controller
                     'api_calls_today' => $apiCallsToday,
                     'map_request' => $mapRequests,
                     'voip_minutes' => $voipMinutes,
-                    'dispatchers_used' => $dispatchersUsed,
-                    'dispatchers_allowed' => $dispatchersAllowed,
-                    'dispatchers' => $dispatchersUsed . '/' . $dispatchersAllowed,
-                    'last_activity' => $lastLogin ?? 'Never'
+                    'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
                 ];
             }
 
@@ -313,6 +234,94 @@ class HomeController extends Controller
             ], 500);
         }
     }
+    
+    // public function usageMonitoring()
+    // {
+    //     try {
+    //         $tenants = Tenant::all();
+
+    //         $totalCompanies = $tenants->count();
+    //         $totalAPICalls = 0;
+    //         $companyList = [];
+
+    //         foreach ($tenants as $tenant) {
+    //             $apiCallsToday = 0;
+    //             $mapRequests = 0;
+    //             $voipMinutes = 0;
+    //             $dispatchersUsed = 0;
+    //             $dispatchersAllowed = 0;
+    //             $lastLogin = null;
+
+    //             // Get dispatchers_allowed from tenant data
+    //             if (isset($tenant->data) && is_array($tenant->data)) {
+    //                 $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
+    //             } elseif (isset($tenant->dispatchers_allowed)) {
+    //                 $dispatchersAllowed = $tenant->dispatchers_allowed;
+    //             }
+
+    //             // Get data from tenant's own database
+    //             $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed, &$lastLogin) {
+
+    //                 if (\Schema::hasTable('bookings')) {
+    //                     $apiCallsToday = \DB::table('bookings')
+    //                         ->whereDate('created_at', Carbon::today())
+    //                         ->count();
+
+    //                     $mapRequests = $apiCallsToday;
+    //                 }
+
+    //                 if (\Schema::hasTable('calls')) {
+    //                     $voipMinutes = \DB::table('calls')
+    //                         ->whereDate('created_at', Carbon::today())
+    //                         ->sum('duration');
+    //                 }
+
+    //                 if (\Schema::hasTable('dispatcher')) {
+    //                     $dispatchersUsed = \DB::table('dispatcher')->count();
+    //                 }
+
+    //                 // Get last activity from users table in tenant database
+    //                 if (\Schema::hasTable('users')) {
+    //                     $user = \DB::table('users')
+    //                         ->orderBy('updated_at', 'DESC')
+    //                         ->first();
+
+    //                     if ($user && isset($user->updated_at)) {
+    //                         $lastLogin = Carbon::parse($user->updated_at)->format('Y-m-d H:i:s');
+    //                     }
+    //                 }
+    //             });
+
+    //             $totalAPICalls += $apiCallsToday;
+
+    //             $companyList[] = [
+    //                 'company_name' => $tenant->company_name,
+    //                 'api_calls_today' => $apiCallsToday,
+    //                 'map_request' => $mapRequests,
+    //                 'voip_minutes' => $voipMinutes,
+    //                 'dispatchers_used' => $dispatchersUsed,
+    //                 'dispatchers_allowed' => (int) $dispatchersAllowed,
+    //                 'dispatchers' => $dispatchersUsed . '/' . $dispatchersAllowed,
+    //                 'last_activity' => $lastLogin ?? 'Never'
+    //             ];
+    //         }
+
+    //         return response()->json([
+    //             'success' => 1,
+    //             'data' => [
+    //                 'totalCompanies' => $totalCompanies,
+    //                 'totalAPICalls' => $totalAPICalls
+    //             ],
+    //             'company_list' => $companyList
+    //         ]);
+
+    //     } catch (\Exception $e) {
+    //         return response()->json([
+    //             'error' => 1,
+    //             'message' => $e->getMessage()
+    //         ], 500);
+    //     }
+    // }
     public function getAPIKeys()
     {
         try {
