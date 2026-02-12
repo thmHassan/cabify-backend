@@ -116,51 +116,72 @@ class HomeController extends Controller
         }
     }
 
-    // public function usageMonitoring(){
-    //     try{
-    //         $activeCompanies = Tenant::where('data->status', 'active')->count();
-    //         $totalAPICalls =  19;
-    //         $companyList = [
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ],
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ],
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ],
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ]
-    //         ];
+    // public function usageMonitoring(Request $request)
+    // {
+    //     try {
+
+    //         $perPage = $request->get('per_page', 10);
+
+    //         $tenants = Tenant::paginate($perPage);
+
+    //         $totalAPICalls = 0;
+    //         $companyList = [];
+
+    //         foreach ($tenants as $tenant) {
+
+    //             $apiCallsToday = 0;
+    //             $mapRequests = 0;
+    //             $voipMinutes = 0;
+    //             $dispatchersUsed = 0;
+
+    //             $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
+
+    //                 if (\Schema::hasTable('bookings')) {
+    //                     $apiCallsToday = \DB::table('bookings')
+    //                         ->whereDate('created_at', Carbon::today())
+    //                         ->count();
+
+    //                     $mapRequests = $apiCallsToday;
+    //                 }
+
+    //                 if (\Schema::hasTable('calls')) {
+    //                     $voipMinutes = \DB::table('calls')
+    //                         ->whereDate('created_at', Carbon::today())
+    //                         ->sum('duration');
+    //                 }
+
+    //                 if (\Schema::hasTable('dispatchers')) {
+    //                     $dispatchersUsed = \DB::table('dispatchers')->count();
+    //                 }
+    //             });
+
+    //             $totalAPICalls += $apiCallsToday;
+
+    //             $companyList[] = [
+    //                 'company_name' => $tenant->company_name,
+    //                 'api_calls_today' => $apiCallsToday,
+    //                 'map_request' => $mapRequests,
+    //                 'voip_minutes' => $voipMinutes,
+    //                 'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
+    //             ];
+    //         }
 
     //         return response()->json([
     //             'success' => 1,
     //             'data' => [
-    //                 'activeCompanies' => $activeCompanies,
+    //                 'totalCompanies' => $tenants->total(),
     //                 'totalAPICalls' => $totalAPICalls
     //             ],
-    //             'company_list' => $companyList
+    //             'company_list' => $companyList,
+    //             'pagination' => [
+    //                 'current_page' => $tenants->currentPage(),
+    //                 'last_page' => $tenants->lastPage(),
+    //                 'per_page' => $tenants->perPage(),
+    //                 'total' => $tenants->total()
+    //             ]
     //         ]);
-    //     }
-    //     catch(\Exception $e){
+
+    //     } catch (\Exception $e) {
     //         return response()->json([
     //             'error' => 1,
     //             'message' => $e->getMessage()
@@ -168,12 +189,11 @@ class HomeController extends Controller
     //     }
     // }
 
+
     public function usageMonitoring(Request $request)
     {
         try {
-
             $perPage = $request->get('per_page', 10);
-
             $tenants = Tenant::paginate($perPage);
 
             $totalAPICalls = 0;
@@ -184,15 +204,15 @@ class HomeController extends Controller
                 $apiCallsToday = 0;
                 $mapRequests = 0;
                 $voipMinutes = 0;
-                $dispatchersUsed = 0;
+                $totalDispatchers = 0;
+                $lastLogin = null;
 
-                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
+                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$totalDispatchers, &$lastLogin) {
 
                     if (\Schema::hasTable('bookings')) {
                         $apiCallsToday = \DB::table('bookings')
                             ->whereDate('created_at', Carbon::today())
                             ->count();
-
                         $mapRequests = $apiCallsToday;
                     }
 
@@ -203,18 +223,44 @@ class HomeController extends Controller
                     }
 
                     if (\Schema::hasTable('dispatchers')) {
-                        $dispatchersUsed = \DB::table('dispatchers')->count();
+                        $totalDispatchers = \DB::table('dispatchers')->count();
+
+                        $lastLoginRow = \DB::table('dispatchers')
+                            ->whereNotNull('last_login')
+                            ->orderBy('last_login', 'DESC')
+                            ->value('last_login');
+
+                        if ($lastLoginRow) {
+                            $lastLogin = $lastLoginRow;
+                        }
+                    }
+
+                    if (\Schema::hasTable('admins') && !$lastLogin) {
+                        $adminLastLogin = \DB::table('admins')
+                            ->whereNotNull('last_login')
+                            ->orderBy('last_login', 'DESC')
+                            ->value('last_login');
+
+                        if ($adminLastLogin) {
+                            $lastLogin = $adminLastLogin;
+                        }
                     }
                 });
 
                 $totalAPICalls += $apiCallsToday;
-
+                $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
                 $companyList[] = [
                     'company_name' => $tenant->company_name,
                     'api_calls_today' => $apiCallsToday,
                     'map_request' => $mapRequests,
                     'voip_minutes' => $voipMinutes,
-                    'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
+                    'dispatchers' => $totalDispatchers . '/' . $dispatchersAllowed,
+                    'total_dispatchers' => $totalDispatchers,
+                    'allowed_dispatchers' => $dispatchersAllowed,
+                    'last_login' => $lastLogin
+                        ? Carbon::parse($lastLogin)->diffForHumans()
+                        : 'Never',
+                    'last_login_raw' => $lastLogin,        
                 ];
             }
 
@@ -240,94 +286,6 @@ class HomeController extends Controller
             ], 500);
         }
     }
-
-    // public function usageMonitoring()
-    // {
-    //     try {
-    //         $tenants = Tenant::all();
-
-    //         $totalCompanies = $tenants->count();
-    //         $totalAPICalls = 0;
-    //         $companyList = [];
-
-    //         foreach ($tenants as $tenant) {
-    //             $apiCallsToday = 0;
-    //             $mapRequests = 0;
-    //             $voipMinutes = 0;
-    //             $dispatchersUsed = 0;
-    //             $dispatchersAllowed = 0;
-    //             $lastLogin = null;
-
-    //             // Get dispatchers_allowed from tenant data
-    //             if (isset($tenant->data) && is_array($tenant->data)) {
-    //                 $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
-    //             } elseif (isset($tenant->dispatchers_allowed)) {
-    //                 $dispatchersAllowed = $tenant->dispatchers_allowed;
-    //             }
-
-    //             // Get data from tenant's own database
-    //             $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed, &$lastLogin) {
-
-    //                 if (\Schema::hasTable('bookings')) {
-    //                     $apiCallsToday = \DB::table('bookings')
-    //                         ->whereDate('created_at', Carbon::today())
-    //                         ->count();
-
-    //                     $mapRequests = $apiCallsToday;
-    //                 }
-
-    //                 if (\Schema::hasTable('calls')) {
-    //                     $voipMinutes = \DB::table('calls')
-    //                         ->whereDate('created_at', Carbon::today())
-    //                         ->sum('duration');
-    //                 }
-
-    //                 if (\Schema::hasTable('dispatcher')) {
-    //                     $dispatchersUsed = \DB::table('dispatcher')->count();
-    //                 }
-
-    //                 // Get last activity from users table in tenant database
-    //                 if (\Schema::hasTable('users')) {
-    //                     $user = \DB::table('users')
-    //                         ->orderBy('updated_at', 'DESC')
-    //                         ->first();
-
-    //                     if ($user && isset($user->updated_at)) {
-    //                         $lastLogin = Carbon::parse($user->updated_at)->format('Y-m-d H:i:s');
-    //                     }
-    //                 }
-    //             });
-
-    //             $totalAPICalls += $apiCallsToday;
-
-    //             $companyList[] = [
-    //                 'company_name' => $tenant->company_name,
-    //                 'api_calls_today' => $apiCallsToday,
-    //                 'map_request' => $mapRequests,
-    //                 'voip_minutes' => $voipMinutes,
-    //                 'dispatchers_used' => $dispatchersUsed,
-    //                 'dispatchers_allowed' => (int) $dispatchersAllowed,
-    //                 'dispatchers' => $dispatchersUsed . '/' . $dispatchersAllowed,
-    //                 'last_activity' => $lastLogin ?? 'Never'
-    //             ];
-    //         }
-
-    //         return response()->json([
-    //             'success' => 1,
-    //             'data' => [
-    //                 'totalCompanies' => $totalCompanies,
-    //                 'totalAPICalls' => $totalAPICalls
-    //             ],
-    //             'company_list' => $companyList
-    //         ]);
-
-    //     } catch (\Exception $e) {
-    //         return response()->json([
-    //             'error' => 1,
-    //             'message' => $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
     public function getAPIKeys()
     {
         try {
