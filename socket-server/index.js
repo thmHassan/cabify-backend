@@ -462,270 +462,6 @@ app.get("/bookings/:id", async (req, res) => {
     }
 });
 
-app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const db = getConnection(req.tenantDb);
-
-        const [bookings] = await db.query(`
-            SELECT 
-                b.*,
-                d.id as driver_id,
-                d.name as driver_name,
-                d.email as driver_email,
-                d.phone_no as driver_phone,
-                d.profile_image as driver_profile_image,
-                vt.id as vehicle_type_id,
-                vt.vehicle_type_name as vehicle_type_name,
-                vt.vehicle_type_service as vehicle_type_service,
-                sc.id as sub_company_id,
-                sc.name as sub_company_name,
-                sc.email as sub_company_email
-            FROM bookings b
-            LEFT JOIN drivers d ON b.driver = d.id
-            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
-            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
-            WHERE b.id = ?
-        `, [id]);
-
-        if (bookings.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found"
-            });
-        }
-
-        const booking = bookings[0];
-
-        if (!booking.email) {
-            return res.status(400).json({
-                success: false,
-                message: "Booking does not have an email address"
-            });
-        }
-
-        const {
-            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
-            vehicle_type_id, vehicle_type_name, vehicle_type_service,
-            sub_company_id, sub_company_name, sub_company_email,
-            ...bookingData
-        } = booking;
-
-        const formattedBooking = {
-            ...bookingData,
-            driverDetail: driver_id ? {
-                id: driver_id,
-                name: driver_name,
-                email: driver_email,
-                phone_no: driver_phone,
-                profile_image: driver_profile_image
-            } : null,
-            vehicleDetail: vehicle_type_id ? {
-                id: vehicle_type_id,
-                vehicle_type_name: vehicle_type_name,
-                vehicle_type_service: vehicle_type_service
-            } : null,
-            subCompanyDetail: sub_company_id ? {
-                id: sub_company_id,
-                name: sub_company_name,
-                email: sub_company_email
-            } : null
-        };
-
-        const emailHtml = getBookingConfirmationEmail(formattedBooking);
-
-        const mailOptions = {
-            from: {
-                name: 'Cabifyit',
-                address: process.env.MAIL_FROM_ADDRESS || 'support@cabifyit.com'
-            },
-            to: booking.email,
-            subject: `Booking Confirmation - ${booking.booking_id}`,
-            html: emailHtml
-        };
-
-        // Send email
-        const info = await transporter.sendMail(mailOptions);
-
-        console.log(`✅ Email sent successfully to ${booking.email}`);
-        console.log('Message ID:', info.messageId);
-
-        return res.json({
-            success: true,
-            message: "Booking confirmation email sent successfully",
-            data: {
-                booking_id: booking.booking_id,
-                email: booking.email,
-                messageId: info.messageId
-            }
-        });
-
-    } catch (error) {
-        console.error("Error sending confirmation email:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// app.put("/bookings/:id/assign-driver", async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { driver_id } = req.body;
-
-//         if (!driver_id) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "driver_id is required"
-//             });
-//         }
-
-//         const db = getConnection(req.tenantDb);
-
-//         const [bookings] = await db.query(
-//             "SELECT * FROM bookings WHERE id = ?",
-//             [id]
-//         );
-
-//         if (bookings.length === 0) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: "Booking not found"
-//             });
-//         }
-
-//         const booking = bookings[0];
-//         const oldDriverId = booking.driver;
-
-//         const [drivers] = await db.query(
-//             "SELECT * FROM drivers WHERE id = ?",
-//             [driver_id]
-//         );
-
-//         if (drivers.length === 0) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: "Driver not found"
-//             });
-//         }
-
-//         await db.query(
-//             "UPDATE bookings SET driver = ?, booking_status = 'ongoing' WHERE id = ?",
-//             [driver_id, id]
-//         );
-
-//         if (oldDriverId && oldDriverId !== null) {
-//             await db.query(
-//                 "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
-//                 [oldDriverId]
-//             );
-
-//             const oldDriverSocketId = driverSockets.get(oldDriverId.toString());
-//             if (oldDriverSocketId) {
-//                 io.to(oldDriverSocketId).emit("driver-unassigned-event", {
-//                     booking_id: booking.id,
-//                     message: "You have been unassigned from this booking"
-//                 });
-//             }
-//         }
-
-//         await db.query(
-//             "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
-//             [driver_id]
-//         );
-
-//         const [updatedBookings] = await db.query(`
-//             SELECT 
-//                 b.*,
-//                 d.id as driver_id,
-//                 d.name as driver_name,
-//                 d.email as driver_email,
-//                 d.phone_no as driver_phone,
-//                 d.profile_image as driver_profile_image,
-//                 vt.id as vehicle_type_id,
-//                 vt.vehicle_type_name as vehicle_type_name,
-//                 vt.vehicle_type_service as vehicle_type_service,
-//                 sc.id as sub_company_id,
-//                 sc.name as sub_company_name,
-//                 sc.email as sub_company_email
-//             FROM bookings b
-//             LEFT JOIN drivers d ON b.driver = d.id
-//             LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
-//             LEFT JOIN sub_companies sc ON b.sub_company = sc.id
-//             WHERE b.id = ?
-//         `, [id]);
-
-//         const updatedBooking = updatedBookings[0];
-//         const {
-//             driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
-//             vehicle_type_id, vehicle_type_name, vehicle_type_service,
-//             sub_company_id, sub_company_name, sub_company_email,
-//             ...bookingData
-//         } = updatedBooking;
-
-//         const formattedBooking = {
-//             ...bookingData,
-//             driverDetail: dId ? {
-//                 id: dId,
-//                 name: driver_name,
-//                 email: driver_email,
-//                 phone_no: driver_phone,
-//                 profile_image: driver_profile_image
-//             } : null,
-//             vehicleDetail: vehicle_type_id ? {
-//                 id: vehicle_type_id,
-//                 vehicle_type_name: vehicle_type_name,
-//                 vehicle_type_service: vehicle_type_service
-//             } : null,
-//             subCompanyDetail: sub_company_id ? {
-//                 id: sub_company_id,
-//                 name: sub_company_name,
-//                 email: sub_company_email
-//             } : null
-//         };
-
-//         const newDriverSocketId = driverSockets.get(driver_id.toString());
-//         if (newDriverSocketId) {
-//             io.to(newDriverSocketId).emit("new-ride", formattedBooking);
-//         }
-
-//         if (booking.user_id) {
-//             const userSocketId = userSockets.get(booking.user_id.toString());
-//             if (userSocketId) {
-//                 const message = oldDriverId
-//                     ? "Your driver has been changed"
-//                     : "Driver has been assigned to your booking";
-
-//                 io.to(userSocketId).emit("driver-changed-event", {
-//                     booking: formattedBooking,
-//                     message: message
-//                 });
-//             }
-//         }
-
-//         // Broadcast dashboard cards update after driver assignment
-//         await broadcastDashboardCardsUpdate(req.tenantDb);
-
-//         const responseMessage = oldDriverId
-//             ? "Driver changed successfully"
-//             : "Driver assigned successfully";
-
-//         return res.json({
-//             success: true,
-//             message: responseMessage,
-//             data: formattedBooking
-//         });
-
-//     } catch (error) {
-//         console.error("Error assigning driver:", error);
-//         return res.status(500).json({
-//             success: false,
-//             error: error.message
-//         });
-//     }
-// });
-
 app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
@@ -895,61 +631,153 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
 app.post("/driver/accept-ride", async (req, res) => {
     try {
         const { ride_id } = req.body;
-        const driver_id = req.user.id;
+        const db = getConnection(req.tenantDb);
+
+        const [updatedBookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id,
+                vt.vehicle_type_name,
+                vt.vehicle_type_service,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id  
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE b.id = ?
+        `, [ride_id]);
+
+        if (!updatedBookings.length) {
+            return res.status(404).json({ success: 0, message: "Ride not found" });
+        }
+
+        const updatedBooking = updatedBookings[0];
+
+        const {
+            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
+            ...bookingData
+        } = updatedBooking;
+
+        const formattedBooking = {
+            ...bookingData,
+            driverDetail: driver_id ? {
+                id: driver_id,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_image: driver_profile_image
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                vehicle_type_name,
+                vehicle_type_service
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name,
+                email: sub_company_email
+            } : null
+        };
+
+        const eventData = {
+            booking_id: ride_id,
+            driver_id,       
+            driver_name,
+            driver_profile_image,
+            booking: formattedBooking,
+            message: `${driver_name} accepted the ride`
+        };
+
+        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("job-accepted-by-driver", eventData));
+        adminSockets.forEach((socketId) => io.to(socketId).emit("job-accepted-by-driver", eventData));
+        clientSockets.forEach((socketId) => io.to(socketId).emit("job-accepted-by-driver", eventData));
+
+        const clientId = req.headers["database"];
+        const socketId = clientSockets.get(clientId?.toString());
+        if (socketId) {
+            io.to(socketId).emit("on-job-driver-event", driver_name);
+        }
+
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+
+        return res.json({ success: 1, message: "Ride accepted successfully", data: formattedBooking });
+
+    } catch (error) {
+        console.error("Accept Ride Error:", error);
+        return res.status(500).json({ success: 0, message: "Something went wrong" });
+    }
+});
+
+app.post("/driver/cancel-ride", async (req, res) => {
+    try {
+        const { ride_id, cancel_reason } = req.body;
 
         const db = getConnection(req.tenantDb);
 
-        // 1️⃣ Booking check
-        const [bookings] = await db.query(
-            "SELECT * FROM bookings WHERE id = ?",
-            [ride_id]
-        );
+        const [bookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.profile_image as driver_profile_image
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            WHERE b.id = ?
+        `, [ride_id]);
 
-        if (bookings.length === 0) {
-            return res.status(404).json({
-                success: 0,
-                message: "Ride not found"
-            });
+        if (!bookings.length) {
+            return res.status(404).json({ success: 0, message: "Ride not found" });
         }
 
-        const booking = bookings[0];
+        const { driver_id, driver_name, driver_profile_image } = bookings[0];
 
-        if (booking.booking_status !== "pending") {
-            return res.status(400).json({
-                success: 0,
-                message: "Ride already accepted or cancelled"
-            });
-        }
+        const eventData = {
+            booking_id: ride_id,
+            driver_id,
+            driver_name,
+            driver_profile_image,
+            cancel_reason: cancel_reason || "",
+            booking: {
+                id: bookings[0].id,
+                booking_id: bookings[0].booking_id,
+                pickup_location: bookings[0].pickup_location,
+                destination_location: bookings[0].destination_location,
+                booking_date: bookings[0].booking_date,
+                pickup_time: bookings[0].pickup_time,
+                booking_status: "cancelled",
+            },
+            message: `${driver_name} cancelled the ride`
+        };
 
-        // 2️⃣ Update booking
-        await db.query(
-            `UPDATE bookings 
-             SET booking_status = 'ongoing',
-                 booking_amount = offered_amount,
-                 driver = ?
-             WHERE id = ?`,
-            [driver_id, ride_id]
-        );
+        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("job-cancelled-by-driver", eventData));
+        adminSockets.forEach((socketId) => io.to(socketId).emit("job-cancelled-by-driver", eventData));
+        clientSockets.forEach((socketId) => io.to(socketId).emit("job-cancelled-by-driver", eventData));
 
-        // 3️⃣ Update driver
-        await db.query(
-            `UPDATE drivers 
-             SET driving_status = 'busy'
-             WHERE id = ?`,
-            [driver_id]
-        );
+        await broadcastDashboardCardsUpdate(req.tenantDb);
 
-        // 4️⃣ Get driver details
-        const [driverRows] = await db.query(
-            "SELECT name, profile_image FROM drivers WHERE id = ?",
-            [driver_id]
-        );
+        return res.json({ success: 1, message: "Cancel event broadcasted" });
 
-        const driverName = driverRows[0]?.name || "Driver";
-        const driverProfileImage = driverRows[0]?.profile_image || null;
+    } catch (error) {
+        console.error("Cancel Ride Error:", error);
+        return res.status(500).json({ success: 0, message: "Something went wrong" });
+    }
+});
 
-        // 5️⃣ Get updated booking with all details
-        const [updatedBookings] = await db.query(`
+app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(`
             SELECT 
                 b.*,
                 d.id as driver_id,
@@ -968,20 +796,35 @@ app.post("/driver/accept-ride", async (req, res) => {
             LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
             LEFT JOIN sub_companies sc ON b.sub_company = sc.id
             WHERE b.id = ?
-        `, [ride_id]);
+        `, [id]);
 
-        const updatedBooking = updatedBookings[0];
+        if (bookings.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const booking = bookings[0];
+
+        if (!booking.email) {
+            return res.status(400).json({
+                success: false,
+                message: "Booking does not have an email address"
+            });
+        }
+
         const {
-            driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
+            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
             vehicle_type_id, vehicle_type_name, vehicle_type_service,
             sub_company_id, sub_company_name, sub_company_email,
             ...bookingData
-        } = updatedBooking;
+        } = booking;
 
         const formattedBooking = {
             ...bookingData,
-            driverDetail: dId ? {
-                id: dId,
+            driverDetail: driver_id ? {
+                id: driver_id,
                 name: driver_name,
                 email: driver_email,
                 phone_no: driver_phone,
@@ -999,51 +842,39 @@ app.post("/driver/accept-ride", async (req, res) => {
             } : null
         };
 
-        // 6️⃣ 🔥 Emit to dispatchers, admins, and clients
-        const eventData = {
-            booking_id: ride_id,
-            driver_id,
-            driver_name: driverName,
-            driver_profile_image: driverProfileImage,
-            booking: formattedBooking,
-            message: `${driverName} accepted the ride`
+        const emailHtml = getBookingConfirmationEmail(formattedBooking);
+
+        const mailOptions = {
+            from: {
+                name: 'Cabifyit',
+                address: process.env.MAIL_FROM_ADDRESS || 'support@cabifyit.com'
+            },
+            to: booking.email,
+            subject: `Booking Confirmation - ${booking.booking_id}`,
+            html: emailHtml
         };
 
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("job-accepted-by-driver", eventData);
-        });
+        // Send email
+        const info = await transporter.sendMail(mailOptions);
 
-        adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("job-accepted-by-driver", eventData);
-        });
-
-        clientSockets.forEach((socketId) => {
-            io.to(socketId).emit("job-accepted-by-driver", eventData);
-        });
-
-        console.log(`✅ Ride ${ride_id} accepted by driver ${driver_id}`);
-
-        // 7️⃣ Call on-job-driver
-        const clientId = req.headers["database"];
-        const socketId = clientSockets.get(clientId.toString());
-        if (socketId) {
-            io.to(socketId).emit("on-job-driver-event", driverName);
-        }
-
-        // 8️⃣ Update dashboard cards
-        await broadcastDashboardCardsUpdate(req.tenantDb);
+        console.log(`✅ Email sent successfully to ${booking.email}`);
+        console.log('Message ID:', info.messageId);
 
         return res.json({
-            success: 1,
-            message: "Ride accepted successfully",
-            data: formattedBooking
+            success: true,
+            message: "Booking confirmation email sent successfully",
+            data: {
+                booking_id: booking.booking_id,
+                email: booking.email,
+                messageId: info.messageId
+            }
         });
 
     } catch (error) {
-        console.error("Accept Ride Error:", error);
+        console.error("Error sending confirmation email:", error);
         return res.status(500).json({
-            success: 0,
-            message: "Something went wrong"
+            success: false,
+            error: error.message
         });
     }
 });
@@ -1477,225 +1308,15 @@ app.post("/waiting-driver", (req, res) => {
     });
 });
 
-// app.post("/send-reminder", (req, res) => {
-//     const { clientId, title, description } = req.body;
-//     const socketId = clientSockets.get(clientId.toString());
-//     if (socketId) {
-//         io.to(socketId).emit("send-reminder", { title, description });
-//     }
-//     return res.json({
-//         success: true,
-//     });
-// });
-
-app.post("/send-reminder", async (req, res) => {
-    try {
-        const { clientId, title, description } = req.body;
-
-        if (!clientId || !title || !description) {
-            return res.status(400).json({
-                success: false,
-                message: "clientId, title, and description are required"
-            });
-        }
-
-        const DB_PREFIX = "tenant";
-        const finalDb = `${DB_PREFIX}${clientId}`;
-
-        const db = getConnection(finalDb);
-
-        const [result] = await db.query(
-            `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at) 
-             VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-            ['company', null, title, description, 'unread']
-        );
-
-        console.log(`Notification stored in database with ID: ${result.insertId}`);
-
-        const socketId = clientSockets.get(clientId.toString());
-        if (socketId) {
-            io.to(socketId).emit("send-reminder", {
-                id: result.insertId,
-                title,
-                description,
-                created_at: new Date()
-            });
-            console.log(`Socket notification sent to client: ${clientId}`);
-        } else {
-            console.log(`Client ${clientId} is not connected via socket`);
-        }
-
-        return res.json({
-            success: true,
-            message: "Reminder sent and stored successfully",
-            data: {
-                id: result.insertId,
-                title,
-                description
-            }
-        });
-
-    } catch (error) {
-        console.error("Error in send-reminder:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+app.post("/send-reminder", (req, res) => {
+    const { clientId, title, description } = req.body;
+    const socketId = clientSockets.get(clientId.toString());
+    if (socketId) {
+        io.to(socketId).emit("send-reminder", { title, description });
     }
-});
-
-app.get("/notifications", async (req, res) => {
-    try {
-        const tenantDb = req.tenantDb;
-        const { status, page = 1, limit = 10 } = req.query;
-
-        if (!tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const pageNum = Math.max(parseInt(page) || 1, 1);
-        const limitNum = Math.max(parseInt(limit) || 10, 1);
-        const offset = (pageNum - 1) * limitNum;
-
-        const db = getConnection(tenantDb);
-
-        let query = "SELECT * FROM notifications WHERE 1=1";
-        const params = [];
-
-        if (status) {
-            query += " AND status = ?";
-            params.push(status);
-        }
-
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
-        params.push(limitNum, offset);
-
-        const [notifications] = await db.query(query, params);
-
-        let countQuery = "SELECT COUNT(*) as total FROM notifications WHERE 1=1";
-        const countParams = [];
-
-        if (status) {
-            countQuery += " AND status = ?";
-            countParams.push(status);
-        }
-
-        const [[{ total }]] = await db.query(countQuery, countParams);
-
-        return res.json({
-            success: true,
-            data: notifications,
-            pagination: {
-                total,
-                page: pageNum,
-                limit: limitNum,
-                total_pages: Math.ceil(total / limitNum),
-                hasNext: pageNum * limitNum < total,
-                hasPrev: pageNum > 1
-            }
-        });
-
-    } catch (error) {
-        console.error("Error fetching notifications:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.delete("/notifications/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const tenantDb = req.tenantDb;
-
-        if (!tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(tenantDb);
-
-        const [notifications] = await db.query(
-            "SELECT * FROM notifications WHERE id = ?",
-            [id]
-        );
-
-        if (notifications.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Notification not found"
-            });
-        }
-
-        await db.query("DELETE FROM notifications WHERE id = ?", [id]);
-
-        console.log(`Notification ${id} deleted successfully`);
-
-        return res.json({
-            success: true,
-            message: "Notification deleted successfully"
-        });
-
-    } catch (error) {
-        console.error("Error deleting notification:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.put("/notifications/:id/mark-read", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const tenantDb = req.tenantDb;
-
-        if (!tenantDb) {
-            return res.status(400).json({
-                success: false,
-                message: "Database header is required"
-            });
-        }
-
-        const db = getConnection(tenantDb);
-
-        const [notifications] = await db.query(
-            "SELECT * FROM notifications WHERE id = ?",
-            [id]
-        );
-
-        if (notifications.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Notification not found"
-            });
-        }
-
-        await db.query(
-            "UPDATE notifications SET status = 'read', updated_at = NOW() WHERE id = ?",
-            [id]
-        );
-
-        console.log(`Notification ${id} marked as read`);
-
-        return res.json({
-            success: true,
-            message: "Notification marked as read"
-        });
-
-    } catch (error) {
-        console.error("rror marking notification as read:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
+    return res.json({
+        success: true,
+    });
 });
 
 server.listen(3001, "0.0.0.0", () => {
