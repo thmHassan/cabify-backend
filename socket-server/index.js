@@ -435,6 +435,27 @@ async function calculatePostPaidEntries(driver, settings, db) {
         });
     }
 
+    const currentCycleStart = new Date(lastSettlementDate);
+    currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
+
+    const currentCycleEnd = new Date(currentCycleStart);
+    currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
+
+    const daysElapsedInCycle = daysPassed % packageDays;
+    const daysRemainingInCycle = packageDays - daysElapsedInCycle;
+
+    entries.push({
+        entry_number: completedCycles + 1,
+        cycle_start_date: formatDate(currentCycleStart),
+        cycle_end_date: formatDate(currentCycleEnd),
+        days_in_cycle: packageDays,
+        days_elapsed: daysElapsedInCycle,
+        days_remaining: daysRemainingInCycle,
+        amount: packageAmount.toFixed(2),
+        status: 'in_progress',
+        description: `Current cycle - ${daysElapsedInCycle} of ${packageDays} days elapsed`
+    });
+
     return entries;
 }
 
@@ -452,7 +473,6 @@ async function calculatePercentageEntries(driver, settings, db) {
 
     const entries = [];
 
-    // Completed past cycles
     for (let i = 0; i < completedCycles; i++) {
         const cycleStartDate = new Date(lastSettlementDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
@@ -489,7 +509,6 @@ async function calculatePercentageEntries(driver, settings, db) {
         });
     }
 
-    // Current in-progress cycle (always show)
     const currentCycleStart = new Date(lastSettlementDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
 
