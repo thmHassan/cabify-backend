@@ -407,9 +407,15 @@ async function calculatePostPaidEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packageAmount = parseFloat(settings.package_amount);
 
+    // ✅ FIX: package_updated_at thi start karo, created_at nahi
+    // Priority: last_settlement_date > package_updated_at > created_at
+    const packageStartDate = settings.package_updated_at
+        ? new Date(settings.package_updated_at)
+        : new Date(driver.created_at);
+
     const lastSettlementDate = driver.last_settlement_date
         ? new Date(driver.last_settlement_date)
-        : new Date(driver.created_at);
+        : packageStartDate;
 
     const currentDate = new Date();
     const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
@@ -417,6 +423,7 @@ async function calculatePostPaidEntries(driver, settings, db) {
 
     const entries = [];
 
+    // ✅ Past completed cycles — PENDING (collect thay)
     for (let i = 0; i < completedCycles; i++) {
         const cycleStartDate = new Date(lastSettlementDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
@@ -435,6 +442,7 @@ async function calculatePostPaidEntries(driver, settings, db) {
         });
     }
 
+    // ✅ Current in-progress cycle — IN_PROGRESS (collect NA thay)
     const currentCycleStart = new Date(lastSettlementDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
 
@@ -463,9 +471,13 @@ async function calculatePercentageEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packagePercentage = parseFloat(settings.package_percentage);
 
+    const packageStartDate = settings.package_updated_at
+        ? new Date(settings.package_updated_at)
+        : new Date(driver.created_at);
+
     const lastSettlementDate = driver.last_settlement_date
         ? new Date(driver.last_settlement_date)
-        : new Date(driver.created_at);
+        : packageStartDate;
 
     const currentDate = new Date();
     const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
@@ -515,6 +527,9 @@ async function calculatePercentageEntries(driver, settings, db) {
     const currentCycleEnd = new Date(currentCycleStart);
     currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
 
+    const daysElapsedInCycle = daysPassed % packageDays;
+    const daysRemainingInCycle = packageDays - daysElapsedInCycle;
+
     const [currentBookingRows] = await db.query(`
         SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
         FROM bookings
@@ -536,6 +551,8 @@ async function calculatePercentageEntries(driver, settings, db) {
         cycle_start_date: formatDate(currentCycleStart),
         cycle_end_date: formatDate(currentCycleEnd),
         days_in_cycle: packageDays,
+        days_elapsed: daysElapsedInCycle,
+        days_remaining: daysRemainingInCycle,
         total_rides_amount: currentRidesAmount.toFixed(2),
         commission_percentage: packagePercentage,
         amount: currentCommission.toFixed(2),
@@ -563,88 +580,56 @@ function formatDateTime(date) {
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
-app.get("/debug/bookings-columns", async (req, res) => {
-    try {
-        const databaseHeader = req.headers['database'];
-        const tenantDb = `tenant${databaseHeader}`;
-        const db = getConnection(tenantDb);
-        const [columns] = await db.query(`DESCRIBE bookings`);
-        return res.json({ columns: columns.map(c => ({ field: c.Field, type: c.Type })) });
-    } catch (error) {
-        return res.status(500).json({ error: error.message });
-    }
-});
 
 app.get("/driver/commission-entries", async (req, res) => {
     try {
-        const { driver_id } = req.query;
+        const { driver_id, page = 1, limit = 10 } = req.query;
 
-        console.log("📊 Commission Entries Request:", { driver_id, tenantDb: req.tenantDb });
+        console.log("📊 Commission Entries Request:", { driver_id, page, limit });
 
         if (!driver_id) {
-            return res.status(400).json({
-                success: 0,
-                message: 'Driver ID is required'
-            });
+            return res.status(400).json({ success: 0, message: 'Driver ID is required' });
         }
 
-        // Try multiple header names
-        const databaseHeader = req.headers['x-database'] ||
-            req.headers['database'] ||
-            req.query.database;
-
+        const databaseHeader = req.headers['x-database'] || req.headers['database'] || req.query.database;
         if (!databaseHeader) {
-            return res.status(400).json({
-                success: 0,
-                message: 'Database header is required'
-            });
+            return res.status(400).json({ success: 0, message: 'Database header is required' });
         }
 
         const tenantDb = `tenant${databaseHeader}`;
         const db = getConnection(tenantDb);
 
-        // ✅ Changed: company_settings → settings
-        const [settingsRows] = await db.query(
-            "SELECT * FROM settings ORDER BY id DESC LIMIT 1"
-        );
-
+        const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
         if (!settingsRows.length) {
-            return res.status(404).json({
-                success: 0,
-                message: 'Company settings not found'
-            });
+            return res.status(404).json({ success: 0, message: 'Company settings not found' });
         }
-
         const settings = settingsRows[0];
 
-        const [driverRows] = await db.query(
-            "SELECT * FROM drivers WHERE id = ?",
-            [driver_id]
-        );
-
+        const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
         if (!driverRows.length) {
-            return res.status(404).json({
-                success: 0,
-                message: 'Driver not found'
-            });
+            return res.status(404).json({ success: 0, message: 'Driver not found' });
         }
-
         const driver = driverRows[0];
 
-        let commissionEntries = [];
-
+        let allEntries = [];
         if (settings.package_type === 'packages_post_paid') {
-            commissionEntries = await calculatePostPaidEntries(driver, settings, db);
+            allEntries = await calculatePostPaidEntries(driver, settings, db);
         } else if (settings.package_type === 'commission_without_topup') {
-            commissionEntries = await calculatePercentageEntries(driver, settings, db);
+            allEntries = await calculatePercentageEntries(driver, settings, db);
         } else {
-            return res.status(400).json({
-                success: 0,
-                message: 'Invalid package type'
-            });
+            return res.status(400).json({ success: 0, message: 'Invalid package type' });
         }
 
-        console.log("✅ Commission Entries Success:", { entries: commissionEntries.length });
+        const pageNum = Math.max(parseInt(page) || 1, 1);
+        const limitNum = Math.max(parseInt(limit) || 10, 1);
+        const totalEntries = allEntries.length;
+        const totalPages = Math.ceil(totalEntries / limitNum);
+        const offset = (pageNum - 1) * limitNum;
+        const paginatedEntries = allEntries.slice(offset, offset + limitNum);
+
+        const pendingEntries = allEntries.filter(e => e.status === 'pending');
+
+        console.log("✅ Commission Entries Success:", { total: totalEntries, page: pageNum });
 
         return res.json({
             success: 1,
@@ -657,18 +642,23 @@ app.get("/driver/commission-entries", async (req, res) => {
                 package_amount: settings.package_amount,
                 package_percentage: settings.package_percentage,
                 last_settlement_date: driver.last_settlement_date,
-                total_uncollected_entries: commissionEntries.length,
-                total_uncollected_amount: commissionEntries.reduce((sum, entry) => sum + parseFloat(entry.amount), 0).toFixed(2),
-                commission_entries: commissionEntries
+                total_uncollected_entries: pendingEntries.length,
+                total_uncollected_amount: pendingEntries.reduce((sum, e) => sum + parseFloat(e.amount), 0).toFixed(2),
+                commission_entries: paginatedEntries,
+                pagination: {
+                    total: totalEntries,
+                    page: pageNum,
+                    limit: limitNum,
+                    total_pages: totalPages,
+                    hasNext: pageNum < totalPages,
+                    hasPrev: pageNum > 1
+                }
             }
         });
 
     } catch (error) {
         console.error('❌ Error in commission-entries:', error);
-        return res.status(500).json({
-            success: 0,
-            message: error.message
-        });
+        return res.status(500).json({ success: 0, message: error.message });
     }
 });
 
@@ -676,116 +666,76 @@ app.post("/driver/collect-commission", async (req, res) => {
     try {
         const { driver_id } = req.body;
 
-        console.log("💰 Collect Commission Request:", { driver_id, body: req.body });
+        console.log("Collect Commission Request:", { driver_id });
 
         if (!driver_id) {
-            return res.status(400).json({
-                success: 0,
-                message: 'Driver ID is required'
-            });
+            return res.status(400).json({ success: 0, message: 'Driver ID is required' });
         }
 
-        // Try multiple header names
-        const databaseHeader = req.headers['x-database'] ||
-            req.headers['database'] ||
-            req.query.database;
-
+        const databaseHeader = req.headers['x-database'] || req.headers['database'] || req.query.database;
         if (!databaseHeader) {
-            return res.status(400).json({
-                success: 0,
-                message: 'Database header is required'
-            });
+            return res.status(400).json({ success: 0, message: 'Database header is required' });
         }
 
         const tenantDb = `tenant${databaseHeader}`;
         const db = getConnection(tenantDb);
 
-        // ✅ Changed: company_settings → settings
-        const [settingsRows] = await db.query(
-            "SELECT * FROM settings ORDER BY id DESC LIMIT 1"
-        );
-
+        const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
         if (!settingsRows.length) {
-            return res.status(404).json({
-                success: 0,
-                message: 'Company settings not found'
-            });
+            return res.status(404).json({ success: 0, message: 'Company settings not found' });
         }
-
         const settings = settingsRows[0];
 
-        const [driverRows] = await db.query(
-            "SELECT * FROM drivers WHERE id = ?",
-            [driver_id]
-        );
-
+        const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
         if (!driverRows.length) {
-            return res.status(404).json({
-                success: 0,
-                message: 'Driver not found'
-            });
+            return res.status(404).json({ success: 0, message: 'Driver not found' });
         }
-
         const driver = driverRows[0];
 
         let commissionEntries = [];
-
         if (settings.package_type === 'packages_post_paid') {
             commissionEntries = await calculatePostPaidEntries(driver, settings, db);
         } else if (settings.package_type === 'commission_without_topup') {
             commissionEntries = await calculatePercentageEntries(driver, settings, db);
         } else {
-            return res.status(400).json({
-                success: 0,
-                message: 'Invalid package type'
-            });
+            return res.status(400).json({ success: 0, message: 'Invalid package type' });
         }
 
         if (commissionEntries.length === 0) {
-            return res.json({
-                success: 0,
-                message: 'No commission entries available to collect'
-            });
+            return res.json({ success: 0, message: 'No commission entries available to collect' });
         }
 
         const firstEntry = commissionEntries[0];
-        const collectionAmount = parseFloat(firstEntry.amount);
-        const currentBalance = parseFloat(driver.wallet_balance || 0);
 
-        if (currentBalance < collectionAmount) {
+        if (firstEntry.status === 'in_progress') {
             return res.status(400).json({
                 success: 0,
-                message: 'Insufficient wallet balance',
+                message: `Current cycle is still in progress. ${firstEntry.days_remaining} days remaining.`,
                 data: {
-                    required_amount: collectionAmount.toFixed(2),
-                    current_balance: currentBalance.toFixed(2),
-                    shortage: (collectionAmount - currentBalance).toFixed(2)
+                    cycle_end_date: firstEntry.cycle_end_date,
+                    days_remaining: firstEntry.days_remaining,
+                    days_elapsed: firstEntry.days_elapsed
                 }
             });
         }
 
-        const newBalance = currentBalance - collectionAmount;
-
+        const collectionAmount = parseFloat(firstEntry.amount);
         const packageDays = parseInt(settings.package_days);
+
         const oldSettlementDate = driver.last_settlement_date
             ? new Date(driver.last_settlement_date)
-            : new Date(driver.created_at);
+            : (settings.package_updated_at ? new Date(settings.package_updated_at) : new Date(driver.created_at));
 
         const newSettlementDate = new Date(oldSettlementDate);
         newSettlementDate.setDate(newSettlementDate.getDate() + packageDays);
 
         await db.query(`
             UPDATE drivers 
-            SET wallet_balance = ?,
-                last_settlement_date = ?
+            SET last_settlement_date = ?
             WHERE id = ?
-        `, [newBalance, formatDateTime(newSettlementDate), driver_id]);
+        `, [formatDateTime(newSettlementDate), driver_id]);
 
-        const [updatedDriverRows] = await db.query(
-            "SELECT * FROM drivers WHERE id = ?",
-            [driver_id]
-        );
-
+        const [updatedDriverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
         const updatedDriver = updatedDriverRows[0];
 
         let remainingEntries = [];
@@ -795,11 +745,7 @@ app.post("/driver/collect-commission", async (req, res) => {
             remainingEntries = await calculatePercentageEntries(updatedDriver, settings, db);
         }
 
-        console.log("✅ Commission Collected Successfully:", {
-            driver_id,
-            collected: collectionAmount,
-            new_balance: newBalance
-        });
+        console.log("✅ Commission Collected Successfully:", { driver_id, collected: collectionAmount });
 
         return res.json({
             success: 1,
@@ -814,23 +760,18 @@ app.post("/driver/collect-commission", async (req, res) => {
                     amount: firstEntry.amount,
                     description: firstEntry.description
                 },
-                previous_balance: currentBalance.toFixed(2),
                 collected_amount: collectionAmount.toFixed(2),
-                new_balance: newBalance.toFixed(2),
                 previous_settlement_date: formatDate(oldSettlementDate),
                 new_settlement_date: formatDate(newSettlementDate),
-                remaining_entries: remainingEntries.length,
-                remaining_amount: remainingEntries.reduce((sum, entry) => sum + parseFloat(entry.amount), 0).toFixed(2),
+                remaining_entries: remainingEntries.filter(e => e.status === 'pending').length,
+                remaining_amount: remainingEntries.filter(e => e.status === 'pending').reduce((sum, e) => sum + parseFloat(e.amount), 0).toFixed(2),
                 next_entries: remainingEntries
             }
         });
 
     } catch (error) {
         console.error('❌ Error in collect-commission:', error);
-        return res.status(500).json({
-            success: 0,
-            message: error.message
-        });
+        return res.status(500).json({ success: 0, message: error.message });
     }
 });
 
