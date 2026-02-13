@@ -188,8 +188,6 @@ class HomeController extends Controller
     //         ], 500);
     //     }
     // }
-
-
     public function usageMonitoring(Request $request)
     {
         try {
@@ -223,19 +221,19 @@ class HomeController extends Controller
                             ->sum('duration');
                     }
 
-                    if (\Schema::hasTable('dispatchers')) {
-                        $totalDispatchers = \DB::table('dispatchers')->count();
+                    if (\Schema::hasTable('dispatcher')) {
+                        $totalDispatchers = \DB::table('dispatcher')->count();
 
-                        $hasLastLogin = \Schema::hasColumn('dispatchers', 'last_login');
+                        $hasLastLogin = \Schema::hasColumn('dispatcher', 'last_login');
                         if ($hasLastLogin) {
-                            $lastLogin = \DB::table('dispatchers')
+                            $lastLogin = \DB::table('dispatcher')
                                 ->whereNotNull('last_login')
                                 ->orderBy('last_login', 'DESC')
                                 ->value('last_login');
                         }
 
                         if (!$lastLogin) {
-                            $lastLogin = \DB::table('dispatchers')
+                            $lastLogin = \DB::table('dispatcher')
                                 ->orderBy('updated_at', 'DESC')
                                 ->value('updated_at');
                         }
@@ -292,7 +290,7 @@ class HomeController extends Controller
                 if ($lastLogin) {
                     try {
                         $lastLoginCarbon = Carbon::parse($lastLogin);
-                        $lastLoginFormatted = $lastLoginCarbon->diffForHumans(); // "2 hours ago"
+                        $lastLoginFormatted = $lastLoginCarbon->diffForHumans();
                         $lastLoginRaw = $lastLoginCarbon->format('Y-m-d H:i:s');
                     } catch (\Exception $e) {
                         $lastLoginFormatted = 'Never';

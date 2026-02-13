@@ -421,13 +421,20 @@ async function calculatePostPaidEntries(driver, settings, db) {
     }
 
     const currentDate = new Date();
-    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
+
+    // ✅ FIX: Calculate from the day AFTER last settlement date
+    const calculationStartDate = new Date(lastSettlementDate);
+    calculationStartDate.setDate(calculationStartDate.getDate() + 1);
+    calculationStartDate.setHours(0, 0, 0, 0);
+
+    const daysPassed = Math.floor((currentDate - calculationStartDate) / (1000 * 60 * 60 * 24));
     const completedCycles = Math.floor(daysPassed / packageDays);
 
     const entries = [];
 
+    // Only create entries for completed cycles (not including current)
     for (let i = 0; i < completedCycles; i++) {
-        const cycleStartDate = new Date(lastSettlementDate);
+        const cycleStartDate = new Date(calculationStartDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
         const cycleEndDate = new Date(cycleStartDate);
         cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
@@ -443,7 +450,8 @@ async function calculatePostPaidEntries(driver, settings, db) {
         });
     }
 
-    const currentCycleStart = new Date(lastSettlementDate);
+    // Add current ongoing cycle
+    const currentCycleStart = new Date(calculationStartDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
     const currentCycleEnd = new Date(currentCycleStart);
     currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
@@ -481,13 +489,18 @@ async function calculatePercentageEntries(driver, settings, db) {
         : packageStartDate;
 
     const currentDate = new Date();
-    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
+
+    const calculationStartDate = new Date(lastSettlementDate);
+    calculationStartDate.setDate(calculationStartDate.getDate() + 1);
+    calculationStartDate.setHours(0, 0, 0, 0);
+
+    const daysPassed = Math.floor((currentDate - calculationStartDate) / (1000 * 60 * 60 * 24));
     const completedCycles = Math.floor(daysPassed / packageDays);
 
     const entries = [];
 
     for (let i = 0; i < completedCycles; i++) {
-        const cycleStartDate = new Date(lastSettlementDate);
+        const cycleStartDate = new Date(calculationStartDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
 
         const cycleEndDate = new Date(cycleStartDate);
@@ -522,7 +535,7 @@ async function calculatePercentageEntries(driver, settings, db) {
         });
     }
 
-    const currentCycleStart = new Date(lastSettlementDate);
+    const currentCycleStart = new Date(calculationStartDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
 
     const currentCycleEnd = new Date(currentCycleStart);
@@ -558,7 +571,7 @@ async function calculatePercentageEntries(driver, settings, db) {
         total_rides_amount: currentRidesAmount.toFixed(2),
         commission_percentage: packagePercentage,
         amount: currentCommission.toFixed(2),
-        status: 'pending', // ✅ Changed from 'in_progress' to 'pending'
+        status: 'pending', 
         description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
     });
 
