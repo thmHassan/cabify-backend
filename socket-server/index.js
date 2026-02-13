@@ -711,6 +711,7 @@ async function calculatePercentageEntries(driver, settings, db) {
 
     const entries = [];
 
+    // ✅ Add completed past cycles
     for (let i = 0; i < completedCycles; i++) {
         const cycleStartDate = new Date(lastSettlementDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
@@ -746,6 +747,41 @@ async function calculatePercentageEntries(driver, settings, db) {
             description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides`
         });
     }
+
+    // ✅ NEW: Always add the current in-progress cycle
+    const currentCycleStart = new Date(lastSettlementDate);
+    currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
+
+    const currentCycleEnd = new Date(currentCycleStart);
+    currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
+
+    const [currentBookingRows] = await db.query(`
+        SELECT SUM(total_amount) as total_rides_amount
+        FROM bookings
+        WHERE driver = ?
+        AND booking_status = 'completed'
+        AND completed_at >= ?
+        AND completed_at <= ?
+    `, [
+        driver.id,
+        formatDateTime(currentCycleStart),
+        formatDateTime(new Date(currentCycleEnd.getTime() + 24 * 60 * 60 * 1000 - 1))
+    ]);
+
+    const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
+    const currentCommission = (currentRidesAmount * packagePercentage) / 100;
+
+    entries.push({
+        entry_number: completedCycles + 1,
+        cycle_start_date: formatDate(currentCycleStart),
+        cycle_end_date: formatDate(currentCycleEnd),
+        days_in_cycle: packageDays,
+        total_rides_amount: currentRidesAmount.toFixed(2),
+        commission_percentage: packagePercentage,
+        amount: currentCommission.toFixed(2),
+        status: 'in_progress',   // ← marks it as ongoing
+        description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
+    });
 
     return entries;
 }
