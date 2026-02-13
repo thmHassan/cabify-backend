@@ -213,6 +213,7 @@ class HomeController extends Controller
                         $apiCallsToday = \DB::table('bookings')
                             ->whereDate('created_at', Carbon::today())
                             ->count();
+
                         $mapRequests = $apiCallsToday;
                     }
 
@@ -225,42 +226,90 @@ class HomeController extends Controller
                     if (\Schema::hasTable('dispatchers')) {
                         $totalDispatchers = \DB::table('dispatchers')->count();
 
-                        $lastLoginRow = \DB::table('dispatchers')
-                            ->whereNotNull('last_login')
-                            ->orderBy('last_login', 'DESC')
-                            ->value('last_login');
+                        $hasLastLogin = \Schema::hasColumn('dispatchers', 'last_login');
+                        if ($hasLastLogin) {
+                            $lastLogin = \DB::table('dispatchers')
+                                ->whereNotNull('last_login')
+                                ->orderBy('last_login', 'DESC')
+                                ->value('last_login');
+                        }
 
-                        if ($lastLoginRow) {
-                            $lastLogin = $lastLoginRow;
+                        if (!$lastLogin) {
+                            $lastLogin = \DB::table('dispatchers')
+                                ->orderBy('updated_at', 'DESC')
+                                ->value('updated_at');
                         }
                     }
 
-                    if (\Schema::hasTable('admins') && !$lastLogin) {
-                        $adminLastLogin = \DB::table('admins')
-                            ->whereNotNull('last_login')
-                            ->orderBy('last_login', 'DESC')
-                            ->value('last_login');
+                    if (!$lastLogin && \Schema::hasTable('admins')) {
+                        $hasLastLogin = \Schema::hasColumn('admins', 'last_login');
+                        if ($hasLastLogin) {
+                            $lastLogin = \DB::table('admins')
+                                ->whereNotNull('last_login')
+                                ->orderBy('last_login', 'DESC')
+                                ->value('last_login');
+                        }
 
-                        if ($adminLastLogin) {
-                            $lastLogin = $adminLastLogin;
+                        if (!$lastLogin) {
+                            $lastLogin = \DB::table('admins')
+                                ->orderBy('updated_at', 'DESC')
+                                ->value('updated_at');
                         }
                     }
                 });
 
                 $totalAPICalls += $apiCallsToday;
-                $dispatchersAllowed = $tenant->data['dispatchers_allowed'] ?? 0;
+
+                $dispatchersAllowed = 0;
+
+                if (isset($tenant->dispatchers_allowed)) {
+                    $dispatchersAllowed = (int) $tenant->dispatchers_allowed;
+                }
+
+                if ($dispatchersAllowed === 0 && isset($tenant->data)) {
+                    $tenantData = $tenant->data;
+
+                    if (is_string($tenantData)) {
+                        $tenantData = json_decode($tenantData, true);
+                    }
+
+                    if (is_object($tenantData)) {
+                        $tenantData = (array) $tenantData;
+                    }
+
+                    $dispatchersAllowed = (int) (
+                        $tenantData['dispatchers_allowed'] ??
+                        $tenantData['max_dispatchers'] ??
+                        $tenantData['dispatcher_limit'] ??
+                        $tenantData['dispatchers'] ??
+                        0
+                    );
+                }
+
+                $lastLoginFormatted = 'Never';
+                $lastLoginRaw = null;
+
+                if ($lastLogin) {
+                    try {
+                        $lastLoginCarbon = Carbon::parse($lastLogin);
+                        $lastLoginFormatted = $lastLoginCarbon->diffForHumans(); // "2 hours ago"
+                        $lastLoginRaw = $lastLoginCarbon->format('Y-m-d H:i:s');
+                    } catch (\Exception $e) {
+                        $lastLoginFormatted = 'Never';
+                        $lastLoginRaw = null;
+                    }
+                }
+
                 $companyList[] = [
-                    'company_name' => $tenant->company_name,
+                    'company_name' => $tenant->company_name ?? 'N/A',
                     'api_calls_today' => $apiCallsToday,
                     'map_request' => $mapRequests,
-                    'voip_minutes' => $voipMinutes,
+                    'voip_minutes' => (int) $voipMinutes,
                     'dispatchers' => $totalDispatchers . '/' . $dispatchersAllowed,
                     'total_dispatchers' => $totalDispatchers,
                     'allowed_dispatchers' => $dispatchersAllowed,
-                    'last_login' => $lastLogin
-                        ? Carbon::parse($lastLogin)->diffForHumans()
-                        : 'Never',
-                    'last_login_raw' => $lastLogin,        
+                    'last_login' => $lastLoginFormatted,
+                    'last_login_raw' => $lastLoginRaw,
                 ];
             }
 
@@ -268,21 +317,21 @@ class HomeController extends Controller
                 'success' => 1,
                 'data' => [
                     'totalCompanies' => $tenants->total(),
-                    'totalAPICalls' => $totalAPICalls
+                    'totalAPICalls' => $totalAPICalls,
                 ],
                 'company_list' => $companyList,
                 'pagination' => [
                     'current_page' => $tenants->currentPage(),
                     'last_page' => $tenants->lastPage(),
                     'per_page' => $tenants->perPage(),
-                    'total' => $tenants->total()
-                ]
+                    'total' => $tenants->total(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 500);
         }
     }

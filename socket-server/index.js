@@ -93,6 +93,191 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
     }
 };
 
+const autoDispatchRide = async ({
+    bookingId,
+    tenantDb,
+    currentPlotId = null,
+    driverIndex = 0,
+    visitedPlots = []
+}) => {
+    try {
+        const db = getConnection(tenantDb);
+
+        const [bookingRows] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [bookingId]
+        );
+
+        if (!bookingRows.length) return;
+        const booking = bookingRows[0];
+
+        if (booking.driver_response === "accepted") {
+            console.log("Ride already accepted. Stop dispatch.");
+            return;
+        }
+
+        if (!currentPlotId) {
+            currentPlotId =
+                booking.pickup_plot_id || booking.destination_plot_id;
+        }
+
+        if (!currentPlotId) {
+            console.log("No plot assigned to booking.");
+            return;
+        }
+
+        if (visitedPlots.includes(currentPlotId)) {
+            console.log("All plots tried. No driver accepted.");
+
+            io.emit("auto-dispatch-failed", {
+                booking_id: bookingId,
+                message: "No drivers accepted the ride."
+            });
+
+            return;
+        }
+
+        visitedPlots.push(currentPlotId);
+
+        const [drivers] = await db.query(
+            `SELECT * FROM drivers
+             WHERE driving_status = 'idle'
+             AND plot_id = ?
+             ORDER BY priority_plot ASC`,
+            [currentPlotId]
+        );
+
+        if (!drivers.length) {
+            console.log("No drivers in plot:", currentPlotId);
+
+            const [plotRows] = await db.query(
+                "SELECT backup_plots FROM plots WHERE id = ?",
+                [currentPlotId]
+            );
+
+            const backupPlots = JSON.parse(
+                plotRows[0]?.backup_plots || "[]"
+            );
+
+            for (let backupPlot of backupPlots) {
+                await autoDispatchRide({
+                    bookingId,
+                    tenantDb,
+                    currentPlotId: backupPlot,
+                    driverIndex: 0,
+                    visitedPlots
+                });
+                return;
+            }
+
+            io.emit("auto-dispatch-failed", {
+                booking_id: bookingId,
+                message: "No drivers available in any plot."
+            });
+
+            return;
+        }
+
+        if (driverIndex >= drivers.length) {
+            console.log("➡ All drivers in this plot tried. Moving to backup.");
+
+            const [plotRows] = await db.query(
+                "SELECT backup_plots FROM plots WHERE id = ?",
+                [currentPlotId]
+            );
+
+            const backupPlots = JSON.parse(
+                plotRows[0]?.backup_plots || "[]"
+            );
+
+            for (let backupPlot of backupPlots) {
+                await autoDispatchRide({
+                    bookingId,
+                    tenantDb,
+                    currentPlotId: backupPlot,
+                    driverIndex: 0,
+                    visitedPlots
+                });
+                return;
+            }
+
+            io.emit("auto-dispatch-failed", {
+                booking_id: bookingId,
+                message: "All drivers rejected the ride."
+            });
+
+            return;
+        }
+
+        const driver = drivers[driverIndex];
+
+        console.log("Sending ride to:", driver.name);
+
+        await db.query(
+            `UPDATE bookings 
+             SET driver = ?, driver_response = NULL 
+             WHERE id = ?`,
+            [driver.id, bookingId]
+        );
+
+        const driverSocketId = driverSockets.get(driver.id.toString());
+
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("new-ride-request", {
+                booking_id: booking.id,
+                message: "You have a new ride request",
+                booking
+            });
+        }
+
+        setTimeout(async () => {
+
+            const [updatedRows] = await db.query(
+                "SELECT driver_response FROM bookings WHERE id = ?",
+                [bookingId]
+            );
+
+            if (!updatedRows.length) return;
+
+            const response = updatedRows[0].driver_response;
+
+            if (response === "accepted") {
+
+                console.log("Accepted by:", driver.name);
+
+                io.emit("job-accepted-by-driver", {
+                    booking_id: bookingId,
+                    driver_id: driver.id,
+                    message: `${driver.name} accepted the ride`
+                });
+
+                return;
+            }
+
+            console.log("Timeout or rejected. Trying next driver.");
+
+            await db.query(
+                `UPDATE bookings 
+                 SET driver = NULL, driver_response = NULL 
+                 WHERE id = ?`,
+                [bookingId]
+            );
+
+            autoDispatchRide({
+                bookingId,
+                tenantDb,
+                currentPlotId,
+                driverIndex: driverIndex + 1,
+                visitedPlots
+            });
+
+        }, 30000);
+
+    } catch (error) {
+        console.error("Auto Dispatch Error:", error.message);
+    }
+};
+
 io.use(async (socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
     const driverId = socket.handshake.query.driver_id;
@@ -628,6 +813,28 @@ app.put("/bookings/:id/driver-response", async (req, res) => {
     }
 });
 
+app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        autoDispatchRide({
+            bookingId: id,
+            tenantDb: req.tenantDb
+        });
+
+        return res.json({
+            success: true,
+            message: "Auto dispatch started"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
 app.post("/driver/accept-ride", async (req, res) => {
     try {
         const { ride_id } = req.body;
@@ -690,7 +897,7 @@ app.post("/driver/accept-ride", async (req, res) => {
 
         const eventData = {
             booking_id: ride_id,
-            driver_id,       
+            driver_id,
             driver_name,
             driver_profile_image,
             booking: formattedBooking,
