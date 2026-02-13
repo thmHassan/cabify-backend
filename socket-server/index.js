@@ -450,11 +450,9 @@ async function calculatePercentageEntries(driver, settings, db) {
     const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
     const completedCycles = Math.floor(daysPassed / packageDays);
 
-    // ✅ CHANGE THIS to your actual column name (fare / booking_fare / ride_amount etc.)
-    const AMOUNT_COLUMN = 'fare';  // <-- change this after checking debug endpoint
-
     const entries = [];
 
+    // Completed past cycles
     for (let i = 0; i < completedCycles; i++) {
         const cycleStartDate = new Date(lastSettlementDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
@@ -463,12 +461,12 @@ async function calculatePercentageEntries(driver, settings, db) {
         cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
 
         const [bookingRows] = await db.query(`
-            SELECT COALESCE(SUM(${AMOUNT_COLUMN}), 0) as total_rides_amount
+            SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
             FROM bookings
             WHERE driver = ?
             AND booking_status = 'completed'
-            AND completed_at >= ?
-            AND completed_at <= ?
+            AND updated_at >= ?
+            AND updated_at <= ?
         `, [
             driver.id,
             formatDateTime(cycleStartDate),
@@ -491,7 +489,7 @@ async function calculatePercentageEntries(driver, settings, db) {
         });
     }
 
-    // ✅ Current in-progress cycle (always show)
+    // Current in-progress cycle (always show)
     const currentCycleStart = new Date(lastSettlementDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
 
@@ -499,12 +497,12 @@ async function calculatePercentageEntries(driver, settings, db) {
     currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
 
     const [currentBookingRows] = await db.query(`
-        SELECT COALESCE(SUM(${AMOUNT_COLUMN}), 0) as total_rides_amount
+        SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
         FROM bookings
         WHERE driver = ?
         AND booking_status = 'completed'
-        AND completed_at >= ?
-        AND completed_at <= ?
+        AND updated_at >= ?
+        AND updated_at <= ?
     `, [
         driver.id,
         formatDateTime(currentCycleStart),
