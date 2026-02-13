@@ -403,6 +403,161 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
 
+async function calculatePostPaidEntries(driver, settings, db) {
+    const packageDays = parseInt(settings.package_days);
+    const packageAmount = parseFloat(settings.package_amount);
+
+    const lastSettlementDate = driver.last_settlement_date
+        ? new Date(driver.last_settlement_date)
+        : new Date(driver.created_at);
+
+    const currentDate = new Date();
+    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
+    const completedCycles = Math.floor(daysPassed / packageDays);
+
+    const entries = [];
+
+    for (let i = 0; i < completedCycles; i++) {
+        const cycleStartDate = new Date(lastSettlementDate);
+        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
+
+        const cycleEndDate = new Date(cycleStartDate);
+        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+
+        entries.push({
+            entry_number: i + 1,
+            cycle_start_date: formatDate(cycleStartDate),
+            cycle_end_date: formatDate(cycleEndDate),
+            days_in_cycle: packageDays,
+            amount: packageAmount.toFixed(2),
+            status: 'pending',
+            description: `${packageDays} days package - ${packageAmount} Rs`
+        });
+    }
+
+    return entries;
+}
+
+async function calculatePercentageEntries(driver, settings, db) {
+    const packageDays = parseInt(settings.package_days);
+    const packagePercentage = parseFloat(settings.package_percentage);
+
+    const lastSettlementDate = driver.last_settlement_date
+        ? new Date(driver.last_settlement_date)
+        : new Date(driver.created_at);
+
+    const currentDate = new Date();
+    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
+    const completedCycles = Math.floor(daysPassed / packageDays);
+
+    // ✅ CHANGE THIS to your actual column name (fare / booking_fare / ride_amount etc.)
+    const AMOUNT_COLUMN = 'fare';  // <-- change this after checking debug endpoint
+
+    const entries = [];
+
+    for (let i = 0; i < completedCycles; i++) {
+        const cycleStartDate = new Date(lastSettlementDate);
+        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
+
+        const cycleEndDate = new Date(cycleStartDate);
+        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+
+        const [bookingRows] = await db.query(`
+            SELECT COALESCE(SUM(${AMOUNT_COLUMN}), 0) as total_rides_amount
+            FROM bookings
+            WHERE driver = ?
+            AND booking_status = 'completed'
+            AND completed_at >= ?
+            AND completed_at <= ?
+        `, [
+            driver.id,
+            formatDateTime(cycleStartDate),
+            formatDateTime(new Date(cycleEndDate.getTime() + 24 * 60 * 60 * 1000 - 1))
+        ]);
+
+        const totalRidesAmount = parseFloat(bookingRows[0]?.total_rides_amount || 0);
+        const commissionAmount = (totalRidesAmount * packagePercentage) / 100;
+
+        entries.push({
+            entry_number: i + 1,
+            cycle_start_date: formatDate(cycleStartDate),
+            cycle_end_date: formatDate(cycleEndDate),
+            days_in_cycle: packageDays,
+            total_rides_amount: totalRidesAmount.toFixed(2),
+            commission_percentage: packagePercentage,
+            amount: commissionAmount.toFixed(2),
+            status: 'pending',
+            description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides`
+        });
+    }
+
+    // ✅ Current in-progress cycle (always show)
+    const currentCycleStart = new Date(lastSettlementDate);
+    currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
+
+    const currentCycleEnd = new Date(currentCycleStart);
+    currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
+
+    const [currentBookingRows] = await db.query(`
+        SELECT COALESCE(SUM(${AMOUNT_COLUMN}), 0) as total_rides_amount
+        FROM bookings
+        WHERE driver = ?
+        AND booking_status = 'completed'
+        AND completed_at >= ?
+        AND completed_at <= ?
+    `, [
+        driver.id,
+        formatDateTime(currentCycleStart),
+        formatDateTime(new Date(currentCycleEnd.getTime() + 24 * 60 * 60 * 1000 - 1))
+    ]);
+
+    const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
+    const currentCommission = (currentRidesAmount * packagePercentage) / 100;
+
+    entries.push({
+        entry_number: completedCycles + 1,
+        cycle_start_date: formatDate(currentCycleStart),
+        cycle_end_date: formatDate(currentCycleEnd),
+        days_in_cycle: packageDays,
+        total_rides_amount: currentRidesAmount.toFixed(2),
+        commission_percentage: packagePercentage,
+        amount: currentCommission.toFixed(2),
+        status: 'in_progress',
+        description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
+    });
+
+    return entries;
+}
+
+function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+app.get("/debug/bookings-columns", async (req, res) => {
+    try {
+        const databaseHeader = req.headers['database'];
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+        const [columns] = await db.query(`DESCRIBE bookings`);
+        return res.json({ columns: columns.map(c => ({ field: c.Field, type: c.Type })) });
+    } catch (error) {
+        return res.status(500).json({ error: error.message });
+    }
+});
+
 app.get("/driver/commission-entries", async (req, res) => {
     try {
         const { driver_id } = req.query;
@@ -661,147 +816,6 @@ app.post("/driver/collect-commission", async (req, res) => {
         });
     }
 });
-
-async function calculatePostPaidEntries(driver, settings, db) {
-    const packageDays = parseInt(settings.package_days);
-    const packageAmount = parseFloat(settings.package_amount);
-
-    const lastSettlementDate = driver.last_settlement_date
-        ? new Date(driver.last_settlement_date)
-        : new Date(driver.created_at);
-
-    const currentDate = new Date();
-    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
-    const completedCycles = Math.floor(daysPassed / packageDays);
-
-    const entries = [];
-
-    for (let i = 0; i < completedCycles; i++) {
-        const cycleStartDate = new Date(lastSettlementDate);
-        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
-
-        const cycleEndDate = new Date(cycleStartDate);
-        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
-
-        entries.push({
-            entry_number: i + 1,
-            cycle_start_date: formatDate(cycleStartDate),
-            cycle_end_date: formatDate(cycleEndDate),
-            days_in_cycle: packageDays,
-            amount: packageAmount.toFixed(2),
-            status: 'pending',
-            description: `${packageDays} days package - ${packageAmount} Rs`
-        });
-    }
-
-    return entries;
-}
-
-async function calculatePercentageEntries(driver, settings, db) {
-    const packageDays = parseInt(settings.package_days);
-    const packagePercentage = parseFloat(settings.package_percentage);
-
-    const lastSettlementDate = driver.last_settlement_date
-        ? new Date(driver.last_settlement_date)
-        : new Date(driver.created_at);
-
-    const currentDate = new Date();
-    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
-    const completedCycles = Math.floor(daysPassed / packageDays);
-
-    const entries = [];
-
-    // ✅ Add completed past cycles
-    for (let i = 0; i < completedCycles; i++) {
-        const cycleStartDate = new Date(lastSettlementDate);
-        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
-
-        const cycleEndDate = new Date(cycleStartDate);
-        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
-
-        const [bookingRows] = await db.query(`
-            SELECT SUM(total_amount) as total_rides_amount
-            FROM bookings
-            WHERE driver = ?
-            AND booking_status = 'completed'
-            AND completed_at >= ?
-            AND completed_at <= ?
-        `, [
-            driver.id,
-            formatDateTime(cycleStartDate),
-            formatDateTime(new Date(cycleEndDate.getTime() + 24 * 60 * 60 * 1000 - 1))
-        ]);
-
-        const totalRidesAmount = parseFloat(bookingRows[0]?.total_rides_amount || 0);
-        const commissionAmount = (totalRidesAmount * packagePercentage) / 100;
-
-        entries.push({
-            entry_number: i + 1,
-            cycle_start_date: formatDate(cycleStartDate),
-            cycle_end_date: formatDate(cycleEndDate),
-            days_in_cycle: packageDays,
-            total_rides_amount: totalRidesAmount.toFixed(2),
-            commission_percentage: packagePercentage,
-            amount: commissionAmount.toFixed(2),
-            status: 'pending',
-            description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides`
-        });
-    }
-
-    // ✅ NEW: Always add the current in-progress cycle
-    const currentCycleStart = new Date(lastSettlementDate);
-    currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
-
-    const currentCycleEnd = new Date(currentCycleStart);
-    currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
-
-    const [currentBookingRows] = await db.query(`
-        SELECT SUM(total_amount) as total_rides_amount
-        FROM bookings
-        WHERE driver = ?
-        AND booking_status = 'completed'
-        AND completed_at >= ?
-        AND completed_at <= ?
-    `, [
-        driver.id,
-        formatDateTime(currentCycleStart),
-        formatDateTime(new Date(currentCycleEnd.getTime() + 24 * 60 * 60 * 1000 - 1))
-    ]);
-
-    const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
-    const currentCommission = (currentRidesAmount * packagePercentage) / 100;
-
-    entries.push({
-        entry_number: completedCycles + 1,
-        cycle_start_date: formatDate(currentCycleStart),
-        cycle_end_date: formatDate(currentCycleEnd),
-        days_in_cycle: packageDays,
-        total_rides_amount: currentRidesAmount.toFixed(2),
-        commission_percentage: packagePercentage,
-        amount: currentCommission.toFixed(2),
-        status: 'in_progress',   // ← marks it as ongoing
-        description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
-    });
-
-    return entries;
-}
-
-function formatDate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-function formatDateTime(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-}
 
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
