@@ -407,15 +407,18 @@ async function calculatePostPaidEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packageAmount = parseFloat(settings.package_amount);
 
-    // ✅ FIX: package_updated_at thi start karo, created_at nahi
-    // Priority: last_settlement_date > package_updated_at > created_at
-    const packageStartDate = settings.package_updated_at
+    // ✅ FIX: Always use package_updated_at if available, otherwise use settings.updated_at
+    const packageChangedDate = settings.package_updated_at
         ? new Date(settings.package_updated_at)
-        : new Date(driver.created_at);
+        : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
 
-    const lastSettlementDate = driver.last_settlement_date
-        ? new Date(driver.last_settlement_date)
-        : packageStartDate;
+    let lastSettlementDate;
+    if (driver.last_settlement_date) {
+        const settlDate = new Date(driver.last_settlement_date);
+        lastSettlementDate = settlDate >= packageChangedDate ? settlDate : packageChangedDate;
+    } else {
+        lastSettlementDate = packageChangedDate;
+    }
 
     const currentDate = new Date();
     const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
@@ -423,11 +426,9 @@ async function calculatePostPaidEntries(driver, settings, db) {
 
     const entries = [];
 
-    // ✅ Past completed cycles — PENDING (collect thay)
     for (let i = 0; i < completedCycles; i++) {
         const cycleStartDate = new Date(lastSettlementDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
-
         const cycleEndDate = new Date(cycleStartDate);
         cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
 
@@ -442,16 +443,15 @@ async function calculatePostPaidEntries(driver, settings, db) {
         });
     }
 
-    // ✅ Current in-progress cycle — IN_PROGRESS (collect NA thay)
     const currentCycleStart = new Date(lastSettlementDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
-
     const currentCycleEnd = new Date(currentCycleStart);
     currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
 
     const daysElapsedInCycle = daysPassed % packageDays;
     const daysRemainingInCycle = packageDays - daysElapsedInCycle;
 
+    // ✅ FIX: Changed status from 'current' to 'pending' so current cycle can be collected
     entries.push({
         entry_number: completedCycles + 1,
         cycle_start_date: formatDate(currentCycleStart),
@@ -460,7 +460,7 @@ async function calculatePostPaidEntries(driver, settings, db) {
         days_elapsed: daysElapsedInCycle,
         days_remaining: daysRemainingInCycle,
         amount: packageAmount.toFixed(2),
-        status: 'in_progress',
+        status: 'pending', // ✅ Changed from 'current' to 'pending'
         description: `Current cycle - ${daysElapsedInCycle} of ${packageDays} days elapsed`
     });
 
@@ -471,9 +471,10 @@ async function calculatePercentageEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packagePercentage = parseFloat(settings.package_percentage);
 
+    // ✅ FIX: Use package_updated_at if available
     const packageStartDate = settings.package_updated_at
         ? new Date(settings.package_updated_at)
-        : new Date(driver.created_at);
+        : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
 
     const lastSettlementDate = driver.last_settlement_date
         ? new Date(driver.last_settlement_date)
@@ -546,6 +547,7 @@ async function calculatePercentageEntries(driver, settings, db) {
     const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
     const currentCommission = (currentRidesAmount * packagePercentage) / 100;
 
+    // ✅ FIX: Changed status from 'in_progress' to 'pending' so current cycle can be collected
     entries.push({
         entry_number: completedCycles + 1,
         cycle_start_date: formatDate(currentCycleStart),
@@ -556,7 +558,7 @@ async function calculatePercentageEntries(driver, settings, db) {
         total_rides_amount: currentRidesAmount.toFixed(2),
         commission_percentage: packagePercentage,
         amount: currentCommission.toFixed(2),
-        status: 'in_progress',
+        status: 'pending', // ✅ Changed from 'in_progress' to 'pending'
         description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
     });
 
@@ -579,7 +581,6 @@ function formatDateTime(date) {
     const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
-
 
 app.get("/driver/commission-entries", async (req, res) => {
     try {
@@ -707,24 +708,18 @@ app.post("/driver/collect-commission", async (req, res) => {
 
         const firstEntry = commissionEntries[0];
 
-        if (firstEntry.status === 'in_progress') {
-            return res.status(400).json({
-                success: 0,
-                message: `Current cycle is still in progress. ${firstEntry.days_remaining} days remaining.`,
-                data: {
-                    cycle_end_date: firstEntry.cycle_end_date,
-                    days_remaining: firstEntry.days_remaining,
-                    days_elapsed: firstEntry.days_elapsed
-                }
-            });
-        }
-
+        // ✅ FIX: Removed the 'in_progress' check - now all pending entries can be collected
         const collectionAmount = parseFloat(firstEntry.amount);
         const packageDays = parseInt(settings.package_days);
 
+        // ✅ FIX: Use package_updated_at if available
+        const packageChangedDate = settings.package_updated_at
+            ? new Date(settings.package_updated_at)
+            : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
+
         const oldSettlementDate = driver.last_settlement_date
             ? new Date(driver.last_settlement_date)
-            : (settings.package_updated_at ? new Date(settings.package_updated_at) : new Date(driver.created_at));
+            : packageChangedDate;
 
         const newSettlementDate = new Date(oldSettlementDate);
         newSettlementDate.setDate(newSettlementDate.getDate() + packageDays);
