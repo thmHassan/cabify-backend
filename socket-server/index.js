@@ -708,21 +708,11 @@ app.post("/driver/collect-commission", async (req, res) => {
 
         const firstEntry = commissionEntries[0];
 
-        // ✅ FIX: Removed the 'in_progress' check - now all pending entries can be collected
         const collectionAmount = parseFloat(firstEntry.amount);
-        const packageDays = parseInt(settings.package_days);
 
-        // ✅ FIX: Use package_updated_at if available
-        const packageChangedDate = settings.package_updated_at
-            ? new Date(settings.package_updated_at)
-            : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
-
-        const oldSettlementDate = driver.last_settlement_date
-            ? new Date(driver.last_settlement_date)
-            : packageChangedDate;
-
-        const newSettlementDate = new Date(oldSettlementDate);
-        newSettlementDate.setDate(newSettlementDate.getDate() + packageDays);
+        // ✅ FIX: Set last_settlement_date to the END date of the collected cycle (cycle_end_date)
+        // This ensures the collected cycle is removed from the list
+        const newSettlementDate = new Date(firstEntry.cycle_end_date + ' 23:59:59');
 
         await db.query(`
             UPDATE drivers 
@@ -756,7 +746,7 @@ app.post("/driver/collect-commission", async (req, res) => {
                     description: firstEntry.description
                 },
                 collected_amount: collectionAmount.toFixed(2),
-                previous_settlement_date: formatDate(oldSettlementDate),
+                previous_settlement_date: driver.last_settlement_date ? formatDate(new Date(driver.last_settlement_date)) : 'Not Set',
                 new_settlement_date: formatDate(newSettlementDate),
                 remaining_entries: remainingEntries.filter(e => e.status === 'pending').length,
                 remaining_amount: remainingEntries.filter(e => e.status === 'pending').reduce((sum, e) => sum + parseFloat(e.amount), 0).toFixed(2),
