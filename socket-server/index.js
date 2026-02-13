@@ -378,6 +378,356 @@ io.on("connection", (socket) => {
 //     next();
 // });
 
+app.get("/driver/commission-entries", async (req, res) => {
+    try {
+        const { driver_id } = req.query;
+
+        console.log("📊 Commission Entries Request:", { driver_id, tenantDb: req.tenantDb });
+
+        if (!driver_id) {
+            return res.status(400).json({
+                success: 0,
+                message: 'Driver ID is required'
+            });
+        }
+
+        if (!req.tenantDb) {
+            return res.status(400).json({
+                success: 0,
+                message: 'Database header is required'
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        const [settingsRows] = await db.query(
+            "SELECT * FROM company_settings ORDER BY id DESC LIMIT 1"
+        );
+
+        if (!settingsRows.length) {
+            return res.status(404).json({
+                success: 0,
+                message: 'Company settings not found'
+            });
+        }
+
+        const settings = settingsRows[0];
+
+        const [driverRows] = await db.query(
+            "SELECT * FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+
+        if (!driverRows.length) {
+            return res.status(404).json({
+                success: 0,
+                message: 'Driver not found'
+            });
+        }
+
+        const driver = driverRows[0];
+
+        let commissionEntries = [];
+
+        if (settings.package_type === 'packages_post_paid') {
+            commissionEntries = await calculatePostPaidEntries(driver, settings, db);
+        } else if (settings.package_type === 'commission_without_topup') {
+            commissionEntries = await calculatePercentageEntries(driver, settings, db);
+        } else {
+            return res.status(400).json({
+                success: 0,
+                message: 'Invalid package type'
+            });
+        }
+
+        console.log("✅ Commission Entries Success:", { entries: commissionEntries.length });
+
+        return res.json({
+            success: 1,
+            data: {
+                driver_id: driver.id,
+                driver_name: driver.name,
+                driver_wallet_balance: parseFloat(driver.wallet_balance || 0).toFixed(2),
+                package_type: settings.package_type,
+                package_days: settings.package_days,
+                package_amount: settings.package_amount,
+                package_percentage: settings.package_percentage,
+                last_settlement_date: driver.last_settlement_date,
+                total_uncollected_entries: commissionEntries.length,
+                total_uncollected_amount: commissionEntries.reduce((sum, entry) => sum + parseFloat(entry.amount), 0).toFixed(2),
+                commission_entries: commissionEntries
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error in commission-entries:', error);
+        return res.status(500).json({
+            success: 0,
+            message: error.message
+        });
+    }
+});
+
+app.post("/driver/collect-commission", async (req, res) => {
+    try {
+        const { driver_id } = req.body;
+
+        console.log("💰 Collect Commission Request:", { driver_id, tenantDb: req.tenantDb });
+
+        if (!driver_id) {
+            return res.status(400).json({
+                success: 0,
+                message: 'Driver ID is required'
+            });
+        }
+
+        if (!req.tenantDb) {
+            return res.status(400).json({
+                success: 0,
+                message: 'Database header is required'
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        const [settingsRows] = await db.query(
+            "SELECT * FROM company_settings ORDER BY id DESC LIMIT 1"
+        );
+
+        if (!settingsRows.length) {
+            return res.status(404).json({
+                success: 0,
+                message: 'Company settings not found'
+            });
+        }
+
+        const settings = settingsRows[0];
+
+        const [driverRows] = await db.query(
+            "SELECT * FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+
+        if (!driverRows.length) {
+            return res.status(404).json({
+                success: 0,
+                message: 'Driver not found'
+            });
+        }
+
+        const driver = driverRows[0];
+
+        let commissionEntries = [];
+
+        if (settings.package_type === 'packages_post_paid') {
+            commissionEntries = await calculatePostPaidEntries(driver, settings, db);
+        } else if (settings.package_type === 'commission_without_topup') {
+            commissionEntries = await calculatePercentageEntries(driver, settings, db);
+        } else {
+            return res.status(400).json({
+                success: 0,
+                message: 'Invalid package type'
+            });
+        }
+
+        if (commissionEntries.length === 0) {
+            return res.json({
+                success: 0,
+                message: 'No commission entries available to collect'
+            });
+        }
+
+        const firstEntry = commissionEntries[0];
+        const collectionAmount = parseFloat(firstEntry.amount);
+        const currentBalance = parseFloat(driver.wallet_balance || 0);
+
+        if (currentBalance < collectionAmount) {
+            return res.status(400).json({
+                success: 0,
+                message: 'Insufficient wallet balance',
+                data: {
+                    required_amount: collectionAmount.toFixed(2),
+                    current_balance: currentBalance.toFixed(2),
+                    shortage: (collectionAmount - currentBalance).toFixed(2)
+                }
+            });
+        }
+
+        const newBalance = currentBalance - collectionAmount;
+
+        const packageDays = parseInt(settings.package_days);
+        const oldSettlementDate = driver.last_settlement_date
+            ? new Date(driver.last_settlement_date)
+            : new Date(driver.created_at);
+
+        const newSettlementDate = new Date(oldSettlementDate);
+        newSettlementDate.setDate(newSettlementDate.getDate() + packageDays);
+
+        await db.query(`
+            UPDATE drivers 
+            SET wallet_balance = ?,
+                last_settlement_date = ?
+            WHERE id = ?
+        `, [newBalance, formatDateTime(newSettlementDate), driver_id]);
+
+        const [updatedDriverRows] = await db.query(
+            "SELECT * FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+
+        const updatedDriver = updatedDriverRows[0];
+
+        let remainingEntries = [];
+        if (settings.package_type === 'packages_post_paid') {
+            remainingEntries = await calculatePostPaidEntries(updatedDriver, settings, db);
+        } else if (settings.package_type === 'commission_without_topup') {
+            remainingEntries = await calculatePercentageEntries(updatedDriver, settings, db);
+        }
+
+        console.log("✅ Commission Collected Successfully:", {
+            driver_id,
+            collected: collectionAmount,
+            new_balance: newBalance
+        });
+
+        return res.json({
+            success: 1,
+            message: 'Commission collected successfully',
+            data: {
+                driver_id: driver.id,
+                driver_name: driver.name,
+                collected_entry: {
+                    entry_number: firstEntry.entry_number,
+                    cycle_start_date: firstEntry.cycle_start_date,
+                    cycle_end_date: firstEntry.cycle_end_date,
+                    amount: firstEntry.amount,
+                    description: firstEntry.description
+                },
+                previous_balance: currentBalance.toFixed(2),
+                collected_amount: collectionAmount.toFixed(2),
+                new_balance: newBalance.toFixed(2),
+                previous_settlement_date: formatDate(oldSettlementDate),
+                new_settlement_date: formatDate(newSettlementDate),
+                remaining_entries: remainingEntries.length,
+                remaining_amount: remainingEntries.reduce((sum, entry) => sum + parseFloat(entry.amount), 0).toFixed(2),
+                next_entries: remainingEntries
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error in collect-commission:', error);
+        return res.status(500).json({
+            success: 0,
+            message: error.message
+        });
+    }
+});
+
+async function calculatePostPaidEntries(driver, settings, db) {
+    const packageDays = parseInt(settings.package_days);
+    const packageAmount = parseFloat(settings.package_amount);
+
+    const lastSettlementDate = driver.last_settlement_date
+        ? new Date(driver.last_settlement_date)
+        : new Date(driver.created_at);
+
+    const currentDate = new Date();
+    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
+    const completedCycles = Math.floor(daysPassed / packageDays);
+
+    const entries = [];
+
+    for (let i = 0; i < completedCycles; i++) {
+        const cycleStartDate = new Date(lastSettlementDate);
+        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
+
+        const cycleEndDate = new Date(cycleStartDate);
+        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+
+        entries.push({
+            entry_number: i + 1,
+            cycle_start_date: formatDate(cycleStartDate),
+            cycle_end_date: formatDate(cycleEndDate),
+            days_in_cycle: packageDays,
+            amount: packageAmount.toFixed(2),
+            status: 'pending',
+            description: `${packageDays} days package - ${packageAmount} Rs`
+        });
+    }
+
+    return entries;
+}
+
+async function calculatePercentageEntries(driver, settings, db) {
+    const packageDays = parseInt(settings.package_days);
+    const packagePercentage = parseFloat(settings.package_percentage);
+
+    const lastSettlementDate = driver.last_settlement_date
+        ? new Date(driver.last_settlement_date)
+        : new Date(driver.created_at);
+
+    const currentDate = new Date();
+    const daysPassed = Math.floor((currentDate - lastSettlementDate) / (1000 * 60 * 60 * 24));
+    const completedCycles = Math.floor(daysPassed / packageDays);
+
+    const entries = [];
+
+    for (let i = 0; i < completedCycles; i++) {
+        const cycleStartDate = new Date(lastSettlementDate);
+        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
+
+        const cycleEndDate = new Date(cycleStartDate);
+        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+
+        const [bookingRows] = await db.query(`
+            SELECT SUM(total_amount) as total_rides_amount
+            FROM bookings
+            WHERE driver = ?
+            AND booking_status = 'completed'
+            AND completed_at >= ?
+            AND completed_at <= ?
+        `, [
+            driver.id,
+            formatDateTime(cycleStartDate),
+            formatDateTime(new Date(cycleEndDate.getTime() + 24 * 60 * 60 * 1000 - 1))
+        ]);
+
+        const totalRidesAmount = parseFloat(bookingRows[0]?.total_rides_amount || 0);
+        const commissionAmount = (totalRidesAmount * packagePercentage) / 100;
+
+        entries.push({
+            entry_number: i + 1,
+            cycle_start_date: formatDate(cycleStartDate),
+            cycle_end_date: formatDate(cycleEndDate),
+            days_in_cycle: packageDays,
+            total_rides_amount: totalRidesAmount.toFixed(2),
+            commission_percentage: packagePercentage,
+            amount: commissionAmount.toFixed(2),
+            status: 'pending',
+            description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides`
+        });
+    }
+
+    return entries;
+}
+
+function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
