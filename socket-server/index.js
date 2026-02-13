@@ -378,6 +378,31 @@ io.on("connection", (socket) => {
 //     next();
 // });
 
+app.use((req, res, next) => {
+    const databaseHeader = req.headers['database'];
+    if (databaseHeader) {
+        req.tenantDb = `tenant${databaseHeader}`;
+        console.log(`📂 Using database: ${req.tenantDb}`);
+    }
+    next();
+});
+
+app.use(express.json());
+
+app.use(cors({
+    origin: [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "https://clientadmin.cabifyit.com",
+        "https://admin.cabifyit.com",
+        "https://dispatcher.cabifyit.com"
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
+}));
+
 app.get("/driver/commission-entries", async (req, res) => {
     try {
         const { driver_id } = req.query;
@@ -727,31 +752,6 @@ function formatDateTime(date) {
     const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
-
-app.use((req, res, next) => {
-    const databaseHeader = req.headers['database'];
-    if (databaseHeader) {
-        req.tenantDb = `tenant${databaseHeader}`;
-        console.log(`📂 Using database: ${req.tenantDb}`);
-    }
-    next();
-});
-
-app.use(express.json());
-
-app.use(cors({
-    origin: [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "https://clientadmin.cabifyit.com",
-        "https://admin.cabifyit.com",
-        "https://dispatcher.cabifyit.com"
-    ],
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
-}));
 
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
