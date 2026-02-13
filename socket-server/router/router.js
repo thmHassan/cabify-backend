@@ -290,6 +290,100 @@ app.get("/bookings/:id/driver-location", async (req, res) => {
     }
 });
 
+// app.put("/bookings/:id/driver-response", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { driver_id, response } = req.body;
+
+//         if (!driver_id || !response) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Driver ID and response are required"
+//             });
+//         }
+
+//         if (!["accepted", "rejected"].includes(response)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Response must be accepted or rejected"
+//             });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [bookingRows] = await db.query(
+//             "SELECT id FROM bookings WHERE id = ? AND driver = ?",
+//             [id, driver_id]
+//         );
+
+//         if (bookingRows.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Booking not found or driver mismatch"
+//             });
+//         }
+
+//         if (response === "accepted") {
+
+//             await db.query(
+//                 `UPDATE bookings 
+//                  SET booking_status = 'started',
+//                      driver_response = 'accepted'
+//                  WHERE id = ?`,
+//                 [id]
+//             );
+
+//             await db.query(
+//                 "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
+//                 [driver_id]
+//             );
+
+//             io.emit("job-accepted-by-driver", {
+//                 booking_id: id,
+//                 driver_id
+//             });
+
+//             return res.json({
+//                 success: true,
+//                 message: "Job accepted successfully"
+//             });
+
+//         } else {
+
+//             await db.query(
+//                 `UPDATE bookings 
+//                  SET driver = NULL,
+//                      booking_status = 'pending',
+//                      driver_response = 'rejected'
+//                  WHERE id = ?`,
+//                 [id]
+//             );
+
+//             await db.query(
+//                 "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
+//                 [driver_id]
+//             );
+
+//             io.emit("job-rejected-by-driver", {
+//                 booking_id: id,
+//                 driver_id
+//             });
+
+//             return res.json({
+//                 success: true,
+//                 message: "Job rejected successfully"
+//             });
+//         }
+
+//     } catch (error) {
+//         console.error("Driver response error:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Something went wrong"
+//         });
+//     }
+// });
+
 // app.put("/bookings/:id/assign-driver", async (req, res) => {
 //     try {
 //         const { id } = req.params;
