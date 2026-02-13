@@ -416,17 +416,24 @@ app.get("/driver/commission-entries", async (req, res) => {
             });
         }
 
-        if (!req.tenantDb) {
+        // Try multiple header names
+        const databaseHeader = req.headers['x-database'] ||
+            req.headers['database'] ||
+            req.query.database;
+
+        if (!databaseHeader) {
             return res.status(400).json({
                 success: 0,
                 message: 'Database header is required'
             });
         }
 
-        const db = getConnection(req.tenantDb);
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
 
+        // ✅ Changed: company_settings → settings
         const [settingsRows] = await db.query(
-            "SELECT * FROM company_settings ORDER BY id DESC LIMIT 1"
+            "SELECT * FROM settings ORDER BY id DESC LIMIT 1"
         );
 
         if (!settingsRows.length) {
@@ -497,7 +504,7 @@ app.post("/driver/collect-commission", async (req, res) => {
     try {
         const { driver_id } = req.body;
 
-        console.log("💰 Collect Commission Request:", { driver_id, tenantDb: req.tenantDb });
+        console.log("💰 Collect Commission Request:", { driver_id, body: req.body });
 
         if (!driver_id) {
             return res.status(400).json({
@@ -506,17 +513,24 @@ app.post("/driver/collect-commission", async (req, res) => {
             });
         }
 
-        if (!req.tenantDb) {
+        // Try multiple header names
+        const databaseHeader = req.headers['x-database'] ||
+            req.headers['database'] ||
+            req.query.database;
+
+        if (!databaseHeader) {
             return res.status(400).json({
                 success: 0,
                 message: 'Database header is required'
             });
         }
 
-        const db = getConnection(req.tenantDb);
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
 
+        // ✅ Changed: company_settings → settings
         const [settingsRows] = await db.query(
-            "SELECT * FROM company_settings ORDER BY id DESC LIMIT 1"
+            "SELECT * FROM settings ORDER BY id DESC LIMIT 1"
         );
 
         if (!settingsRows.length) {
