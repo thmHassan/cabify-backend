@@ -374,10 +374,6 @@ io.on("connection", (socket) => {
     });
 });
 
-// app.use((req, res, next) => {
-//     next();
-// });
-
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
@@ -407,7 +403,6 @@ async function calculatePostPaidEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packageAmount = parseFloat(settings.package_amount);
 
-    // ✅ FIX: Always use package_updated_at if available, otherwise use settings.updated_at
     const packageChangedDate = settings.package_updated_at
         ? new Date(settings.package_updated_at)
         : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
@@ -422,7 +417,6 @@ async function calculatePostPaidEntries(driver, settings, db) {
 
     const currentDate = new Date();
 
-    // ✅ FIX: Calculate from the day AFTER last settlement date
     const calculationStartDate = new Date(lastSettlementDate);
     calculationStartDate.setDate(calculationStartDate.getDate() + 1);
     calculationStartDate.setHours(0, 0, 0, 0);
@@ -432,7 +426,6 @@ async function calculatePostPaidEntries(driver, settings, db) {
 
     const entries = [];
 
-    // Only create entries for completed cycles (not including current)
     for (let i = 0; i < completedCycles; i++) {
         const cycleStartDate = new Date(calculationStartDate);
         cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
@@ -450,7 +443,6 @@ async function calculatePostPaidEntries(driver, settings, db) {
         });
     }
 
-    // Add current ongoing cycle
     const currentCycleStart = new Date(calculationStartDate);
     currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
     const currentCycleEnd = new Date(currentCycleStart);
@@ -459,7 +451,6 @@ async function calculatePostPaidEntries(driver, settings, db) {
     const daysElapsedInCycle = daysPassed % packageDays;
     const daysRemainingInCycle = packageDays - daysElapsedInCycle;
 
-    // ✅ FIX: Changed status from 'current' to 'pending' so current cycle can be collected
     entries.push({
         entry_number: completedCycles + 1,
         cycle_start_date: formatDate(currentCycleStart),
@@ -468,7 +459,7 @@ async function calculatePostPaidEntries(driver, settings, db) {
         days_elapsed: daysElapsedInCycle,
         days_remaining: daysRemainingInCycle,
         amount: packageAmount.toFixed(2),
-        status: 'pending', // ✅ Changed from 'current' to 'pending'
+        status: 'pending',
         description: `Current cycle - ${daysElapsedInCycle} of ${packageDays} days elapsed`
     });
 
@@ -479,7 +470,6 @@ async function calculatePercentageEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packagePercentage = parseFloat(settings.package_percentage);
 
-    // ✅ FIX: Use package_updated_at if available
     const packageStartDate = settings.package_updated_at
         ? new Date(settings.package_updated_at)
         : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
@@ -560,7 +550,6 @@ async function calculatePercentageEntries(driver, settings, db) {
     const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
     const currentCommission = (currentRidesAmount * packagePercentage) / 100;
 
-    // ✅ FIX: Changed status from 'in_progress' to 'pending' so current cycle can be collected
     entries.push({
         entry_number: completedCycles + 1,
         cycle_start_date: formatDate(currentCycleStart),
@@ -571,7 +560,7 @@ async function calculatePercentageEntries(driver, settings, db) {
         total_rides_amount: currentRidesAmount.toFixed(2),
         commission_percentage: packagePercentage,
         amount: currentCommission.toFixed(2),
-        status: 'pending', 
+        status: 'pending',
         description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
     });
 
@@ -599,7 +588,7 @@ app.get("/driver/commission-entries", async (req, res) => {
     try {
         const { driver_id, page = 1, limit = 10 } = req.query;
 
-        console.log("📊 Commission Entries Request:", { driver_id, page, limit });
+        console.log("Commission Entries Request:", { driver_id, page, limit });
 
         if (!driver_id) {
             return res.status(400).json({ success: 0, message: 'Driver ID is required' });
@@ -643,7 +632,7 @@ app.get("/driver/commission-entries", async (req, res) => {
 
         const pendingEntries = allEntries.filter(e => e.status === 'pending');
 
-        console.log("✅ Commission Entries Success:", { total: totalEntries, page: pageNum });
+        console.log("Commission Entries Success:", { total: totalEntries, page: pageNum });
 
         return res.json({
             success: 1,
@@ -671,7 +660,7 @@ app.get("/driver/commission-entries", async (req, res) => {
         });
 
     } catch (error) {
-        console.error('❌ Error in commission-entries:', error);
+        console.error('Error in commission-entries:', error);
         return res.status(500).json({ success: 0, message: error.message });
     }
 });
@@ -722,9 +711,6 @@ app.post("/driver/collect-commission", async (req, res) => {
         const firstEntry = commissionEntries[0];
 
         const collectionAmount = parseFloat(firstEntry.amount);
-
-        // ✅ FIX: Set last_settlement_date to the END date of the collected cycle (cycle_end_date)
-        // This ensures the collected cycle is removed from the list
         const newSettlementDate = new Date(firstEntry.cycle_end_date + ' 23:59:59');
 
         await db.query(`
@@ -743,7 +729,7 @@ app.post("/driver/collect-commission", async (req, res) => {
             remainingEntries = await calculatePercentageEntries(updatedDriver, settings, db);
         }
 
-        console.log("✅ Commission Collected Successfully:", { driver_id, collected: collectionAmount });
+        console.log("Commission Collected Successfully:", { driver_id, collected: collectionAmount });
 
         return res.json({
             success: 1,
@@ -768,7 +754,7 @@ app.post("/driver/collect-commission", async (req, res) => {
         });
 
     } catch (error) {
-        console.error('❌ Error in collect-commission:', error);
+        console.error('Error in collect-commission:', error);
         return res.status(500).json({ success: 0, message: error.message });
     }
 });
@@ -853,7 +839,6 @@ app.get("/bookings", async (req, res) => {
         `;
         const params = [];
 
-        // Dashboard card filters
         if (filter) {
             switch (filter) {
                 case 'todays_booking':
@@ -931,7 +916,6 @@ app.get("/bookings", async (req, res) => {
 
         const [bookings] = await db.query(dataQuery, [...params, limitNum, offset]);
 
-        // Format the response to include nested objects
         const formattedBookings = bookings.map(booking => {
             const {
                 driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
@@ -962,7 +946,6 @@ app.get("/bookings", async (req, res) => {
             };
         });
 
-        // Count query
         const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
         const [[{ total }]] = await db.query(countQuery, params);
 
@@ -1031,7 +1014,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        // Check booking
         const [bookingRows] = await db.query(
             "SELECT id, booking_status FROM bookings WHERE id = ?",
             [id]
@@ -1044,7 +1026,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
-        // Check driver
         const [driverRows] = await db.query(
             "SELECT id, driving_status FROM drivers WHERE id = ?",
             [driver_id]
@@ -1057,7 +1038,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
-        // Assign driver (status remains pending)
         await db.query(
             `UPDATE bookings 
              SET driver = ?, 
@@ -1066,7 +1046,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             [driver_id, id]
         );
 
-        // Notify driver
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
             io.to(driverSocketId).emit("job-assignment-request", {
@@ -1082,100 +1061,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
     } catch (error) {
         console.error("Assign driver error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Something went wrong"
-        });
-    }
-});
-
-app.put("/bookings/:id/driver-response", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { driver_id, response } = req.body;
-
-        if (!driver_id || !response) {
-            return res.status(400).json({
-                success: false,
-                message: "Driver ID and response are required"
-            });
-        }
-
-        if (!["accepted", "rejected"].includes(response)) {
-            return res.status(400).json({
-                success: false,
-                message: "Response must be accepted or rejected"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const [bookingRows] = await db.query(
-            "SELECT id FROM bookings WHERE id = ? AND driver = ?",
-            [id, driver_id]
-        );
-
-        if (bookingRows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found or driver mismatch"
-            });
-        }
-
-        if (response === "accepted") {
-
-            await db.query(
-                `UPDATE bookings 
-                 SET booking_status = 'started',
-                     driver_response = 'accepted'
-                 WHERE id = ?`,
-                [id]
-            );
-
-            await db.query(
-                "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
-                [driver_id]
-            );
-
-            io.emit("job-accepted-by-driver", {
-                booking_id: id,
-                driver_id
-            });
-
-            return res.json({
-                success: true,
-                message: "Job accepted successfully"
-            });
-
-        } else {
-
-            await db.query(
-                `UPDATE bookings 
-                 SET driver = NULL,
-                     booking_status = 'pending',
-                     driver_response = 'rejected'
-                 WHERE id = ?`,
-                [id]
-            );
-
-            await db.query(
-                "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
-                [driver_id]
-            );
-
-            io.emit("job-rejected-by-driver", {
-                booking_id: id,
-                driver_id
-            });
-
-            return res.json({
-                success: true,
-                message: "Job rejected successfully"
-            });
-        }
-
-    } catch (error) {
-        console.error("Driver response error:", error);
         return res.status(500).json({
             success: false,
             message: "Something went wrong"
@@ -1431,10 +1316,9 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
             html: emailHtml
         };
 
-        // Send email
         const info = await transporter.sendMail(mailOptions);
 
-        console.log(`✅ Email sent successfully to ${booking.email}`);
+        console.log(`Email sent successfully to ${booking.email}`);
         console.log('Message ID:', info.messageId);
 
         return res.json({
@@ -1570,7 +1454,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             } : null
         };
 
-        // Emit socket events based on status change
         if (booking.user_id) {
             const userSocketId = userSockets.get(booking.user_id.toString());
             if (userSocketId) {
@@ -1591,7 +1474,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // Broadcast dashboard cards update after status change
         await broadcastDashboardCardsUpdate(req.tenantDb);
 
         return res.json({
@@ -1707,7 +1589,7 @@ app.post("/bookings/broadcast", async (req, res) => {
 
         const finalDb = `${DB_PREFIX}${tenantDb}`;
 
-        console.log("📂 Using DB:", finalDb);
+        console.log("Using DB:", finalDb);
 
         const db = getConnection(finalDb);
 
@@ -1727,11 +1609,6 @@ app.post("/bookings/broadcast", async (req, res) => {
         const booking = rows[0];
         let sentCount = 0;
 
-        console.log("📢 Broadcasting booking:", booking.id);
-        console.log("Dispatchers:", dispatcherSockets.size);
-        console.log("Admins:", adminSockets.size);
-        console.log("Clients:", clientSockets.size);
-
         dispatcherSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
             sentCount++;
@@ -1747,7 +1624,6 @@ app.post("/bookings/broadcast", async (req, res) => {
             sentCount++;
         });
 
-        // Broadcast dashboard cards update after new booking
         await broadcastDashboardCardsUpdate(finalDb);
 
         return res.json({
@@ -1757,7 +1633,7 @@ app.post("/bookings/broadcast", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("❌ Broadcast error:", error);
+        console.error("Broadcast error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
