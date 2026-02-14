@@ -23,8 +23,9 @@ class PlotController extends Controller
             $plot->save();
 
             $settings = CompanySetting::orderBy("id", "DESC")->first();
-            if (isset($settings) && $settings != NULL) {
+            if ($settings) {
                 $settings->maps_api_count = ($settings->maps_api_count ?? 0) + 1;
+                $settings->last_use_map_api = \Carbon\Carbon::now();
                 $settings->save();
             }
 
