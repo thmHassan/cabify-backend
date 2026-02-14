@@ -353,6 +353,35 @@ io.on("connection", (socket) => {
         }
     });
 
+     socket.on("get-driver-location", async (data) => {
+        try {
+            var dataArray;
+            if (typeof data === "string") {
+                dataArray = JSON.parse(data);
+            } else {
+                dataArray = data;
+            }
+            const response = await axios.post(
+                "https://backend.cabifyit.com/api/driver/get-location",
+                dataArray,
+                {
+                    headers: {
+                        database: `tenant${dataArray.database}`,
+                    }
+                }
+            );
+
+            const location = response.data;
+
+            socket.emit("get-driver-location-on-user", {
+                success: true,
+                data: location,
+            });
+        } catch (err) {
+            console.error("Laravel Socket error", err);
+        }
+    });
+
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());
@@ -1656,6 +1685,23 @@ app.post("/send-new-ride", (req, res) => {
         sent_to: sentCount
     });
 });
+
+app.post("/change-cancel-ride", (req, res) => {
+    const { drivers, status, booking } = req.body;
+    let sentCount = 0;
+    drivers.forEach(driverId => {
+        const socketId = driverSockets.get(driverId.toString());
+        if (socketId) {
+            io.to(socketId).emit("driver-ride-status-event", {status, booking});
+            sentCount++;
+        }
+    });
+    return res.json({
+        success: true,
+        sent_to: sentCount
+    });
+});
+
 
 app.post("/send-new-booking", (req, res) => {
     const { dispatchers, booking } = req.body;
