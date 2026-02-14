@@ -289,6 +289,89 @@ app.get("/bookings/:id/driver-location", async (req, res) => {
         });
     }
 });
+app.get("/wallet/transactions", async (req, res) => {
+    try {
+        const { user_id, user_type, page = 1, limit = 10, type } = req.query;
+
+        console.log("Wallet Transactions Request:", { user_id, user_type, page, limit });
+
+        if (!user_id) {
+            return res.status(400).json({ success: 0, message: 'user_id is required' });
+        }
+
+        if (!user_type) {
+            return res.status(400).json({ success: 0, message: 'user_type is required (driver/user/etc)' });
+        }
+
+        const databaseHeader = req.headers['x-database'] || req.headers['database'] || req.query.database;
+        if (!databaseHeader) {
+            return res.status(400).json({ success: 0, message: 'Database header is required' });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const pageNum = Math.max(parseInt(page) || 1, 1);
+        const limitNum = Math.max(parseInt(limit) || 10, 1);
+        const offset = (pageNum - 1) * limitNum;
+
+        let whereClause = 'WHERE user_id = ? AND user_type = ?';
+        const params = [user_id, user_type];
+
+        if (type) {
+            whereClause += ' AND type = ?';
+            params.push(type);
+        }
+
+        const countQuery = `SELECT COUNT(*) as total FROM wallet_transactions ${whereClause}`;
+        const [[{ total }]] = await db.query(countQuery, params);
+
+        const dataQuery = `
+            SELECT * FROM wallet_transactions 
+            ${whereClause}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+        const [transactions] = await db.query(dataQuery, [...params, limitNum, offset]);
+
+        const balanceQuery = `
+            SELECT 
+                COALESCE(SUM(CASE WHEN type = 'add' THEN amount ELSE 0 END), 0) as total_added,
+                COALESCE(SUM(CASE WHEN type = 'deduct' THEN amount ELSE 0 END), 0) as total_deducted
+            FROM wallet_transactions 
+            WHERE user_id = ? AND user_type = ?
+        `;
+        const [[balance]] = await db.query(balanceQuery, [user_id, user_type]);
+
+        const currentBalance = parseFloat(balance.total_added) - parseFloat(balance.total_deducted);
+
+        console.log("Wallet Transactions Success:", { total, page: pageNum });
+
+        return res.json({
+            success: 1,
+            data: {
+                user_id: parseInt(user_id),
+                user_type,
+                current_balance: currentBalance.toFixed(2),
+                total_added: parseFloat(balance.total_added).toFixed(2),
+                total_deducted: parseFloat(balance.total_deducted).toFixed(2),
+                transactions,
+                pagination: {
+                    total,
+                    page: pageNum,
+                    limit: limitNum,
+                    total_pages: Math.ceil(total / limitNum),
+                    hasNext: pageNum * limitNum < total,
+                    hasPrev: pageNum > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in wallet transactions:', error);
+        return res.status(500).json({ success: 0, message: error.message });
+    }
+})
 
 // app.put("/bookings/:id/driver-response", async (req, res) => {
 //     try {
