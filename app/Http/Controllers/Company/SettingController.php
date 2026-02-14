@@ -818,7 +818,7 @@ class SettingController extends Controller
             \DB::reconnect('tenant_temp');
 
             $settings = \DB::connection('tenant_temp')
-                ->table('company_settings')
+                ->table('settings')
                 ->orderBy('id', 'DESC')
                 ->first();
 
