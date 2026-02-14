@@ -795,13 +795,20 @@ class SettingController extends Controller
     public function getMapsApiCount(Request $request)
     {
         try {
-            $settings = CompanySetting::orderBy("id", "DESC")->first();
+            $request->validate([
+                'company_id' => 'required',
+            ]);
+
+            $settings = \DB::connection($request->company_id)
+                ->table('company_settings')
+                ->orderBy("id", "DESC")
+                ->first();
 
             return response()->json([
                 'success' => 1,
                 'maps_api_count' => $settings->maps_api_count ?? 0,
                 'last_used' => $settings->last_use_map_api
-                    ? \Carbon\Carbon::parse($settings->last_use_map_api)->format('d M Y, h:i A')
+                    ? Carbon::parse($settings->last_use_map_api)->format('d M Y, h:i A')
                     : 'Never',
             ]);
         } catch (\Exception $e) {
