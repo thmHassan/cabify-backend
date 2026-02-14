@@ -799,9 +799,27 @@ class SettingController extends Controller
                 'company_id' => 'required',
             ]);
 
-            $settings = \DB::connection($request->company_id)
+            $dbName = 'tenant' . $request->company_id;
+
+            \Config::set('database.connections.tenant_temp', [
+                'driver' => 'mysql',
+                'host' => env('DB_HOST', '127.0.0.1'),
+                'port' => env('DB_PORT', '3306'),
+                'database' => $dbName,
+                'username' => env('DB_USERNAME', 'root'),
+                'password' => env('DB_PASSWORD', ''),
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'strict' => false,
+            ]);
+
+            \DB::purge('tenant_temp');
+            \DB::reconnect('tenant_temp');
+
+            $settings = \DB::connection('tenant_temp')
                 ->table('company_settings')
-                ->orderBy("id", "DESC")
+                ->orderBy('id', 'DESC')
                 ->first();
 
             return response()->json([
