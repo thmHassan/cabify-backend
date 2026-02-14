@@ -156,7 +156,7 @@ class BookingController extends Controller
             ]);
 
             $existBid = CompanyBid::where('booking_id', $request->booking_id)
-            ->where('driver_id', $driver->id)
+            ->where('driver_id', auth("driver")->user()->id)
             ->exists();
 
             if($existBid){
