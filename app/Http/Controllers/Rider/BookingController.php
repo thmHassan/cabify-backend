@@ -757,6 +757,9 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
+            else{
+                $query->whereDate("booking_date", ">=", date("Y-m-d"));
+            }
             $pendingRides = $query->with(['userDetail', 'driverDetail','ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([

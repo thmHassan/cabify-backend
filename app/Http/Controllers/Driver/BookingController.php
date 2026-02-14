@@ -418,8 +418,24 @@ class BookingController extends Controller
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/driver/accept-ride', [
-                        'ride_id' => $booking->id,
-                    ]);
+                'ride_id' => $booking->id,
+            ]);
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                'userId' => $booking->user_id,
+                'status' => "accept_ride",
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'destination_point' => $booking->destination_point,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'booking_status' => $booking->booking_status
+                ]
+            ]);
 
             $dataCheck = (new TenantUser)
                 ->setConnection('central')
