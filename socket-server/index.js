@@ -366,7 +366,7 @@ io.on("connection", (socket) => {
                 dataArray,
                 {
                     headers: {
-                        database: `tenant${dataArray.database}`,
+                        database: `${dataArray.database}`,
                     }
                 }
             );
