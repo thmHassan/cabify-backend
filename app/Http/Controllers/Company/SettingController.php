@@ -12,8 +12,8 @@ use App\Models\UserSubscription;
 use App\Models\MobileAppSetting;
 use App\Models\PackageSetting;
 use Hash;
-use App\Models\CompanyUser; 
-use App\Models\CompanyDriver; 
+use App\Models\CompanyUser;
+use App\Models\CompanyDriver;
 use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyBooking;
@@ -21,17 +21,18 @@ use Carbon\Carbon;
 
 class SettingController extends Controller
 {
-    public function getCompanyProfile(Request $request){
-        try{
+    public function getCompanyProfile(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
             $data = $settings;
-            
-            if(!isset($settings) || $settings == NULL){
+
+            if (!isset($settings) || $settings == NULL) {
                 $settings = (new TenantUser)
-                ->setConnection('central')
-                ->where("id", $request->header('database'))
-                ->first();
-                
+                    ->setConnection('central')
+                    ->where("id", $request->header('database'))
+                    ->first();
+
                 $data['company_name'] = $settings->data['company_name'];
                 $data['company_email'] = $settings->data['email'];
                 $data['company_phone_no'] = $settings->data['phone'];
@@ -45,8 +46,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'data' => $data
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -54,8 +54,9 @@ class SettingController extends Controller
         }
     }
 
-    public function saveCompanyProfile(Request $request){
-        try{
+    public function saveCompanyProfile(Request $request)
+    {
+        try {
             $request->validate([
                 'company_name' => 'required|max:255',
                 'company_email' => 'required|max:255',
@@ -67,10 +68,10 @@ class SettingController extends Controller
                 'support_emergency_no' => 'required|max:255',
                 'support_rescue_number' => 'required|max:255',
             ]);
-            
+
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($settings) || $settings == NULL){
+            if (!isset($settings) || $settings == NULL) {
                 $settings = new CompanySetting;
             }
 
@@ -85,13 +86,12 @@ class SettingController extends Controller
             $settings->support_emergency_no = $request->support_emergency_no;
             $settings->support_rescue_number = $request->support_rescue_number;
             $settings->save();
-            
+
             return response()->json([
                 'success' => 1,
                 'message' => "Company profile updated successfully"
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -99,8 +99,9 @@ class SettingController extends Controller
         }
     }
 
-    public function updatePassword(Request $request){
-        try{
+    public function updatePassword(Request $request)
+    {
+        try {
             $request->validate([
                 'current_password' => 'required',
                 'new_password' => 'required',
@@ -110,19 +111,19 @@ class SettingController extends Controller
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
                 ->first();
-            
-            if(!Hash::check($request->current_password, $settings->data['password'])){
+
+            if (!Hash::check($request->current_password, $settings->data['password'])) {
                 return response()->json([
                     'error' => 1,
                     'message' => "Current password is mismatched"
                 ]);
             }
-            
+
             $data = (new Tenant)
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
                 ->first();
-            
+
             $data->password = Hash::make($request->new_password);
             $data->save();
 
@@ -130,8 +131,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Password updated successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -139,15 +139,16 @@ class SettingController extends Controller
         }
     }
 
-    public function updateMobileSetting(Request $request){
-        try{
+    public function updateMobileSetting(Request $request)
+    {
+        try {
             $request->validate([
                 'keys' => 'required',
             ]);
-            
-            foreach($request->keys as $key => $value){
+
+            foreach ($request->keys as $key => $value) {
                 $data = MobileAppSetting::where("key", $key)->first();
-                if(!isset($data) || $data == NULL){
+                if (!isset($data) || $data == NULL) {
                     $data = new MobileAppSetting;
                     $data->key = $key;
                 }
@@ -159,8 +160,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Mobile App settings updated successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -168,16 +168,16 @@ class SettingController extends Controller
         }
     }
 
-    public function getMobileSetting(Request $request){
-        try{
+    public function getMobileSetting(Request $request)
+    {
+        try {
             $settings = MobileAppSetting::get();
 
             return response()->json([
                 'success' => 1,
                 'setting' => $settings
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -185,11 +185,12 @@ class SettingController extends Controller
         }
     }
 
-    public function saveMainCommission(Request $request){
-        try{
+    public function saveMainCommission(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($settings) || $settings == NULL){
+            if (!isset($settings) || $settings == NULL) {
                 $settings = new CompanySetting;
             }
 
@@ -205,8 +206,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Commission settings saved successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -214,8 +214,9 @@ class SettingController extends Controller
         }
     }
 
-    public function savePackageTopup(Request $request){
-        try{
+    public function savePackageTopup(Request $request)
+    {
+        try {
             $request->validate([
                 'package_name' => 'required',
                 'package_type' => 'required',
@@ -233,8 +234,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Package Topup saved successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -242,8 +242,9 @@ class SettingController extends Controller
         }
     }
 
-    public function editPackageTopup(Request $request){
-        try{
+    public function editPackageTopup(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required',
                 'package_name' => 'required',
@@ -262,8 +263,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Package Topup updated successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -271,8 +271,9 @@ class SettingController extends Controller
         }
     }
 
-    public function getCommissionData(Request $request){
-        try{
+    public function getCommissionData(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
             $data['package_type'] = $settings->package_type;
@@ -283,16 +284,15 @@ class SettingController extends Controller
             $data['waiting_time_charge'] = $settings->waiting_time_charge;
 
             $packageTopups = PackageSetting::orderBy("id", "DESC")->get();
-            
+
             return response()->json([
                 'success' => 1,
                 'data' => [
                     'main_commission' => (object) $data,
                     'packageTopups' => $packageTopups
                 ]
-                ]);
-        }
-        catch(Exception $e){
+            ]);
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -300,11 +300,12 @@ class SettingController extends Controller
         }
     }
 
-    public function deletePackageTopup(Request $request){
-        try{
+    public function deletePackageTopup(Request $request)
+    {
+        try {
             $packageTopup = PackageSetting::where("id", $request->id)->first();
 
-            if(isset($packageTopup) && $packageTopup != NULL){
+            if (isset($packageTopup) && $packageTopup != NULL) {
                 $packageTopup->delete();
             }
 
@@ -312,8 +313,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Package popup deleted successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -321,8 +321,9 @@ class SettingController extends Controller
         }
     }
 
-    public function planDetail(Request $request){
-        try{
+    public function planDetail(Request $request)
+    {
+        try {
             $user = (new TenantUser)
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
@@ -330,15 +331,14 @@ class SettingController extends Controller
 
             $subscriptionData = (new Subscription)
                 ->setConnection('central')
-                ->where("id",$user->data['subscription_type'])
+                ->where("id", $user->data['subscription_type'])
                 ->first();
 
             return response()->json([
                 'success' => 1,
                 'planDetail' => $subscriptionData
             ]);
-        }   
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -346,11 +346,12 @@ class SettingController extends Controller
         }
     }
 
-    public function paymentHistory(Request $request){
-        try{
+    public function paymentHistory(Request $request)
+    {
+        try {
             $transactionHistory = (new UserSubscription)
                 ->setConnection('central')
-                ->where("user_id",$request->header('database'))
+                ->where("user_id", $request->header('database'))
                 ->orderBy("id", "DESC")
                 ->get();
 
@@ -358,8 +359,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'history' => $transactionHistory
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -367,16 +367,16 @@ class SettingController extends Controller
         }
     }
 
-    public function stripeInformation(Request $request){
-        try{
+    public function stripeInformation(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
             return response()->json([
                 'success' => 1,
                 'settings' => $settings
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -384,11 +384,12 @@ class SettingController extends Controller
         }
     }
 
-    public function saveStripeInformation(Request $request){
-        try{
+    public function saveStripeInformation(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($settings) || $settings == NULL){
+            if (!isset($settings) || $settings == NULL) {
                 $settings = new CompanySetting;
             }
             $settings->stripe_payment = $request->stripe_payment;
@@ -404,8 +405,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Stripe information saved successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -413,16 +413,16 @@ class SettingController extends Controller
         }
     }
 
-    public function thirdPartyInformation(Request $request){
-        try{
+    public function thirdPartyInformation(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
             return response()->json([
                 'success' => 1,
                 'settings' => $settings
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -430,11 +430,12 @@ class SettingController extends Controller
         }
     }
 
-    public function saveThirdPartyInformation(Request $request){
-        try{
+    public function saveThirdPartyInformation(Request $request)
+    {
+        try {
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($settings) || $settings == NULL){
+            if (!isset($settings) || $settings == NULL) {
                 $settings = new CompanySetting;
             }
             $settings->google_api_keys = $request->google_api_keys;
@@ -451,8 +452,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Third party information saved successfully'
             ]);
-        }
-        catch(Exception $e){
+        } catch (Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -460,23 +460,21 @@ class SettingController extends Controller
         }
     }
 
-    public function sendNotification(Request $request){
-        try{
-            if($request->user_type == "users"){
+    public function sendNotification(Request $request)
+    {
+        try {
+            if ($request->user_type == "users") {
                 $users = CompanyUser::whereNotNUll("device_token")->get();
-            }
-            else{
+            } else {
                 $query = CompanyDriver::whereNotNUll("device_token");
-                if($request->user_type == "pending_drivers"){
-                        $query->where("status", "pending");
+                if ($request->user_type == "pending_drivers") {
+                    $query->where("status", "pending");
+                } else if ($request->user_type == "approved_drivers") {
+                    $query->where("status", "accepted");
+                } else if ($request->user_type == "rejected_drivers") {
+                    $query->where("status", "rejected");
                 }
-                else if($request->user_type == "approved_drivers"){
-                        $query->where("status", "accepted");
-                }
-                else if($request->user_type == "rejected_drivers"){
-                        $query->where("status", "rejected");
-                }   
-                if($request->vehicle_id != NULL){
+                if ($request->vehicle_id != NULL) {
                     $query->where('vehicle_type', $request->vehicle_id);
                 }
                 $users = $query->get();
@@ -491,8 +489,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => "Notification process started successfully"
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -500,11 +497,12 @@ class SettingController extends Controller
         }
     }
 
-    public function saveAppContent(Request $request){
-        try{
+    public function saveAppContent(Request $request)
+    {
+        try {
             $setting = CompanySetting::orderBy("id", "DESC")->first();
 
-            if(!isset($setting) || $setting == NULL){
+            if (!isset($setting) || $setting == NULL) {
                 $setting = new CompanySetting;
             }
             $setting->terms_conditions = $request->terms_conditions;
@@ -516,8 +514,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'App sontent saved successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -525,16 +522,16 @@ class SettingController extends Controller
         }
     }
 
-    public function getAppContent(Request $request){
-        try{
+    public function getAppContent(Request $request)
+    {
+        try {
             $setting = CompanySetting::orderBy("id", "DESC")->first();
 
             return response()->json([
                 'success' => 1,
                 'data' => $setting
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -542,8 +539,9 @@ class SettingController extends Controller
         }
     }
 
-    public function getCompanyBookingSystem(){
-        try{
+    public function getCompanyBookingSystem()
+    {
+        try {
             $setting = CompanySetting::orderBy("id", "DESC")->first();
 
             $company_booking_system = $setting->company_booking_system;
@@ -554,8 +552,7 @@ class SettingController extends Controller
                 'company_booking_system' => $company_booking_system,
                 'company_admin_dispatch_sytem' => $company_admin_dispatch_sytem,
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -563,8 +560,9 @@ class SettingController extends Controller
         }
     }
 
-    public function updateCompanyBookingSystem(Request $request){
-        try{
+    public function updateCompanyBookingSystem(Request $request)
+    {
+        try {
             $setting = CompanySetting::orderBy("id", "DESC")->first();
             $setting->company_booking_system = $request->company_booking_system;
             $setting->save();
@@ -573,8 +571,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => "Booking system updated successfully"
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -641,7 +638,7 @@ class SettingController extends Controller
                     CompanyDispatchSystem::where('dispatch_system', $dispatchSystem)
                         ->where('steps', $step)
                         ->update([
-                            'status'   => $request->$dispatchSystem[$step],
+                            'status' => $request->$dispatchSystem[$step],
                             'priority' => $priority,
                         ]);
                 }
@@ -650,7 +647,7 @@ class SettingController extends Controller
             if ($request->has('manual_dispatch_only')) {
                 CompanyDispatchSystem::where('dispatch_system', 'manual_dispatch_only')
                     ->update([
-                        'status'   => $request->manual_dispatch_only['status'],
+                        'status' => $request->manual_dispatch_only['status'],
                         'priority' => $request->manual_dispatch_only['priority'],
                     ]);
             }
@@ -668,16 +665,16 @@ class SettingController extends Controller
         }
     }
 
-    public function getDispatchSystem(Request $request){
-        try{
+    public function getDispatchSystem(Request $request)
+    {
+        try {
             $data = CompanyDispatchSystem::orderBy("id", "ASC")->get();
 
             return response()->json([
                 'success' => 1,
                 'data' => $data
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -685,13 +682,14 @@ class SettingController extends Controller
         }
     }
 
-    public function matchPassword(Request $request){
-        try{
+    public function matchPassword(Request $request)
+    {
+        try {
             $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
 
             $password = json_decode($data->data)->password;
-            
-            if(!Hash::check($request->password, $password)){
+
+            if (!Hash::check($request->password, $password)) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Invalid Password'
@@ -701,8 +699,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Password match successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -710,19 +707,20 @@ class SettingController extends Controller
         }
     }
 
-    public function dashboard(Request $request){
-        try{
-            $activeRides = CompanyBooking::where(function($q){
-                            $q->where("booking_status", 'arrived')
-                              ->orWhere("booking_status", 'started')
-                              ->orWhere("booking_status", 'ongoing');
-                        })
-                        ->whereDate("booking_date", date("Y-m-d"))->count();
+    public function dashboard(Request $request)
+    {
+        try {
+            $activeRides = CompanyBooking::where(function ($q) {
+                $q->where("booking_status", 'arrived')
+                    ->orWhere("booking_status", 'started')
+                    ->orWhere("booking_status", 'ongoing');
+            })
+                ->whereDate("booking_date", date("Y-m-d"))->count();
             $cancelRides = CompanyBooking::where("booking_status", "cancelled")->whereDate("booking_date", date("Y-m-d"))->count();
             $waitingRides = CompanyBooking::where("booking_status", "pending")->whereDate("booking_date", date("Y-m-d"))->count();
-            
+
             $totalBookings = CompanyBooking::count();
-            $scheduledBookings = CompanyBooking::where("booking_status", "pending")->whereDate("booking_date", ">",date("Y-m-d"))->count();
+            $scheduledBookings = CompanyBooking::where("booking_status", "pending")->whereDate("booking_date", ">", date("Y-m-d"))->count();
             $completedRides = CompanyBooking::where("booking_status", "completed")->count();
             $totalCancelRides = CompanyBooking::where("booking_status", "cancelled")->count();
 
@@ -745,8 +743,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'data' => $data
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -754,21 +751,22 @@ class SettingController extends Controller
         }
     }
 
-    public function systemAlert(Request $request){
-        try{
+    public function systemAlert(Request $request)
+    {
+        try {
             $data = (new TenantUser)
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
-                ->first();   
+                ->first();
 
-            $expiryDate = Carbon::parse($data->data['expiry_date']); 
+            $expiryDate = Carbon::parse($data->data['expiry_date']);
             $daysLeft = now()->diffInDays($expiryDate, false);
 
             $cancelledRide = CompanyBooking::where("booking_status", "cancelled")->whereDate("booking_date", date("Y-m-d"))->count();
 
             $alerts = [];
             $i = 0;
-            if($daysLeft <= 10){
+            if ($daysLeft <= 10) {
                 $alerts[$i]['title'] = "Subscription Expiry Alert";
                 $alerts[$i]['description'] = "Your Subscription is going to expire in $daysLeft days.";
                 $i++;
@@ -787,12 +785,27 @@ class SettingController extends Controller
                 'success' => 1,
                 'alerts' => $alerts
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+    public function getMapsApiCount(Request $request)
+    {
+        try {
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+
+            return response()->json([
+                'success' => 1,
+                'maps_api_count' => $settings->maps_api_count ?? 0
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 }

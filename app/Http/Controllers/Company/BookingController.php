@@ -17,8 +17,9 @@ use Illuminate\Support\Facades\Http;
 
 class BookingController extends Controller
 {
-    public function getPlot(Request $request){
-        try{
+    public function getPlot(Request $request)
+    {
+        try {
             $request->validate([
                 'latitude' => 'required',
                 'longitude' => 'required',
@@ -42,8 +43,7 @@ class BookingController extends Controller
                 'found' => $matched ? 1 : 0,
                 'record' => $matched
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -84,13 +84,15 @@ class BookingController extends Controller
             $intersect = (($yi > $y) != ($yj > $y)) &&
                 ($x < ($xj - $xi) * ($y - $yi) / ($yj - $yi) + $xi);
 
-            if ($intersect) $inside = !$inside;
+            if ($intersect)
+                $inside = !$inside;
         }
         return $inside;
     }
 
-    public function createBooking(Request $request){
-        try{
+    public function createBooking(Request $request)
+    {
+        try {
             $request->validate([
                 'multi_booking' => 'required',
                 'pickup_time' => 'required',
@@ -116,27 +118,27 @@ class BookingController extends Controller
             $nearBooking = 0;
             $alertMessage = NULL;
 
-            if(isset($request->multi_booking) && $request->multi_booking == "yes"){
+            if (isset($request->multi_booking) && $request->multi_booking == "yes") {
                 $dayArray = array_map('trim', explode(',', $request->multi_days));
                 $startDate = Carbon::parse($request->start_at);
-                $endDate   = Carbon::parse($request->end_at);
+                $endDate = Carbon::parse($request->end_at);
                 for ($date = $startDate; $date->lte($endDate); $date->addDay()) {
-                    
+
                     if (in_array($date->format('D'), $dayArray)) {
 
-                        if(isset($request->driver) && $request->driver != NULL && $alertMessage == NULL){
+                        if (isset($request->driver) && $request->driver != NULL && $alertMessage == NULL) {
                             $bookingTime = Carbon::parse($request->pickup_time);
                             $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
-                            $endTime   = $bookingTime->copy()->addHour()->format('H:i:s');
+                            $endTime = $bookingTime->copy()->addHour()->format('H:i:s');
                             $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
-    
+
                             if ($existingBooking && $alertMessage == NULL) {
                                 $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
                             }
                         }
 
                         $newBooking = new CompanyBooking;
-                        $newBooking->booking_id = "RD". strtoupper(uniqid());
+                        $newBooking->booking_id = "RD" . strtoupper(uniqid());
                         $newBooking->sub_company = $request->sub_company;
                         $newBooking->pickup_time = $request->pickup_time;
                         $newBooking->booking_date = $date;
@@ -177,28 +179,26 @@ class BookingController extends Controller
                         $newBooking->start_at = $request->start_at;
                         $newBooking->end_at = $request->end_at;
                         $newBooking->payment_method = $request->payment_method;
-                        $newBooking->save();  
+                        $newBooking->save();
                     }
                 }
-            }
-            else{
-                if($request->pickup_time != 'asap' && $request->driver != NULL){
+            } else {
+                if ($request->pickup_time != 'asap' && $request->driver != NULL) {
                     $date = $request->booking_date;
                     $bookingTime = Carbon::parse($request->pickup_time);
                     $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
-                    $endTime   = $bookingTime->copy()->addHour()->format('H:i:s');
+                    $endTime = $bookingTime->copy()->addHour()->format('H:i:s');
                     $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
                     if ($existingBooking && $alertMessage == NULL) {
                         $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
                     }
-                }
-                else if($request->driver != NULL){
+                } else if ($request->driver != NULL) {
                     $date = $request->booking_date;
                     $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)
-                        ->where(function($q){
+                        ->where(function ($q) {
                             $q->where("booking_status", 'started')
-                              ->orWhere("booking_status", 'started')
-                              ->orWhere("booking_status", 'ongoing');
+                                ->orWhere("booking_status", 'started')
+                                ->orWhere("booking_status", 'ongoing');
                         })
                         ->first();
                     if ($existingBooking && $alertMessage == NULL) {
@@ -207,7 +207,7 @@ class BookingController extends Controller
                 }
 
                 $newBooking = new CompanyBooking;
-                $newBooking->booking_id = "RD". strtoupper(uniqid());
+                $newBooking->booking_id = "RD" . strtoupper(uniqid());
                 $newBooking->sub_company = $request->sub_company;
                 $newBooking->multi_booking = $request->multi_booking;
                 $newBooking->multi_days = $request->multi_days;
@@ -256,22 +256,20 @@ class BookingController extends Controller
                 $newBooking->save();
 
                 Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                 ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
-                    'booking_id' => $newBooking->id,
-                    'tenantDb'   => $request->header('database'),
-                 ]);
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                            'booking_id' => $newBooking->id,
+                            'tenantDb' => $request->header('database'),
+                        ]);
 
-                if(!isset($request->driver) || $request->driver == NULL){
+                if (!isset($request->driver) || $request->driver == NULL) {
                     $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
-                    
-                    if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
+
+                    if ($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base") {
                         AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                    }
-                    elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                    } elseif ($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base") {
                         SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
-                    }
-                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                    } elseif ($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver") {
                         AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
                     }
                 }
@@ -282,8 +280,7 @@ class BookingController extends Controller
                 'message' => 'Booking created successfully',
                 'alertMessage' => $alertMessage
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -291,46 +288,45 @@ class BookingController extends Controller
         }
     }
 
-    public function calculateFares(Request $request){
-        try{
+    public function calculateFares(Request $request)
+    {
+        try {
             $request->validate([
                 'pickup_point' => 'required',
                 'destination_point' => 'required',
                 'vehicle_id' => 'required'
             ]);
 
-            if(isset(auth('tenant')->user()->id)){
+            if (isset(auth('tenant')->user()->id)) {
                 $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
-            }
-            else{
+            } else {
                 $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             }
 
             $map_api = json_decode($data->data)->maps_api;
             $map = json_decode($data->data)->map;
 
-            $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();   
+            $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
             $barikoi_key = $data->barikoi_key;
 
-            if(isset($map) && $map == "enable"){
-                if(isset($map_api) && $map_api != NULL){
+            if (isset($map) && $map == "enable") {
+                if (isset($map_api) && $map_api != NULL) {
                     $google_map_key = $data->google_map_key;
                 }
-            }
-            else{
+            } else {
                 $data = CompanySetting::orderBy("id", "DESC")->first();
                 $google_map_key = $data->google_api_keys;
             }
-            
-            if(isset($map_api) && $map_api == "barikoi"){  
-                
-                if(!isset($request->via_point) || count($request->via_point) == 0){
+
+            if (isset($map_api) && $map_api == "barikoi") {
+
+                if (!isset($request->via_point) || count($request->via_point) == 0) {
                     $points = "{$request->pickup_point['longitude']},{$request->pickup_point['latitude']};{$request->destination_point['longitude']},{$request->destination_point['latitude']}";
 
                     $url = "https://barikoi.xyz/v2/api/route/{$points}?api_key={$barikoi_key}&geometries=geojson&profile=car";
-    
+
                     $ch = curl_init();
-    
+
                     curl_setopt_array($ch, [
                         CURLOPT_URL => $url,
                         CURLOPT_RETURNTRANSFER => true,
@@ -340,9 +336,9 @@ class BookingController extends Controller
                             "Accept: application/json"
                         ],
                     ]);
-    
+
                     $response = curl_exec($ch);
-    
+
                     if (curl_errno($ch)) {
                         echo 'cURL Error: ' . curl_error($ch);
                     } else {
@@ -352,24 +348,21 @@ class BookingController extends Controller
                         $distance = $route['distance'];
                     }
                     curl_close($ch);
-                }
-                else{
+                } else {
                     $distance = 0;
-                    for($i = 0; $i <= count($request->via_point); $i++){
-                        if($i == 0){
+                    for ($i = 0; $i <= count($request->via_point); $i++) {
+                        if ($i == 0) {
                             $points = "{$request->pickup_point['longitude']},{$request->pickup_point['latitude']};{$request->via_point[$i]['longitude']},{$request->via_point[$i]['latitude']}";
-                        }
-                        else if($i == count($request->via_point)){
+                        } else if ($i == count($request->via_point)) {
                             $points = "{$request->via_point[$i - 1]['longitude']},{$request->via_point[$i - 1]['latitude']};{$request->destination_point['longitude']},{$request->destination_point['latitude']}";
-                        }
-                        else{
+                        } else {
                             $points = "{$request->via_point[$i - 1]['longitude']},{$request->via_point[$i - 1]['latitude']};{$request->via_point[$i]['longitude']},{$request->via_point[$i]['latitude']}";
                         }
-    
+
                         $url = "https://barikoi.xyz/v2/api/route/{$points}?api_key={$barikoi_key}&geometries=geojson&profile=car";
-        
+
                         $ch = curl_init();
-        
+
                         curl_setopt_array($ch, [
                             CURLOPT_URL => $url,
                             CURLOPT_RETURNTRANSFER => true,
@@ -379,9 +372,9 @@ class BookingController extends Controller
                                 "Accept: application/json"
                             ],
                         ]);
-        
+
                         $response = curl_exec($ch);
-        
+
                         if (curl_errno($ch)) {
                             echo 'cURL Error: ' . curl_error($ch);
                         } else {
@@ -394,32 +387,28 @@ class BookingController extends Controller
                         curl_close($ch);
                     }
                 }
-            }
-            else if(isset($map_api) && $map_api == "google"){  
-                if(!isset($request->via_point) || count($request->via_point) == 0){
-                    
+            } else if (isset($map_api) && $map_api == "google") {
+                if (!isset($request->via_point) || count($request->via_point) == 0) {
+
                     $origin = "{$request->pickup_point['latitude']},{$request->pickup_point['longitude']}";
                     $destination = "{$request->destination_point['latitude']},{$request->destination_point['longitude']}";
-                    
+
                     $url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=$origin&destinations=$destination&mode=driving&units=metric&key=$google_map_key";
 
                     $response = file_get_contents($url);
                     $data = json_decode($response, true);
 
                     $distance = $data['rows'][0]['elements'][0]['distance']['value'];
-                }
-                else{
+                } else {
                     $distance = 0;
-                    for($i = 0; $i <= count($request->via_point); $i++){
-                        if($i == 0){
+                    for ($i = 0; $i <= count($request->via_point); $i++) {
+                        if ($i == 0) {
                             $origin = "{$request->pickup_point['latitude']},{$request->pickup_point['longitude']}";
                             $destination = "{$request->via_point[$i]['latitude']},{$request->via_point[$i]['longitude']}";
-                        }
-                        else if($i == count($request->via_point)){
+                        } else if ($i == count($request->via_point)) {
                             $origin = "{$request->via_point[$i - 1]['latitude']},{$request->via_point[$i - 1]['longitude']}";
                             $destination = "{$request->destination_point['latitude']},{$request->destination_point['longitude']}";
-                        }
-                        else{
+                        } else {
                             $origin = "{$request->via_point[$i - 1]['latitude']},{$request->via_point[$i - 1]['longitude']}";
                             $destination = "{$request->via_point[$i]['latitude']},{$request->via_point[$i]['longitude']}";
                         }
@@ -432,74 +421,73 @@ class BookingController extends Controller
                         $distance += (float) $cDistance;
                     }
                 }
-            }
-            else if(isset($map_api) && $map_api == "both"){  
+            } else if (isset($map_api) && $map_api == "both") {
 
             }
 
             $vehicle = CompanyVehicleType::where("id", $request->vehicle_id)->first();
 
-            if(isset(auth('tenant')->user()->id)){
+            if (isset(auth('tenant')->user()->id)) {
                 $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
-            }
-            else{
+            } else {
                 $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             }
 
             $data = json_decode($data->data);
 
-            if($data->units == "miles"){
+            if ($data->units == "miles") {
                 $cdistance = ($distance / 1609.344);
-            }
-            else{
+            } else {
                 $cdistance = ($distance / 1000);
             }
-            if($vehicle->mileage_system == "fixed"){
+            if ($vehicle->mileage_system == "fixed") {
                 $firstDistance = 1;
                 $secondDistance = (float) $cdistance - (float) $firstDistance;
                 $firstAmount = $vehicle->first_mile_km;
                 $secondAmount = (float) $secondDistance * (float) $vehicle->second_mile_km;
                 $amount = (float) $firstAmount + (float) $secondAmount;
-            }   
-            else{
+            } else {
                 $fromArray = $vehicle->from_array;
                 $toArray = $vehicle->to_array;
                 $priceArray = $vehicle->price_array;
                 $amount = 0;
                 $remainDistance = $cdistance;
-                for($i = 0; $i < count($fromArray); $i++){
-                    if($cdistance > $toArray[$i] && $remainDistance != 0){
+                for ($i = 0; $i < count($fromArray); $i++) {
+                    if ($cdistance > $toArray[$i] && $remainDistance != 0) {
                         $tempDistance = (float) $toArray[$i] - (float) $fromArray[$i];
                         $cAmount = (float) $tempDistance * (float) $priceArray[$i];
                         $amount += (float) $cAmount;
                         $remainDistance = (float) $cdistance - (float) $toArray[$i];
-                    }
-                    else{
+                    } else {
                         $cAmount = (float) $remainDistance * (float) $priceArray[$i];
                         $amount += (float) $cAmount;
                         $remainDistance = 0;
                     }
                 }
-                if($remainDistance != 0){
-                    $cAmount = (float) $remainDistance * (float) $priceArray[$i-1];
+                if ($remainDistance != 0) {
+                    $cAmount = (float) $remainDistance * (float) $priceArray[$i - 1];
                     $amount += (float) $cAmount;
                 }
-            }         
-            if($vehicle->base_fare_system_status == "yes"){
-                if($cdistance <= $vehicle->base_fare_less_than_x_miles){
+            }
+            if ($vehicle->base_fare_system_status == "yes") {
+                if ($cdistance <= $vehicle->base_fare_less_than_x_miles) {
                     $amount = (float) $amount + (float) $vehicle->base_fare_less_than_x_price;
-                }
-                else if($vehicle->base_fare_from_x_miles <= $cdistance && $cdistance <= $vehicle->base_fare_to_x_miles){
+                } else if ($vehicle->base_fare_from_x_miles <= $cdistance && $cdistance <= $vehicle->base_fare_to_x_miles) {
                     $amount = (float) $amount + (float) $vehicle->base_fare_from_to_price;
-                }
-                else if($cdistance >= $vehicle->base_fare_greater_than_x_miles){
+                } else if ($cdistance >= $vehicle->base_fare_greater_than_x_miles) {
                     $amount = (float) $amount + (float) $vehicle->base_fare_greater_than_x_price;
                 }
             }
 
-            if(isset($request->journey_type) && $request->journey_type == "return"){
+            if (isset($request->journey_type) && $request->journey_type == "return") {
                 $distance = 2 * $distance;
                 $amount = 2 * $amount;
+            }
+
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+            if (isset($settings) && $settings != NULL) {
+                $settings->maps_api_count = ($settings->maps_api_count ?? 0) + 1;
+                $settings->save();
             }
 
             return response()->json([
@@ -507,8 +495,7 @@ class BookingController extends Controller
                 'distance' => $distance,
                 'calculate_fare' => $amount
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -516,18 +503,19 @@ class BookingController extends Controller
         }
     }
 
-    public function cancelledBooking(Request $request){
-        try{
+    public function cancelledBooking(Request $request)
+    {
+        try {
             $query = CompanyBooking::where("booking_status", 'cancelled')->with("driverDetail")->orderBy("id", "DESC");
 
-            if(isset($request->search) && $request->search != NULL){
-                $query->where(function($q) use ($request){
-                    $q->where("booking_id", "LIKE", "%".$request->search."%")
-                      ->orWhere("name", "LIKE", "%".$request->search."%");
+            if (isset($request->search) && $request->search != NULL) {
+                $query->where(function ($q) use ($request) {
+                    $q->where("booking_id", "LIKE", "%" . $request->search . "%")
+                        ->orWhere("name", "LIKE", "%" . $request->search . "%");
                 });
             }
 
-            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+            if (isset($request->dispatcher_id) && $request->dispatcher_id != NULL) {
                 $query->where("dispatcher_id", $request->dispatcher_id);
             }
 
@@ -537,8 +525,7 @@ class BookingController extends Controller
                 'success' => 1,
                 'bookings' => $bookings
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -546,17 +533,18 @@ class BookingController extends Controller
         }
     }
 
-    public function bookingList(Request $request){
-        try{
+    public function bookingList(Request $request)
+    {
+        try {
             $query = CompanyBooking::orderBy("id", "DESC");
 
-            if(isset($request->status) && $request->status != NULL){
+            if (isset($request->status) && $request->status != NULL) {
                 $query->where('booking_status', $request->status);
             }
-            if(isset($request->date) && $request->date != NULL){
+            if (isset($request->date) && $request->date != NULL) {
                 $query->whereDate("created_at", $request->date);
             }
-            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+            if (isset($request->dispatcher_id) && $request->dispatcher_id != NULL) {
                 $query->where("dispatcher_id", $request->dispatcher_id);
             }
             $rides = $query->with('driverDetail')->paginate(10);
@@ -565,8 +553,7 @@ class BookingController extends Controller
                 'success' => 1,
                 'rides' => $rides
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -574,16 +561,16 @@ class BookingController extends Controller
         }
     }
 
-    public function rideDetail(Request $request){
-        try{
+    public function rideDetail(Request $request)
+    {
+        try {
             $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['driverDetail', 'vehicleDetail', 'subCompanyDetail', 'accountDetail'])->first();
 
             return response()->json([
                 'success' => 1,
                 'detail' => $rideDetail
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
