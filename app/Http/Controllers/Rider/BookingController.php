@@ -22,6 +22,7 @@ use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
 use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
+use App\Models\WalletTransaction;
 
 class BookingController extends Controller
 {
@@ -498,7 +499,7 @@ class BookingController extends Controller
                 $driver = CompanyDriver::where("id", $bid->driver_id)->first();
                 $companySetting = CompanySetting::orderBy("id", "DESC")->first();
                 if($companySetting->package_type == "per_ride_commission_topup"){
-                    $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
+                    $checkAmount = $companySetting->package_amount;
                     if($driver->wallet_balance < $checkAmount){
                         return response()->json([
                             'error' => 1,
@@ -507,6 +508,14 @@ class BookingController extends Controller
                     }
                     $driver->wallet_balance -= $checkAmount;
                     $driver->save();
+                    
+                    $wallet = new WalletTransaction;
+                    $wallet->user_type = "driver";
+                    $wallet->user_id = $driver->id;
+                    $wallet->type = 'deduct';
+                    $wallet->amount = $checkAmount;
+                    $wallet->comment = "Per ride booking deduction";
+                    $wallet->save();
                 }
 
                 Http::withHeaders([

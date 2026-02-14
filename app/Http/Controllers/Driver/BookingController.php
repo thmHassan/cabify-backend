@@ -21,6 +21,7 @@ use App\Models\CompanyNotification;
 use App\Models\Setting;
 use App\Models\TenantUser;
 use App\Models\CompanyUser;
+use App\Models\WalletTransaction;
 
 class BookingController extends Controller
 {
@@ -167,7 +168,7 @@ class BookingController extends Controller
 
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
             if ($companySetting->package_type == "per_ride_commission_topup") {
-                $checkAmount = ($request->amount * $companySetting->package_amount) / 100;
+                $checkAmount = $companySetting->package_amount;
                 if ($checkAmount > auth("driver")->user()->wallet_balance) {
                     return response()->json([
                         'error' => 1,
@@ -369,7 +370,7 @@ class BookingController extends Controller
 
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
             if ($companySetting->package_type == "per_ride_commission_topup") {
-                $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
+                $checkAmount = $companySetting->package_amount;
                 if ($checkAmount > auth("driver")->user()->wallet_balance) {
                     return response()->json([
                         'error' => 1,
@@ -400,8 +401,16 @@ class BookingController extends Controller
 
             $driver->driving_status = "busy";
             if ($companySetting->package_type == "per_ride_commission_topup") {
-                $checkAmount = ($booking->offered_amount * $companySetting->package_amount) / 100;
+                $checkAmount = $companySetting->package_amount;
                 $driver->wallet_balance -= $checkAmount;
+
+                $wallet = new WalletTransaction;
+                $wallet->user_type = "driver";
+                $wallet->user_id = $driver->id;
+                $wallet->type = 'deduct';
+                $wallet->amount = $checkAmount;
+                $wallet->comment = "Per ride booking deduction";
+                $wallet->save();
             }
             $driver->save();
 
