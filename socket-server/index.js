@@ -652,14 +652,23 @@ app.get("/driver/commission-entries", async (req, res) => {
             return res.status(400).json({ success: 0, message: 'Invalid package type' });
         }
 
+        let uncollectedEntries = allEntries;
+        if (driver.last_settlement_date) {
+            const lastSettlementDate = new Date(driver.last_settlement_date);
+            uncollectedEntries = allEntries.filter(entry => {
+                const cycleEndDate = new Date(entry.cycle_end_date + ' 23:59:59');
+                return cycleEndDate > lastSettlementDate;
+            });
+        }
+
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
-        const totalEntries = allEntries.length;
+        const totalEntries = uncollectedEntries.length;
         const totalPages = Math.ceil(totalEntries / limitNum);
         const offset = (pageNum - 1) * limitNum;
-        const paginatedEntries = allEntries.slice(offset, offset + limitNum);
+        const paginatedEntries = uncollectedEntries.slice(offset, offset + limitNum);
 
-        const pendingEntries = allEntries.filter(e => e.status === 'pending');
+        const pendingEntries = uncollectedEntries.filter(e => e.status === 'pending');
 
         console.log("Commission Entries Success:", { total: totalEntries, page: pageNum });
 
@@ -741,12 +750,32 @@ app.post("/driver/collect-commission", async (req, res) => {
 
         const collectionAmount = parseFloat(firstEntry.amount);
         const newSettlementDate = new Date(firstEntry.cycle_end_date + ' 23:59:59');
+        const currentDateTime = new Date();
 
         await db.query(`
             UPDATE drivers 
             SET last_settlement_date = ?
             WHERE id = ?
         `, [formatDateTime(newSettlementDate), driver_id]);
+
+        const transactionType = settings.package_type === 'packages_post_paid' ? 'add' : 'add';
+        const transactionComment = settings.package_type === 'packages_post_paid'
+            ? `Commission collected - ${firstEntry.description}`
+            : `Commission collected - ${firstEntry.description}`;
+
+        await db.query(`
+            INSERT INTO wallet_transactions 
+            (user_type, user_id, type, comment, created_at, updated_at, amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [
+            'driver',
+            driver_id,
+            transactionType,
+            transactionComment,
+            formatDateTime(currentDateTime),
+            formatDateTime(currentDateTime),
+            collectionAmount
+        ]);
 
         const [updatedDriverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
         const updatedDriver = updatedDriverRows[0];
@@ -778,7 +807,8 @@ app.post("/driver/collect-commission", async (req, res) => {
                 new_settlement_date: formatDate(newSettlementDate),
                 remaining_entries: remainingEntries.filter(e => e.status === 'pending').length,
                 remaining_amount: remainingEntries.filter(e => e.status === 'pending').reduce((sum, e) => sum + parseFloat(e.amount), 0).toFixed(2),
-                next_entries: remainingEntries
+                next_entries: remainingEntries,
+                transaction_recorded: true
             }
         });
 

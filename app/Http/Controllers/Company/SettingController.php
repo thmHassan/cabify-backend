@@ -795,11 +795,39 @@ class SettingController extends Controller
     public function getMapsApiCount(Request $request)
     {
         try {
-            $settings = CompanySetting::orderBy("id", "DESC")->first();
+            $request->validate([
+                'company_id' => 'required',
+            ]);
+
+            $dbName = 'tenant' . $request->company_id;
+
+            \Config::set('database.connections.tenant_temp', [
+                'driver' => 'mysql',
+                'host' => env('DB_HOST', '127.0.0.1'),
+                'port' => env('DB_PORT', '3306'),
+                'database' => $dbName,
+                'username' => env('DB_USERNAME', 'root'),
+                'password' => env('DB_PASSWORD', ''),
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'strict' => false,
+            ]);
+
+            \DB::purge('tenant_temp');
+            \DB::reconnect('tenant_temp');
+
+            $settings = \DB::connection('tenant_temp')
+                ->table('settings')
+                ->orderBy('id', 'DESC')
+                ->first();
 
             return response()->json([
                 'success' => 1,
-                'maps_api_count' => $settings->maps_api_count ?? 0
+                'maps_api_count' => $settings->maps_api_count ?? 0,
+                'last_used' => $settings->last_use_map_api
+                    ? Carbon::parse($settings->last_use_map_api)->format('d M Y, h:i A')
+                    : 'Never',
             ]);
         } catch (\Exception $e) {
             return response()->json([
