@@ -44,7 +44,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status = 'no_show' 
+                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
                     THEN 1 
                 END) AS no_show,
 
@@ -90,6 +90,191 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
     } catch (error) {
         console.error("❌ Error broadcasting dashboard cards:", error);
         return null;
+    }
+};
+
+const autoDispatchRide = async ({
+    bookingId,
+    tenantDb,
+    currentPlotId = null,
+    driverIndex = 0,
+    visitedPlots = []
+}) => {
+    try {
+        const db = getConnection(tenantDb);
+
+        const [bookingRows] = await db.query(
+            "SELECT * FROM bookings WHERE id = ?",
+            [bookingId]
+        );
+
+        if (!bookingRows.length) return;
+        const booking = bookingRows[0];
+
+        if (booking.driver_response === "accepted") {
+            console.log("Ride already accepted. Stop dispatch.");
+            return;
+        }
+
+        if (!currentPlotId) {
+            currentPlotId =
+                booking.pickup_plot_id || booking.destination_plot_id;
+        }
+
+        if (!currentPlotId) {
+            console.log("No plot assigned to booking.");
+            return;
+        }
+
+        if (visitedPlots.includes(currentPlotId)) {
+            console.log("All plots tried. No driver accepted.");
+
+            io.emit("auto-dispatch-failed", {
+                booking_id: bookingId,
+                message: "No drivers accepted the ride."
+            });
+
+            return;
+        }
+
+        visitedPlots.push(currentPlotId);
+
+        const [drivers] = await db.query(
+            `SELECT * FROM drivers
+             WHERE driving_status = 'idle'
+             AND plot_id = ?
+             ORDER BY priority_plot ASC`,
+            [currentPlotId]
+        );
+
+        if (!drivers.length) {
+            console.log("No drivers in plot:", currentPlotId);
+
+            const [plotRows] = await db.query(
+                "SELECT backup_plots FROM plots WHERE id = ?",
+                [currentPlotId]
+            );
+
+            const backupPlots = JSON.parse(
+                plotRows[0]?.backup_plots || "[]"
+            );
+
+            for (let backupPlot of backupPlots) {
+                await autoDispatchRide({
+                    bookingId,
+                    tenantDb,
+                    currentPlotId: backupPlot,
+                    driverIndex: 0,
+                    visitedPlots
+                });
+                return;
+            }
+
+            io.emit("auto-dispatch-failed", {
+                booking_id: bookingId,
+                message: "No drivers available in any plot."
+            });
+
+            return;
+        }
+
+        if (driverIndex >= drivers.length) {
+            console.log("➡ All drivers in this plot tried. Moving to backup.");
+
+            const [plotRows] = await db.query(
+                "SELECT backup_plots FROM plots WHERE id = ?",
+                [currentPlotId]
+            );
+
+            const backupPlots = JSON.parse(
+                plotRows[0]?.backup_plots || "[]"
+            );
+
+            for (let backupPlot of backupPlots) {
+                await autoDispatchRide({
+                    bookingId,
+                    tenantDb,
+                    currentPlotId: backupPlot,
+                    driverIndex: 0,
+                    visitedPlots
+                });
+                return;
+            }
+
+            io.emit("auto-dispatch-failed", {
+                booking_id: bookingId,
+                message: "All drivers rejected the ride."
+            });
+
+            return;
+        }
+
+        const driver = drivers[driverIndex];
+
+        console.log("Sending ride to:", driver.name);
+
+        await db.query(
+            `UPDATE bookings 
+             SET driver = ?, driver_response = NULL 
+             WHERE id = ?`,
+            [driver.id, bookingId]
+        );
+
+        const driverSocketId = driverSockets.get(driver.id.toString());
+
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("new-ride-request", {
+                booking_id: booking.id,
+                message: "You have a new ride request",
+                booking
+            });
+        }
+
+        setTimeout(async () => {
+
+            const [updatedRows] = await db.query(
+                "SELECT driver_response FROM bookings WHERE id = ?",
+                [bookingId]
+            );
+
+            if (!updatedRows.length) return;
+
+            const response = updatedRows[0].driver_response;
+
+            if (response === "accepted") {
+
+                console.log("Accepted by:", driver.name);
+
+                io.emit("job-accepted-by-driver", {
+                    booking_id: bookingId,
+                    driver_id: driver.id,
+                    message: `${driver.name} accepted the ride`
+                });
+
+                return;
+            }
+
+            console.log("Timeout or rejected. Trying next driver.");
+
+            await db.query(
+                `UPDATE bookings 
+                 SET driver = NULL, driver_response = NULL 
+                 WHERE id = ?`,
+                [bookingId]
+            );
+
+            autoDispatchRide({
+                bookingId,
+                tenantDb,
+                currentPlotId,
+                driverIndex: driverIndex + 1,
+                visitedPlots
+            });
+
+        }, 30000);
+
+    } catch (error) {
+        console.error("Auto Dispatch Error:", error.message);
     }
 };
 
@@ -189,10 +374,6 @@ io.on("connection", (socket) => {
     });
 });
 
-// app.use((req, res, next) => {
-//     next();
-// });
-
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
@@ -218,6 +399,366 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
 
+async function calculatePostPaidEntries(driver, settings, db) {
+    const packageDays = parseInt(settings.package_days);
+    const packageAmount = parseFloat(settings.package_amount);
+
+    const packageChangedDate = settings.package_updated_at
+        ? new Date(settings.package_updated_at)
+        : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
+
+    let lastSettlementDate;
+    if (driver.last_settlement_date) {
+        const settlDate = new Date(driver.last_settlement_date);
+        lastSettlementDate = settlDate >= packageChangedDate ? settlDate : packageChangedDate;
+    } else {
+        lastSettlementDate = packageChangedDate;
+    }
+
+    const currentDate = new Date();
+
+    const calculationStartDate = new Date(lastSettlementDate);
+    calculationStartDate.setDate(calculationStartDate.getDate() + 1);
+    calculationStartDate.setHours(0, 0, 0, 0);
+
+    const daysPassed = Math.floor((currentDate - calculationStartDate) / (1000 * 60 * 60 * 24));
+    const completedCycles = Math.floor(daysPassed / packageDays);
+
+    const entries = [];
+
+    for (let i = 0; i < completedCycles; i++) {
+        const cycleStartDate = new Date(calculationStartDate);
+        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
+        const cycleEndDate = new Date(cycleStartDate);
+        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+
+        entries.push({
+            entry_number: i + 1,
+            cycle_start_date: formatDate(cycleStartDate),
+            cycle_end_date: formatDate(cycleEndDate),
+            days_in_cycle: packageDays,
+            amount: packageAmount.toFixed(2),
+            status: 'pending',
+            description: `${packageDays} days package - ${packageAmount} Rs`
+        });
+    }
+
+    const currentCycleStart = new Date(calculationStartDate);
+    currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
+    const currentCycleEnd = new Date(currentCycleStart);
+    currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
+
+    const daysElapsedInCycle = daysPassed % packageDays;
+    const daysRemainingInCycle = packageDays - daysElapsedInCycle;
+
+    entries.push({
+        entry_number: completedCycles + 1,
+        cycle_start_date: formatDate(currentCycleStart),
+        cycle_end_date: formatDate(currentCycleEnd),
+        days_in_cycle: packageDays,
+        days_elapsed: daysElapsedInCycle,
+        days_remaining: daysRemainingInCycle,
+        amount: packageAmount.toFixed(2),
+        status: 'pending',
+        description: `Current cycle - ${daysElapsedInCycle} of ${packageDays} days elapsed`
+    });
+
+    return entries;
+}
+
+async function calculatePercentageEntries(driver, settings, db) {
+    const packageDays = parseInt(settings.package_days);
+    const packagePercentage = parseFloat(settings.package_percentage);
+
+    const packageStartDate = settings.package_updated_at
+        ? new Date(settings.package_updated_at)
+        : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
+
+    const lastSettlementDate = driver.last_settlement_date
+        ? new Date(driver.last_settlement_date)
+        : packageStartDate;
+
+    const currentDate = new Date();
+
+    const calculationStartDate = new Date(lastSettlementDate);
+    calculationStartDate.setDate(calculationStartDate.getDate() + 1);
+    calculationStartDate.setHours(0, 0, 0, 0);
+
+    const daysPassed = Math.floor((currentDate - calculationStartDate) / (1000 * 60 * 60 * 24));
+    const completedCycles = Math.floor(daysPassed / packageDays);
+
+    const entries = [];
+
+    for (let i = 0; i < completedCycles; i++) {
+        const cycleStartDate = new Date(calculationStartDate);
+        cycleStartDate.setDate(cycleStartDate.getDate() + (i * packageDays));
+
+        const cycleEndDate = new Date(cycleStartDate);
+        cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+
+        const [bookingRows] = await db.query(`
+            SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
+            FROM bookings
+            WHERE driver = ?
+            AND booking_status = 'completed'
+            AND updated_at >= ?
+            AND updated_at <= ?
+        `, [
+            driver.id,
+            formatDateTime(cycleStartDate),
+            formatDateTime(new Date(cycleEndDate.getTime() + 24 * 60 * 60 * 1000 - 1))
+        ]);
+
+        const totalRidesAmount = parseFloat(bookingRows[0]?.total_rides_amount || 0);
+        const commissionAmount = (totalRidesAmount * packagePercentage) / 100;
+
+        entries.push({
+            entry_number: i + 1,
+            cycle_start_date: formatDate(cycleStartDate),
+            cycle_end_date: formatDate(cycleEndDate),
+            days_in_cycle: packageDays,
+            total_rides_amount: totalRidesAmount.toFixed(2),
+            commission_percentage: packagePercentage,
+            amount: commissionAmount.toFixed(2),
+            status: 'pending',
+            description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides`
+        });
+    }
+
+    const currentCycleStart = new Date(calculationStartDate);
+    currentCycleStart.setDate(currentCycleStart.getDate() + (completedCycles * packageDays));
+
+    const currentCycleEnd = new Date(currentCycleStart);
+    currentCycleEnd.setDate(currentCycleEnd.getDate() + packageDays - 1);
+
+    const daysElapsedInCycle = daysPassed % packageDays;
+    const daysRemainingInCycle = packageDays - daysElapsedInCycle;
+
+    const [currentBookingRows] = await db.query(`
+        SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
+        FROM bookings
+        WHERE driver = ?
+        AND booking_status = 'completed'
+        AND updated_at >= ?
+        AND updated_at <= ?
+    `, [
+        driver.id,
+        formatDateTime(currentCycleStart),
+        formatDateTime(new Date(currentCycleEnd.getTime() + 24 * 60 * 60 * 1000 - 1))
+    ]);
+
+    const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
+    const currentCommission = (currentRidesAmount * packagePercentage) / 100;
+
+    entries.push({
+        entry_number: completedCycles + 1,
+        cycle_start_date: formatDate(currentCycleStart),
+        cycle_end_date: formatDate(currentCycleEnd),
+        days_in_cycle: packageDays,
+        days_elapsed: daysElapsedInCycle,
+        days_remaining: daysRemainingInCycle,
+        total_rides_amount: currentRidesAmount.toFixed(2),
+        commission_percentage: packagePercentage,
+        amount: currentCommission.toFixed(2),
+        status: 'pending',
+        description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
+    });
+
+    return entries;
+}
+
+function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+app.get("/driver/commission-entries", async (req, res) => {
+    try {
+        const { driver_id, page = 1, limit = 10 } = req.query;
+
+        console.log("Commission Entries Request:", { driver_id, page, limit });
+
+        if (!driver_id) {
+            return res.status(400).json({ success: 0, message: 'Driver ID is required' });
+        }
+
+        const databaseHeader = req.headers['x-database'] || req.headers['database'] || req.query.database;
+        if (!databaseHeader) {
+            return res.status(400).json({ success: 0, message: 'Database header is required' });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
+        if (!settingsRows.length) {
+            return res.status(404).json({ success: 0, message: 'Company settings not found' });
+        }
+        const settings = settingsRows[0];
+
+        const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
+        if (!driverRows.length) {
+            return res.status(404).json({ success: 0, message: 'Driver not found' });
+        }
+        const driver = driverRows[0];
+
+        let allEntries = [];
+        if (settings.package_type === 'packages_post_paid') {
+            allEntries = await calculatePostPaidEntries(driver, settings, db);
+        } else if (settings.package_type === 'commission_without_topup') {
+            allEntries = await calculatePercentageEntries(driver, settings, db);
+        } else {
+            return res.status(400).json({ success: 0, message: 'Invalid package type' });
+        }
+
+        const pageNum = Math.max(parseInt(page) || 1, 1);
+        const limitNum = Math.max(parseInt(limit) || 10, 1);
+        const totalEntries = allEntries.length;
+        const totalPages = Math.ceil(totalEntries / limitNum);
+        const offset = (pageNum - 1) * limitNum;
+        const paginatedEntries = allEntries.slice(offset, offset + limitNum);
+
+        const pendingEntries = allEntries.filter(e => e.status === 'pending');
+
+        console.log("Commission Entries Success:", { total: totalEntries, page: pageNum });
+
+        return res.json({
+            success: 1,
+            data: {
+                driver_id: driver.id,
+                driver_name: driver.name,
+                driver_wallet_balance: parseFloat(driver.wallet_balance || 0).toFixed(2),
+                package_type: settings.package_type,
+                package_days: settings.package_days,
+                package_amount: settings.package_amount,
+                package_percentage: settings.package_percentage,
+                last_settlement_date: driver.last_settlement_date,
+                total_uncollected_entries: pendingEntries.length,
+                total_uncollected_amount: pendingEntries.reduce((sum, e) => sum + parseFloat(e.amount), 0).toFixed(2),
+                commission_entries: paginatedEntries,
+                pagination: {
+                    total: totalEntries,
+                    page: pageNum,
+                    limit: limitNum,
+                    total_pages: totalPages,
+                    hasNext: pageNum < totalPages,
+                    hasPrev: pageNum > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in commission-entries:', error);
+        return res.status(500).json({ success: 0, message: error.message });
+    }
+});
+
+app.post("/driver/collect-commission", async (req, res) => {
+    try {
+        const { driver_id } = req.body;
+
+        console.log("Collect Commission Request:", { driver_id });
+
+        if (!driver_id) {
+            return res.status(400).json({ success: 0, message: 'Driver ID is required' });
+        }
+
+        const databaseHeader = req.headers['x-database'] || req.headers['database'] || req.query.database;
+        if (!databaseHeader) {
+            return res.status(400).json({ success: 0, message: 'Database header is required' });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
+        if (!settingsRows.length) {
+            return res.status(404).json({ success: 0, message: 'Company settings not found' });
+        }
+        const settings = settingsRows[0];
+
+        const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
+        if (!driverRows.length) {
+            return res.status(404).json({ success: 0, message: 'Driver not found' });
+        }
+        const driver = driverRows[0];
+
+        let commissionEntries = [];
+        if (settings.package_type === 'packages_post_paid') {
+            commissionEntries = await calculatePostPaidEntries(driver, settings, db);
+        } else if (settings.package_type === 'commission_without_topup') {
+            commissionEntries = await calculatePercentageEntries(driver, settings, db);
+        } else {
+            return res.status(400).json({ success: 0, message: 'Invalid package type' });
+        }
+
+        if (commissionEntries.length === 0) {
+            return res.json({ success: 0, message: 'No commission entries available to collect' });
+        }
+
+        const firstEntry = commissionEntries[0];
+
+        const collectionAmount = parseFloat(firstEntry.amount);
+        const newSettlementDate = new Date(firstEntry.cycle_end_date + ' 23:59:59');
+
+        await db.query(`
+            UPDATE drivers 
+            SET last_settlement_date = ?
+            WHERE id = ?
+        `, [formatDateTime(newSettlementDate), driver_id]);
+
+        const [updatedDriverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
+        const updatedDriver = updatedDriverRows[0];
+
+        let remainingEntries = [];
+        if (settings.package_type === 'packages_post_paid') {
+            remainingEntries = await calculatePostPaidEntries(updatedDriver, settings, db);
+        } else if (settings.package_type === 'commission_without_topup') {
+            remainingEntries = await calculatePercentageEntries(updatedDriver, settings, db);
+        }
+
+        console.log("Commission Collected Successfully:", { driver_id, collected: collectionAmount });
+
+        return res.json({
+            success: 1,
+            message: 'Commission collected successfully',
+            data: {
+                driver_id: driver.id,
+                driver_name: driver.name,
+                collected_entry: {
+                    entry_number: firstEntry.entry_number,
+                    cycle_start_date: firstEntry.cycle_start_date,
+                    cycle_end_date: firstEntry.cycle_end_date,
+                    amount: firstEntry.amount,
+                    description: firstEntry.description
+                },
+                collected_amount: collectionAmount.toFixed(2),
+                previous_settlement_date: driver.last_settlement_date ? formatDate(new Date(driver.last_settlement_date)) : 'Not Set',
+                new_settlement_date: formatDate(newSettlementDate),
+                remaining_entries: remainingEntries.filter(e => e.status === 'pending').length,
+                remaining_amount: remainingEntries.filter(e => e.status === 'pending').reduce((sum, e) => sum + parseFloat(e.amount), 0).toFixed(2),
+                next_entries: remainingEntries
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in collect-commission:', error);
+        return res.status(500).json({ success: 0, message: error.message });
+    }
+});
+
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
@@ -240,7 +781,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status = 'no_show' 
+                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
                     THEN 1 
                 END) AS no_show,
 
@@ -298,7 +839,6 @@ app.get("/bookings", async (req, res) => {
         `;
         const params = [];
 
-        // Dashboard card filters
         if (filter) {
             switch (filter) {
                 case 'todays_booking':
@@ -311,7 +851,7 @@ app.get("/bookings", async (req, res) => {
                     baseQuery += ` AND b.booking_status = 'completed'`;
                     break;
                 case 'no_show':
-                    baseQuery += ` AND b.booking_status = 'no_show'`;
+                    baseQuery += ` AND b.booking_status IN ('no_show', 'arrived', 'ongoing')`;
                     break;
                 case 'cancelled':
                     baseQuery += ` AND b.booking_status = 'cancelled'`;
@@ -376,7 +916,6 @@ app.get("/bookings", async (req, res) => {
 
         const [bookings] = await db.query(dataQuery, [...params, limitNum, offset]);
 
-        // Format the response to include nested objects
         const formattedBookings = bookings.map(booking => {
             const {
                 driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
@@ -407,7 +946,6 @@ app.get("/bookings", async (req, res) => {
             };
         });
 
-        // Count query
         const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
         const [[{ total }]] = await db.query(countQuery, params);
 
@@ -459,6 +997,240 @@ app.get("/bookings/:id", async (req, res) => {
             success: false,
             error: error.message
         });
+    }
+});
+
+app.put("/bookings/:id/assign-driver", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { driver_id } = req.body;
+
+        if (!driver_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Driver ID is required"
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        const [bookingRows] = await db.query(
+            "SELECT id, booking_status FROM bookings WHERE id = ?",
+            [id]
+        );
+
+        if (bookingRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found"
+            });
+        }
+
+        const [driverRows] = await db.query(
+            "SELECT id, driving_status FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+
+        if (driverRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found"
+            });
+        }
+
+        await db.query(
+            `UPDATE bookings 
+             SET driver = ?, 
+                 driver_response = NULL
+             WHERE id = ?`,
+            [driver_id, id]
+        );
+
+        const driverSocketId = driverSockets.get(driver_id.toString());
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("job-assignment-request", {
+                booking_id: id,
+                message: "You have been assigned a new job. Accept or reject."
+            });
+        }
+
+        return res.json({
+            success: true,
+            message: "Driver assigned successfully. Waiting for driver response."
+        });
+
+    } catch (error) {
+        console.error("Assign driver error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Something went wrong"
+        });
+    }
+});
+
+app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        autoDispatchRide({
+            bookingId: id,
+            tenantDb: req.tenantDb
+        });
+
+        return res.json({
+            success: true,
+            message: "Auto dispatch started"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+app.post("/driver/accept-ride", async (req, res) => {
+    try {
+        const { ride_id } = req.body;
+        const db = getConnection(req.tenantDb);
+
+        const [updatedBookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id,
+                vt.vehicle_type_name,
+                vt.vehicle_type_service,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name,
+                sc.email as sub_company_email
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id  
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            WHERE b.id = ?
+        `, [ride_id]);
+
+        if (!updatedBookings.length) {
+            return res.status(404).json({ success: 0, message: "Ride not found" });
+        }
+
+        const updatedBooking = updatedBookings[0];
+
+        const {
+            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
+            ...bookingData
+        } = updatedBooking;
+
+        const formattedBooking = {
+            ...bookingData,
+            driverDetail: driver_id ? {
+                id: driver_id,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_image: driver_profile_image
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                vehicle_type_name,
+                vehicle_type_service
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name,
+                email: sub_company_email
+            } : null
+        };
+
+        const eventData = {
+            booking_id: ride_id,
+            driver_id,
+            driver_name,
+            driver_profile_image,
+            booking: formattedBooking,
+            message: `${driver_name} accepted the ride`
+        };
+
+        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("job-accepted-by-driver", eventData));
+        adminSockets.forEach((socketId) => io.to(socketId).emit("job-accepted-by-driver", eventData));
+        clientSockets.forEach((socketId) => io.to(socketId).emit("job-accepted-by-driver", eventData));
+
+        const clientId = req.headers["database"];
+        const socketId = clientSockets.get(clientId?.toString());
+        if (socketId) {
+            io.to(socketId).emit("on-job-driver-event", driver_name);
+        }
+
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+
+        return res.json({ success: 1, message: "Ride accepted successfully", data: formattedBooking });
+
+    } catch (error) {
+        console.error("Accept Ride Error:", error);
+        return res.status(500).json({ success: 0, message: "Something went wrong" });
+    }
+});
+
+app.post("/driver/cancel-ride", async (req, res) => {
+    try {
+        const { ride_id, cancel_reason } = req.body;
+
+        const db = getConnection(req.tenantDb);
+
+        const [bookings] = await db.query(`
+            SELECT 
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.profile_image as driver_profile_image
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            WHERE b.id = ?
+        `, [ride_id]);
+
+        if (!bookings.length) {
+            return res.status(404).json({ success: 0, message: "Ride not found" });
+        }
+
+        const { driver_id, driver_name, driver_profile_image } = bookings[0];
+
+        const eventData = {
+            booking_id: ride_id,
+            driver_id,
+            driver_name,
+            driver_profile_image,
+            cancel_reason: cancel_reason || "",
+            booking: {
+                id: bookings[0].id,
+                booking_id: bookings[0].booking_id,
+                pickup_location: bookings[0].pickup_location,
+                destination_location: bookings[0].destination_location,
+                booking_date: bookings[0].booking_date,
+                pickup_time: bookings[0].pickup_time,
+                booking_status: "cancelled",
+            },
+            message: `${driver_name} cancelled the ride`
+        };
+
+        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("job-cancelled-by-driver", eventData));
+        adminSockets.forEach((socketId) => io.to(socketId).emit("job-cancelled-by-driver", eventData));
+        clientSockets.forEach((socketId) => io.to(socketId).emit("job-cancelled-by-driver", eventData));
+
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+
+        return res.json({ success: 1, message: "Cancel event broadcasted" });
+
+    } catch (error) {
+        console.error("Cancel Ride Error:", error);
+        return res.status(500).json({ success: 0, message: "Something went wrong" });
     }
 });
 
@@ -544,10 +1316,9 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
             html: emailHtml
         };
 
-        // Send email
         const info = await transporter.sendMail(mailOptions);
 
-        console.log(`✅ Email sent successfully to ${booking.email}`);
+        console.log(`Email sent successfully to ${booking.email}`);
         console.log('Message ID:', info.messageId);
 
         return res.json({
@@ -562,163 +1333,6 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 
     } catch (error) {
         console.error("Error sending confirmation email:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.put("/bookings/:id/assign-driver", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { driver_id } = req.body;
-
-        if (!driver_id) {
-            return res.status(400).json({
-                success: false,
-                message: "driver_id is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const [bookings] = await db.query(
-            "SELECT * FROM bookings WHERE id = ?",
-            [id]
-        );
-
-        if (bookings.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found"
-            });
-        }
-
-        const booking = bookings[0];
-        const oldDriverId = booking.driver;
-
-        const [drivers] = await db.query(
-            "SELECT * FROM drivers WHERE id = ?",
-            [driver_id]
-        );
-
-        if (drivers.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Driver not found"
-            });
-        }
-
-        await db.query(
-            "UPDATE bookings SET driver = ?, booking_status = 'ongoing' WHERE id = ?",
-            [driver_id, id]
-        );
-
-        if (oldDriverId && oldDriverId !== null) {
-            await db.query(
-                "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
-                [oldDriverId]
-            );
-
-            const oldDriverSocketId = driverSockets.get(oldDriverId.toString());
-            if (oldDriverSocketId) {
-                io.to(oldDriverSocketId).emit("driver-unassigned-event", {
-                    booking_id: booking.id,
-                    message: "You have been unassigned from this booking"
-                });
-            }
-        }
-
-        await db.query(
-            "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
-            [driver_id]
-        );
-
-        const [updatedBookings] = await db.query(`
-            SELECT 
-                b.*,
-                d.id as driver_id,
-                d.name as driver_name,
-                d.email as driver_email,
-                d.phone_no as driver_phone,
-                d.profile_image as driver_profile_image,
-                vt.id as vehicle_type_id,
-                vt.vehicle_type_name as vehicle_type_name,
-                vt.vehicle_type_service as vehicle_type_service,
-                sc.id as sub_company_id,
-                sc.name as sub_company_name,
-                sc.email as sub_company_email
-            FROM bookings b
-            LEFT JOIN drivers d ON b.driver = d.id
-            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
-            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
-            WHERE b.id = ?
-        `, [id]);
-
-        const updatedBooking = updatedBookings[0];
-        const {
-            driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
-            vehicle_type_id, vehicle_type_name, vehicle_type_service,
-            sub_company_id, sub_company_name, sub_company_email,
-            ...bookingData
-        } = updatedBooking;
-
-        const formattedBooking = {
-            ...bookingData,
-            driverDetail: dId ? {
-                id: dId,
-                name: driver_name,
-                email: driver_email,
-                phone_no: driver_phone,
-                profile_image: driver_profile_image
-            } : null,
-            vehicleDetail: vehicle_type_id ? {
-                id: vehicle_type_id,
-                vehicle_type_name: vehicle_type_name,
-                vehicle_type_service: vehicle_type_service
-            } : null,
-            subCompanyDetail: sub_company_id ? {
-                id: sub_company_id,
-                name: sub_company_name,
-                email: sub_company_email
-            } : null
-        };
-
-        const newDriverSocketId = driverSockets.get(driver_id.toString());
-        if (newDriverSocketId) {
-            io.to(newDriverSocketId).emit("new-ride", formattedBooking);
-        }
-
-        if (booking.user_id) {
-            const userSocketId = userSockets.get(booking.user_id.toString());
-            if (userSocketId) {
-                const message = oldDriverId
-                    ? "Your driver has been changed"
-                    : "Driver has been assigned to your booking";
-
-                io.to(userSocketId).emit("driver-changed-event", {
-                    booking: formattedBooking,
-                    message: message
-                });
-            }
-        }
-
-        // Broadcast dashboard cards update after driver assignment
-        await broadcastDashboardCardsUpdate(req.tenantDb);
-
-        const responseMessage = oldDriverId
-            ? "Driver changed successfully"
-            : "Driver assigned successfully";
-
-        return res.json({
-            success: true,
-            message: responseMessage,
-            data: formattedBooking
-        });
-
-    } catch (error) {
-        console.error("Error assigning driver:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -840,7 +1454,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             } : null
         };
 
-        // Emit socket events based on status change
         if (booking.user_id) {
             const userSocketId = userSockets.get(booking.user_id.toString());
             if (userSocketId) {
@@ -861,7 +1474,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // Broadcast dashboard cards update after status change
         await broadcastDashboardCardsUpdate(req.tenantDb);
 
         return res.json({
@@ -977,7 +1589,7 @@ app.post("/bookings/broadcast", async (req, res) => {
 
         const finalDb = `${DB_PREFIX}${tenantDb}`;
 
-        console.log("📂 Using DB:", finalDb);
+        console.log("Using DB:", finalDb);
 
         const db = getConnection(finalDb);
 
@@ -997,11 +1609,6 @@ app.post("/bookings/broadcast", async (req, res) => {
         const booking = rows[0];
         let sentCount = 0;
 
-        console.log("📢 Broadcasting booking:", booking.id);
-        console.log("Dispatchers:", dispatcherSockets.size);
-        console.log("Admins:", adminSockets.size);
-        console.log("Clients:", clientSockets.size);
-
         dispatcherSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
             sentCount++;
@@ -1017,7 +1624,6 @@ app.post("/bookings/broadcast", async (req, res) => {
             sentCount++;
         });
 
-        // Broadcast dashboard cards update after new booking
         await broadcastDashboardCardsUpdate(finalDb);
 
         return res.json({
@@ -1027,7 +1633,7 @@ app.post("/bookings/broadcast", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("❌ Broadcast error:", error);
+        console.error("Broadcast error:", error);
         return res.status(500).json({
             success: false,
             error: error.message
@@ -1155,147 +1761,15 @@ app.post("/waiting-driver", (req, res) => {
     });
 });
 
-// app.post("/send-reminder", (req, res) => {
-//     const { clientId, title, description } = req.body;
-//     const socketId = clientSockets.get(clientId.toString());
-//     if (socketId) {
-//         io.to(socketId).emit("send-reminder", { title, description });
-//     }
-//     return res.json({
-//         success: true,
-//     });
-// });
-
-app.post("/send-reminder", async (req, res) => {
-    try {
-        const { clientId, title, description, user_type = "client" } = req.body;
-
-        if (!clientId || !title || !description) {
-            return res.status(400).json({
-                success: false,
-                message: "clientId, title and description are required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        const insertQuery = `
-            INSERT INTO notifications 
-            (user_type, user_id, title, message, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'unread', NOW(), NOW())
-        `;
-
-        const [result] = await db.query(insertQuery, [
-            user_type,
-            clientId.toString(),
-            title,
-            description
-        ]);
-
-        console.log("Reminder stored in DB with ID:", result.insertId);
-
-        const socketId = clientSockets.get(clientId.toString());
-        if (socketId) {
-            io.to(socketId).emit("send-reminder", {
-                id: result.insertId,
-                title,
-                description,
-                status: "unread"
-            });
-        }
-
-        return res.json({
-            success: true,
-            message: "Reminder sent and stored successfully",
-            notification_id: result.insertId
-        });
-
-    } catch (error) {
-        console.error("Error sending reminder:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+app.post("/send-reminder", (req, res) => {
+    const { clientId, title, description } = req.body;
+    const socketId = clientSockets.get(clientId.toString());
+    if (socketId) {
+        io.to(socketId).emit("send-reminder", { title, description });
     }
-});
-
-app.delete("/notifications/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        if (!id) {
-            return res.status(400).json({
-                success: false,
-                message: "Notification ID is required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        // Check if notification exists
-        const [rows] = await db.query(
-            "SELECT * FROM notifications WHERE id = ?",
-            [id]
-        );
-
-        if (!rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Notification not found"
-            });
-        }
-
-        // Delete notification
-        await db.query(
-            "DELETE FROM notifications WHERE id = ?",
-            [id]
-        );
-
-        return res.json({
-            success: true,
-            message: "Notification deleted successfully"
-        });
-
-    } catch (error) {
-        console.error("❌ Delete notification error:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-app.delete("/notifications/user/:userId", async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const { user_type } = req.query;
-
-        if (!userId || !user_type) {
-            return res.status(400).json({
-                success: false,
-                message: "userId and user_type are required"
-            });
-        }
-
-        const db = getConnection(req.tenantDb);
-
-        await db.query(
-            "DELETE FROM notifications WHERE user_id = ? AND user_type = ?",
-            [userId, user_type]
-        );
-
-        return res.json({
-            success: true,
-            message: "All notifications deleted for this user"
-        });
-
-    } catch (error) {
-        console.error("❌ Delete user notifications error:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
+    return res.json({
+        success: true,
+    });
 });
 
 server.listen(3001, "0.0.0.0", () => {

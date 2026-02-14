@@ -290,4 +290,465 @@ app.get("/bookings/:id/driver-location", async (req, res) => {
     }
 });
 
+// app.put("/bookings/:id/driver-response", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { driver_id, response } = req.body;
+
+//         if (!driver_id || !response) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Driver ID and response are required"
+//             });
+//         }
+
+//         if (!["accepted", "rejected"].includes(response)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Response must be accepted or rejected"
+//             });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [bookingRows] = await db.query(
+//             "SELECT id FROM bookings WHERE id = ? AND driver = ?",
+//             [id, driver_id]
+//         );
+
+//         if (bookingRows.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Booking not found or driver mismatch"
+//             });
+//         }
+
+//         if (response === "accepted") {
+
+//             await db.query(
+//                 `UPDATE bookings 
+//                  SET booking_status = 'started',
+//                      driver_response = 'accepted'
+//                  WHERE id = ?`,
+//                 [id]
+//             );
+
+//             await db.query(
+//                 "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
+//                 [driver_id]
+//             );
+
+//             io.emit("job-accepted-by-driver", {
+//                 booking_id: id,
+//                 driver_id
+//             });
+
+//             return res.json({
+//                 success: true,
+//                 message: "Job accepted successfully"
+//             });
+
+//         } else {
+
+//             await db.query(
+//                 `UPDATE bookings 
+//                  SET driver = NULL,
+//                      booking_status = 'pending',
+//                      driver_response = 'rejected'
+//                  WHERE id = ?`,
+//                 [id]
+//             );
+
+//             await db.query(
+//                 "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
+//                 [driver_id]
+//             );
+
+//             io.emit("job-rejected-by-driver", {
+//                 booking_id: id,
+//                 driver_id
+//             });
+
+//             return res.json({
+//                 success: true,
+//                 message: "Job rejected successfully"
+//             });
+//         }
+
+//     } catch (error) {
+//         console.error("Driver response error:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Something went wrong"
+//         });
+//     }
+// });
+
+// app.put("/bookings/:id/assign-driver", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { driver_id } = req.body;
+
+//         if (!driver_id) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "driver_id is required"
+//             });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [bookings] = await db.query(
+//             "SELECT * FROM bookings WHERE id = ?",
+//             [id]
+//         );
+
+//         if (bookings.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Booking not found"
+//             });
+//         }
+
+//         const booking = bookings[0];
+//         const oldDriverId = booking.driver;
+
+//         const [drivers] = await db.query(
+//             "SELECT * FROM drivers WHERE id = ?",
+//             [driver_id]
+//         );
+
+//         if (drivers.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Driver not found"
+//             });
+//         }
+
+//         await db.query(
+//             "UPDATE bookings SET driver = ?, booking_status = 'ongoing' WHERE id = ?",
+//             [driver_id, id]
+//         );
+
+//         if (oldDriverId && oldDriverId !== null) {
+//             await db.query(
+//                 "UPDATE drivers SET driving_status = 'idle' WHERE id = ?",
+//                 [oldDriverId]
+//             );
+
+//             const oldDriverSocketId = driverSockets.get(oldDriverId.toString());
+//             if (oldDriverSocketId) {
+//                 io.to(oldDriverSocketId).emit("driver-unassigned-event", {
+//                     booking_id: booking.id,
+//                     message: "You have been unassigned from this booking"
+//                 });
+//             }
+//         }
+
+//         await db.query(
+//             "UPDATE drivers SET driving_status = 'busy' WHERE id = ?",
+//             [driver_id]
+//         );
+
+//         const [updatedBookings] = await db.query(`
+//             SELECT 
+//                 b.*,
+//                 d.id as driver_id,
+//                 d.name as driver_name,
+//                 d.email as driver_email,
+//                 d.phone_no as driver_phone,
+//                 d.profile_image as driver_profile_image,
+//                 vt.id as vehicle_type_id,
+//                 vt.vehicle_type_name as vehicle_type_name,
+//                 vt.vehicle_type_service as vehicle_type_service,
+//                 sc.id as sub_company_id,
+//                 sc.name as sub_company_name,
+//                 sc.email as sub_company_email
+//             FROM bookings b
+//             LEFT JOIN drivers d ON b.driver = d.id
+//             LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+//             LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+//             WHERE b.id = ?
+//         `, [id]);
+
+//         const updatedBooking = updatedBookings[0];
+//         const {
+//             driver_id: dId, driver_name, driver_email, driver_phone, driver_profile_image,
+//             vehicle_type_id, vehicle_type_name, vehicle_type_service,
+//             sub_company_id, sub_company_name, sub_company_email,
+//             ...bookingData
+//         } = updatedBooking;
+
+//         const formattedBooking = {
+//             ...bookingData,
+//             driverDetail: dId ? {
+//                 id: dId,
+//                 name: driver_name,
+//                 email: driver_email,
+//                 phone_no: driver_phone,
+//                 profile_image: driver_profile_image
+//             } : null,
+//             vehicleDetail: vehicle_type_id ? {
+//                 id: vehicle_type_id,
+//                 vehicle_type_name: vehicle_type_name,
+//                 vehicle_type_service: vehicle_type_service
+//             } : null,
+//             subCompanyDetail: sub_company_id ? {
+//                 id: sub_company_id,
+//                 name: sub_company_name,
+//                 email: sub_company_email
+//             } : null
+//         };
+
+//         const newDriverSocketId = driverSockets.get(driver_id.toString());
+//         if (newDriverSocketId) {
+//             io.to(newDriverSocketId).emit("new-ride", formattedBooking);
+//         }
+
+//         if (booking.user_id) {
+//             const userSocketId = userSockets.get(booking.user_id.toString());
+//             if (userSocketId) {
+//                 const message = oldDriverId
+//                     ? "Your driver has been changed"
+//                     : "Driver has been assigned to your booking";
+
+//                 io.to(userSocketId).emit("driver-changed-event", {
+//                     booking: formattedBooking,
+//                     message: message
+//                 });
+//             }
+//         }
+
+//         // Broadcast dashboard cards update after driver assignment
+//         await broadcastDashboardCardsUpdate(req.tenantDb);
+
+//         const responseMessage = oldDriverId
+//             ? "Driver changed successfully"
+//             : "Driver assigned successfully";
+
+//         return res.json({
+//             success: true,
+//             message: responseMessage,
+//             data: formattedBooking
+//         });
+
+//     } catch (error) {
+//         console.error("Error assigning driver:", error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
+
+// app.post("/send-reminder", async (req, res) => {
+//     try {
+//         const { clientId, title, description } = req.body;
+
+//         if (!clientId || !title || !description) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "clientId, title, and description are required"
+//             });
+//         }
+
+//         const DB_PREFIX = "tenant";
+//         const finalDb = `${DB_PREFIX}${clientId}`;
+
+//         const db = getConnection(finalDb);
+
+//         const [result] = await db.query(
+//             `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at) 
+//              VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+//             ['company', null, title, description, 'unread']
+//         );
+
+//         console.log(`Notification stored in database with ID: ${result.insertId}`);
+
+//         const socketId = clientSockets.get(clientId.toString());
+//         if (socketId) {
+//             io.to(socketId).emit("send-reminder", {
+//                 id: result.insertId,
+//                 title,
+//                 description,
+//                 created_at: new Date()
+//             });
+//             console.log(`Socket notification sent to client: ${clientId}`);
+//         } else {
+//             console.log(`Client ${clientId} is not connected via socket`);
+//         }
+
+//         return res.json({
+//             success: true,
+//             message: "Reminder sent and stored successfully",
+//             data: {
+//                 id: result.insertId,
+//                 title,
+//                 description
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error("Error in send-reminder:", error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
+
+// app.get("/notifications", async (req, res) => {
+//     try {
+//         const tenantDb = req.tenantDb;
+//         const { status, page = 1, limit = 10 } = req.query;
+
+//         if (!tenantDb) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Database header is required"
+//             });
+//         }
+
+//         const pageNum = Math.max(parseInt(page) || 1, 1);
+//         const limitNum = Math.max(parseInt(limit) || 10, 1);
+//         const offset = (pageNum - 1) * limitNum;
+
+//         const db = getConnection(tenantDb);
+
+//         let query = "SELECT * FROM notifications WHERE 1=1";
+//         const params = [];
+
+//         if (status) {
+//             query += " AND status = ?";
+//             params.push(status);
+//         }
+
+//         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+//         params.push(limitNum, offset);
+
+//         const [notifications] = await db.query(query, params);
+
+//         let countQuery = "SELECT COUNT(*) as total FROM notifications WHERE 1=1";
+//         const countParams = [];
+
+//         if (status) {
+//             countQuery += " AND status = ?";
+//             countParams.push(status);
+//         }
+
+//         const [[{ total }]] = await db.query(countQuery, countParams);
+
+//         return res.json({
+//             success: true,
+//             data: notifications,
+//             pagination: {
+//                 total,
+//                 page: pageNum,
+//                 limit: limitNum,
+//                 total_pages: Math.ceil(total / limitNum),
+//                 hasNext: pageNum * limitNum < total,
+//                 hasPrev: pageNum > 1
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error("Error fetching notifications:", error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
+
+// app.delete("/notifications/:id", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const tenantDb = req.tenantDb;
+
+//         if (!tenantDb) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Database header is required"
+//             });
+//         }
+
+//         const db = getConnection(tenantDb);
+
+//         const [notifications] = await db.query(
+//             "SELECT * FROM notifications WHERE id = ?",
+//             [id]
+//         );
+
+//         if (notifications.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Notification not found"
+//             });
+//         }
+
+//         await db.query("DELETE FROM notifications WHERE id = ?", [id]);
+
+//         console.log(`Notification ${id} deleted successfully`);
+
+//         return res.json({
+//             success: true,
+//             message: "Notification deleted successfully"
+//         });
+
+//     } catch (error) {
+//         console.error("Error deleting notification:", error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
+
+// app.put("/notifications/:id/mark-read", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const tenantDb = req.tenantDb;
+
+//         if (!tenantDb) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Database header is required"
+//             });
+//         }
+
+//         const db = getConnection(tenantDb);
+
+//         const [notifications] = await db.query(
+//             "SELECT * FROM notifications WHERE id = ?",
+//             [id]
+//         );
+
+//         if (notifications.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Notification not found"
+//             });
+//         }
+
+//         await db.query(
+//             "UPDATE notifications SET status = 'read', updated_at = NOW() WHERE id = ?",
+//             [id]
+//         );
+
+//         console.log(`Notification ${id} marked as read`);
+
+//         return res.json({
+//             success: true,
+//             message: "Notification marked as read"
+//         });
+
+//     } catch (error) {
+//         console.error("rror marking notification as read:", error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
+
 module.exports = router;

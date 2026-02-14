@@ -14,27 +14,28 @@ use Illuminate\Support\Facades\Http;
 
 class HomeController extends Controller
 {
-    public function updateProfile(Request $request){
-        try{
+    public function updateProfile(Request $request)
+    {
+        try {
             $request->validate([
                 'name' => 'required',
                 'email' => 'required',
-                'profile_picture' => 'image|mimes:jpg,jpeg,png,gif|max:2048', 
+                'profile_picture' => 'image|mimes:jpg,jpeg,png,gif|max:2048',
             ]);
-            
-            $me = User::where('role','superadmin')->first();
+
+            $me = User::where('role', 'superadmin')->first();
             $me->name = $request->name;
             $me->email = $request->email;
 
-            if(isset($request->profile_picture) && $request->profile_picture != NULL && $me->profile_picture && file_exists($me->profile_picture)) {
-                unlink(public_path('profile_pictures/'.$me->profile_picture));
+            if (isset($request->profile_picture) && $request->profile_picture != NULL && $me->profile_picture && file_exists($me->profile_picture)) {
+                unlink(public_path('profile_pictures/' . $me->profile_picture));
             }
 
-            if(isset($request->profile_picture) && $request->profile_picture != NULL){
+            if (isset($request->profile_picture) && $request->profile_picture != NULL) {
                 $file = $request->file('profile_picture');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('profile_pictures'), $filename);
-                $me->profile_picture = 'profile_pictures/'.$filename;
+                $me->profile_picture = 'profile_pictures/' . $filename;
             }
 
             $me->save();
@@ -44,8 +45,7 @@ class HomeController extends Controller
                 'message' => 'Profile updated successfully'
             ]);
 
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -53,8 +53,9 @@ class HomeController extends Controller
         }
     }
 
-    public function changePassword(Request $request){
-        try{
+    public function changePassword(Request $request)
+    {
+        try {
             $request->validate([
                 'old_password' => 'required',
                 'new_password' => 'required',
@@ -75,8 +76,7 @@ class HomeController extends Controller
                 'success' => 1,
                 'message' => 'Password changed successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -84,18 +84,19 @@ class HomeController extends Controller
         }
     }
 
-    public function dashboard(){
-        try{
+    public function dashboard()
+    {
+        try {
             $totalCompanies = Tenant::where('data->created_at', '>=', Carbon::now()->subHours(3))->count();
             $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
             $monthlyRevenue = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())->sum('data->payment_amount');
             $recentTransaction = [];
-            $APIStatus['google_map']['requests'] = 1;  
-            $APIStatus['google_map']['cost'] = 1;  
-            $APIStatus['google_map']['status'] = 1;  
-            $APIStatus['twillio_api']['minutes'] = 1;  
-            $APIStatus['twillio_api']['cost'] = 1;  
-            $APIStatus['twillio_api']['status'] = 1;  
+            $APIStatus['google_map']['requests'] = 1;
+            $APIStatus['google_map']['cost'] = 1;
+            $APIStatus['google_map']['status'] = 1;
+            $APIStatus['twillio_api']['minutes'] = 1;
+            $APIStatus['twillio_api']['cost'] = 1;
+            $APIStatus['twillio_api']['status'] = 1;
 
             return response()->json([
                 'success' => 1,
@@ -107,142 +108,168 @@ class HomeController extends Controller
                     'apiStatus' => $APIStatus
                 ]
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
             ], 500);
         }
     }
+    
+    public function usageMonitoring(Request $request)
+    {
+        try {
+            $perPage = $request->get('per_page', 10);
+            $tenants = Tenant::paginate($perPage);
 
-    // public function usageMonitoring(){
-    //     try{
-    //         $activeCompanies = Tenant::where('data->status', 'active')->count();
-    //         $totalAPICalls =  19;
-    //         $companyList = [
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ],
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ],
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ],
-    //             [
-    //                 'company_name' => 'ABC',
-    //                 'api_calls_today' => '12500',
-    //                 'map_request' => '8500',
-    //                 'voip_minutes' => '1250',
-    //                 'dispatchers' => '5/10'
-    //             ]
-    //         ];
+            $totalAPICalls = 0;
+            $companyList = [];
 
-    //         return response()->json([
-    //             'success' => 1,
-    //             'data' => [
-    //                 'activeCompanies' => $activeCompanies,
-    //                 'totalAPICalls' => $totalAPICalls
-    //             ],
-    //             'company_list' => $companyList
-    //         ]);
-    //     }
-    //     catch(\Exception $e){
-    //         return response()->json([
-    //             'error' => 1,
-    //             'message' => $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
-    public function usageMonitoring()
-{
-    try {
+            foreach ($tenants as $tenant) {
 
-        $tenants = Tenant::where('status', 'active')->get();
+                $apiCallsToday = 0;
+                $mapRequests = 0;
+                $voipMinutes = 0;
+                $totalDispatchers = 0;
+                $lastLogin = null;
 
-        $activeCompanies = $tenants->count();
-        $totalAPICalls = 0;
-        $companyList = [];
+                $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$totalDispatchers, &$lastLogin) {
 
-        foreach ($tenants as $tenant) {
+                    if (\Schema::hasTable('bookings')) {
+                        $apiCallsToday = \DB::table('bookings')
+                            ->whereDate('created_at', Carbon::today())
+                            ->count();
 
-            $apiCallsToday = 0;
-            $mapRequests = 0;
-            $voipMinutes = 0;
-            $dispatchersUsed = 0;
+                        $mapRequests = $apiCallsToday;
+                    }
 
-            $tenant->run(function () use (&$apiCallsToday, &$mapRequests, &$voipMinutes, &$dispatchersUsed) {
+                    if (\Schema::hasTable('calls')) {
+                        $voipMinutes = \DB::table('calls')
+                            ->whereDate('created_at', Carbon::today())
+                            ->sum('duration');
+                    }
 
-                // ✅ Today's API Calls
-                $apiCallsToday = \DB::table('api_logs')
-                    ->whereDate('created_at', Carbon::today())
-                    ->count();
+                    if (\Schema::hasTable('dispatcher')) {
+                        $totalDispatchers = \DB::table('dispatcher')->count();
 
-                // ✅ Today's Map Requests
-                $mapRequests = \DB::table('map_logs')
-                    ->whereDate('created_at', Carbon::today())
-                    ->count();
+                        $hasLastLogin = \Schema::hasColumn('dispatcher', 'last_login');
+                        if ($hasLastLogin) {
+                            $lastLogin = \DB::table('dispatcher')
+                                ->whereNotNull('last_login')
+                                ->orderBy('last_login', 'DESC')
+                                ->value('last_login');
+                        }
 
-                // ✅ Today's VOIP Minutes
-                $voipMinutes = \DB::table('voip_logs')
-                    ->whereDate('created_at', Carbon::today())
-                    ->sum('minutes');
+                        if (!$lastLogin) {
+                            $lastLogin = \DB::table('dispatcher')
+                                ->orderBy('updated_at', 'DESC')
+                                ->value('updated_at');
+                        }
+                    }
 
-                // ✅ Active Dispatchers
-                $dispatchersUsed = \DB::table('dispatchers')
-                    ->count();
-            });
+                    if (!$lastLogin && \Schema::hasTable('admins')) {
+                        $hasLastLogin = \Schema::hasColumn('admins', 'last_login');
+                        if ($hasLastLogin) {
+                            $lastLogin = \DB::table('admins')
+                                ->whereNotNull('last_login')
+                                ->orderBy('last_login', 'DESC')
+                                ->value('last_login');
+                        }
 
-            $totalAPICalls += $apiCallsToday;
+                        if (!$lastLogin) {
+                            $lastLogin = \DB::table('admins')
+                                ->orderBy('updated_at', 'DESC')
+                                ->value('updated_at');
+                        }
+                    }
+                });
 
-            $companyList[] = [
-                'company_name' => $tenant->company_name,
-                'api_calls_today' => $apiCallsToday,
-                'map_request' => $mapRequests,
-                'voip_minutes' => $voipMinutes,
-                'dispatchers' => $dispatchersUsed . '/' . $tenant->dispatchers_allowed
-            ];
+                $totalAPICalls += $apiCallsToday;
+
+                $dispatchersAllowed = 0;
+
+                if (isset($tenant->dispatchers_allowed)) {
+                    $dispatchersAllowed = (int) $tenant->dispatchers_allowed;
+                }
+
+                if ($dispatchersAllowed === 0 && isset($tenant->data)) {
+                    $tenantData = $tenant->data;
+
+                    if (is_string($tenantData)) {
+                        $tenantData = json_decode($tenantData, true);
+                    }
+
+                    if (is_object($tenantData)) {
+                        $tenantData = (array) $tenantData;
+                    }
+
+                    $dispatchersAllowed = (int) (
+                        $tenantData['dispatchers_allowed'] ??
+                        $tenantData['max_dispatchers'] ??
+                        $tenantData['dispatcher_limit'] ??
+                        $tenantData['dispatchers'] ??
+                        0
+                    );
+                }
+
+                $lastLoginFormatted = 'Never';
+                $lastLoginRaw = null;
+
+                if ($lastLogin) {
+                    try {
+                        $lastLoginCarbon = Carbon::parse($lastLogin);
+                        $lastLoginFormatted = $lastLoginCarbon->diffForHumans();
+                        $lastLoginRaw = $lastLoginCarbon->format('Y-m-d H:i:s');
+                    } catch (\Exception $e) {
+                        $lastLoginFormatted = 'Never';
+                        $lastLoginRaw = null;
+                    }
+                }
+
+                $companyList[] = [
+                    'company_name' => $tenant->company_name ?? 'N/A',
+                    'api_calls_today' => $apiCallsToday,
+                    'map_request' => $mapRequests,
+                    'voip_minutes' => (int) $voipMinutes,
+                    'dispatchers' => $totalDispatchers . '/' . $dispatchersAllowed,
+                    'total_dispatchers' => $totalDispatchers,
+                    'allowed_dispatchers' => $dispatchersAllowed,
+                    'last_login' => $lastLoginFormatted,
+                    'last_login_raw' => $lastLoginRaw,
+                ];
+            }
+
+            return response()->json([
+                'success' => 1,
+                'data' => [
+                    'totalCompanies' => $tenants->total(),
+                    'totalAPICalls' => $totalAPICalls,
+                ],
+                'company_list' => $companyList,
+                'pagination' => [
+                    'current_page' => $tenants->currentPage(),
+                    'last_page' => $tenants->lastPage(),
+                    'per_page' => $tenants->perPage(),
+                    'total' => $tenants->total(),
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
         }
-
-        return response()->json([
-            'success' => 1,
-            'data' => [
-                'activeCompanies' => $activeCompanies,
-                'totalAPICalls' => $totalAPICalls
-            ],
-            'company_list' => $companyList
-        ]);
-
-    } catch (\Exception $e) {
-        return response()->json([
-            'error' => 1,
-            'message' => $e->getMessage()
-        ], 500);
     }
-}
-
-    public function getAPIKeys(){
-        try{
+    public function getAPIKeys()
+    {
+        try {
             $settingKeys = Setting::orderBy("id", "DESC")->first();
             return response()->json([
                 'success' => 1,
                 'settingKeys' => $settingKeys
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -250,10 +277,11 @@ class HomeController extends Controller
         }
     }
 
-    public function storeAPIKeys(Request $request){
-        try{
+    public function storeAPIKeys(Request $request)
+    {
+        try {
             $settingKeys = Setting::orderBy("id", "DESC")->first();
-            if(!isset($settingKeys) || $settingKeys == NULL){
+            if (!isset($settingKeys) || $settingKeys == NULL) {
                 $settingKeys = new Setting;
             }
             $settingKeys->stripe_secret = $request->stripe_secret;
@@ -272,25 +300,23 @@ class HomeController extends Controller
                 'success' => 1,
                 'message' => 'API keys saved successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
             ], 500);
         }
     }
-
-    public function paymentReminderList(){
-        try{
+    public function paymentReminderList()
+    {
+        try {
             $tenantList = Tenant::whereDate('data->expiry_date', '<', today())->get();
 
             return response()->json([
                 'success' => 1,
                 'list' => $tenantList
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -298,8 +324,9 @@ class HomeController extends Controller
         }
     }
 
-    public function sendReminder(Request $request){
-        try{
+    public function sendReminder(Request $request)
+    {
+        try {
             $request->validate([
                 'client_id' => 'required',
                 'title' => 'required',
@@ -317,17 +344,16 @@ class HomeController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
-                'clientId' => $request->client_id,
-                'title' => $request->title,
-                'description' => $request->description
-            ]);
+                        'clientId' => $request->client_id,
+                        'title' => $request->title,
+                        'description' => $request->description
+                    ]);
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Remider sent successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             \Log::info($e->getMessage());
             return response()->json([
                 'error' => 1,

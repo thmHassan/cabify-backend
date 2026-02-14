@@ -16,8 +16,9 @@ use App\Models\CompanyToken;
 
 class UserController extends Controller
 {
-    public function createUser(Request $request){
-        try{
+    public function createUser(Request $request)
+    {
+        try {
             $request->validate([
                 'name' => 'required|max:255',
                 'email' => 'required|email|unique:users,email',
@@ -33,38 +34,37 @@ class UserController extends Controller
                 ->first();
 
             $countUser = CompanyUser::count();
-            
-            if($countUser >= $dataCheck->data['passengers_allowed']){
+
+            if ($countUser >= $dataCheck->data['passengers_allowed']) {
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
-                    'clientId' => $request->header('database'),
-                    'title' => "Passenger Limit",
-                    'description' => "You have reached your passenger limits"
-                ]);
+                            'clientId' => $request->header('database'),
+                            'title' => "Passenger Limit",
+                            'description' => "You have reached your passenger limits"
+                        ]);
 
                 return response()->json([
                     'error' => 1,
                     'message' => 'You have already reached to passenger limits'
                 ]);
             }
-            
+
             $newUser = new CompanyUser;
-            $newUser->name = $request->name; 
-            $newUser->email = $request->email; 
-            $newUser->phone_no = $request->phone_no; 
-            $newUser->password = Hash::make($request->password); 
-            $newUser->address = $request->address; 
-            $newUser->city = $request->city; 
-            $newUser->dispatcher_id = $request->dispatcher_id; 
+            $newUser->name = $request->name;
+            $newUser->email = $request->email;
+            $newUser->phone_no = $request->phone_no;
+            $newUser->password = Hash::make($request->password);
+            $newUser->address = $request->address;
+            $newUser->city = $request->city;
+            $newUser->dispatcher_id = $request->dispatcher_id;
             $newUser->save();
 
             return response()->json([
                 'success' => 1,
                 'message' => 'User saved successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -72,8 +72,9 @@ class UserController extends Controller
         }
     }
 
-    public function editUser(Request $request){
-        try{
+    public function editUser(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required',
                 'name' => 'required|max:255',
@@ -86,22 +87,21 @@ class UserController extends Controller
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
             ]);
-            
+
             $editUser = CompanyUser::where("id", $request->id)->first();
-            $editUser->name = $request->name; 
-            $editUser->email = $request->email; 
-            $editUser->phone_no = $request->phone_no; 
-            $editUser->address = $request->address; 
-            $editUser->city = $request->city; 
-            $editUser->dispatcher_id = $request->dispatcher_id; 
+            $editUser->name = $request->name;
+            $editUser->email = $request->email;
+            $editUser->phone_no = $request->phone_no;
+            $editUser->address = $request->address;
+            $editUser->city = $request->city;
+            $editUser->dispatcher_id = $request->dispatcher_id;
             $editUser->save();
 
             return response()->json([
                 'success' => 1,
                 'message' => 'User updated successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -109,30 +109,34 @@ class UserController extends Controller
         }
     }
 
-    public function listUser(Request $request){
-        try{
-            $perPage = 10;
-            if(isset($request->perPage) && $request->perPage != NULL){
-                $perPage = $request->perPage;
-            }
+    public function listUser(Request $request)
+    {
+        try {
+            $perPage = $request->perPage ?? 10;
+
             $users = CompanyUser::orderBy("id", "DESC");
-            if(isset($request->search) && $request->search != NULL){
-                $users->where(function($query) use ($request){
-                    $query->where("name", "LIKE" ,"%".$request->search."%")
-                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
+
+            if ($request->filled('search')) {
+                $search = $request->search;
+
+                $users->where(function ($query) use ($search) {
+                    $query->where("name", "LIKE", "%$search%")
+                        ->orWhere("email", "LIKE", "%$search%")
+                        ->orWhere("phone_no", "LIKE", "%$search%");
                 });
             }
-            if(isset($request->dispatcher_id) && $request->dispatcher_id != NULL){
+
+            if ($request->filled('dispatcher_id')) {
                 $users->where("dispatcher_id", $request->dispatcher_id);
             }
+
             $data = $users->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
                 'users' => $data
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -140,21 +144,21 @@ class UserController extends Controller
         }
     }
 
-    public function deleteUser(Request $request){
-        try{
+    public function deleteUser(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required',
             ]);
             $user = CompanyUser::where("id", $request->id)->first();
-            if(isset($user) && $user != NULL){
+            if (isset($user) && $user != NULL) {
                 $user->delete();
             }
             return response()->json([
                 'success' => 1,
                 'message' => 'User deleted successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -162,8 +166,9 @@ class UserController extends Controller
         }
     }
 
-    public function getEditUser(Request $request){
-        try{
+    public function getEditUser(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required',
             ]);
@@ -172,8 +177,7 @@ class UserController extends Controller
                 'success' => 1,
                 'user' => $user
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -181,8 +185,9 @@ class UserController extends Controller
         }
     }
 
-    public function changeUserStatus(Request $request){
-        try{
+    public function changeUserStatus(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required',
             ]);
@@ -194,8 +199,7 @@ class UserController extends Controller
                 'success' => 1,
                 'message' => 'User status updated successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -203,16 +207,16 @@ class UserController extends Controller
         }
     }
 
-    public function rideHistory(Request $request){
-        try{
+    public function rideHistory(Request $request)
+    {
+        try {
             $data = CompanyBooking::where("user_id", $request->user_id)->with('driverDetail')->orderBy("id", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
                 'rideHistory' => $data
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -220,8 +224,9 @@ class UserController extends Controller
         }
     }
 
-    public function sendUserNotification(Request $request){
-        try{
+    public function sendUserNotification(Request $request)
+    {
+        try {
             $request->validate([
                 'user_id' => 'required',
                 'title' => 'required',
@@ -232,8 +237,8 @@ class UserController extends Controller
 
             $tokens = CompanyToken::where("user_id", $request->user_id)->where("user_type", "rider")->get();
 
-            if(isset($tokens) && $tokens != NULL){
-                foreach($tokens as $key => $token){
+            if (isset($tokens) && $tokens != NULL) {
+                foreach ($tokens as $key => $token) {
                     FCMService::sendToDevice(
                         $token->fcm_token,
                         $request->title,
@@ -253,8 +258,7 @@ class UserController extends Controller
                 'success' => 1,
                 'message' => 'Notification sent successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
