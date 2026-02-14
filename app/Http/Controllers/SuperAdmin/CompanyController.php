@@ -511,6 +511,20 @@ class CompanyController extends Controller
                 );
             }
             $data = $tenants->paginate($perPage);
+
+            $data->getCollection()->transform(function ($tenant) {
+                tenancy()->initialize($tenant);
+                $monthlyAmount = DB::table('wallet_transactions')
+                    ->whereMonth('created_at', Carbon::now()->month)
+                    ->whereYear('created_at', Carbon::now()->year)
+                    ->sum('amount');
+
+                tenancy()->end();
+
+                $tenant->monthly_revenue = $monthlyAmount ?? 0;
+
+                return $tenant;
+            });
             return response()->json([
                 'success' => 1,
                 'message' => 'List fetched successfully',
