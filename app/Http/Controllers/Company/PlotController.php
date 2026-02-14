@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyPlot;
+use App\Models\CompanySetting;
 
 class PlotController extends Controller
 {
-    public function createPlot(Request $request){
-        try{
+    public function createPlot(Request $request)
+    {
+        try {
             $request->validate([
                 'name' => 'required|max:255',
                 'features' => 'required',
@@ -20,12 +22,17 @@ class PlotController extends Controller
             $plot->features = json_encode($request->features);
             $plot->save();
 
+            $settings = CompanySetting::orderBy("id", "DESC")->first();
+            if (isset($settings) && $settings != NULL) {
+                $settings->maps_api_count = ($settings->maps_api_count ?? 0) + 1;
+                $settings->save();
+            }
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Plot saved successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -33,8 +40,9 @@ class PlotController extends Controller
         }
     }
 
-    public function editPlot(Request $request){
-        try{
+    public function editPlot(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required',
                 'name' => 'required|max:255',
@@ -50,8 +58,7 @@ class PlotController extends Controller
                 'success' => 1,
                 'message' => 'Plot updated successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -59,15 +66,15 @@ class PlotController extends Controller
         }
     }
 
-    public function getEditPlot(Request $request){
-        try{
+    public function getEditPlot(Request $request)
+    {
+        try {
             $plot = CompanyPlot::where("id", $request->id)->first();
             return response()->json([
                 'success' => 1,
                 'plot' => $plot
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -75,17 +82,18 @@ class PlotController extends Controller
         }
     }
 
-    public function plotList(Request $request){
-        try{
+    public function plotList(Request $request)
+    {
+        try {
             $perPage = 10;
-            if(isset($request->perPage) && $request->perPage != NULL){
+            if (isset($request->perPage) && $request->perPage != NULL) {
                 $perPage = $request->perPage;
             }
             $plots = CompanyPlot::orderBy("id", "DESC");
-            if(isset($request->search) && $request->search != NULL){
-                $plots->where(function($query) use ($request){
-                    $query->where("name", "LIKE" ,"%".$request->search."%")
-                            ->orWhere("features", "LIKE" ,"%".$request->search."%");
+            if (isset($request->search) && $request->search != NULL) {
+                $plots->where(function ($query) use ($request) {
+                    $query->where("name", "LIKE", "%" . $request->search . "%")
+                        ->orWhere("features", "LIKE", "%" . $request->search . "%");
                 });
             }
             $data = $plots->paginate($perPage);
@@ -93,8 +101,7 @@ class PlotController extends Controller
                 'success' => 1,
                 'list' => $data
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -102,19 +109,19 @@ class PlotController extends Controller
         }
     }
 
-    public function deletePlot(Request $request){
-        try{
+    public function deletePlot(Request $request)
+    {
+        try {
             $plot = CompanyPlot::where("id", $request->id)->first();
 
-            if(isset($plot) && $plot != NULL){
+            if (isset($plot) && $plot != NULL) {
                 $plot->delete();
             }
             return response()->json([
                 'success' => 1,
                 'message' => 'Plot deleted successfully'
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -122,16 +129,16 @@ class PlotController extends Controller
         }
     }
 
-    public function allPlot(Request $request){
-        try{
+    public function allPlot(Request $request)
+    {
+        try {
             $plots = CompanyPlot::orderBy("id", "DESC")->get();
 
             return response()->json([
                 'success' => 1,
                 'list' => $plots
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -139,8 +146,9 @@ class PlotController extends Controller
         }
     }
 
-    public function storeBackupPlot(Request $request){
-        try{
+    public function storeBackupPlot(Request $request)
+    {
+        try {
             $request->validate([
                 'id' => 'required|max:255',
                 'backup_plot_array' => 'required',
@@ -154,8 +162,7 @@ class PlotController extends Controller
                 'success' => 1,
                 'message' => "Backup plot added succesfully"
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -163,12 +170,13 @@ class PlotController extends Controller
         }
     }
 
-    public function getBackupPlot(Request $request){
-        try{
+    public function getBackupPlot(Request $request)
+    {
+        try {
             $plots = CompanyPlot::orderBy("id", "DESC")->get();
 
-            foreach($plots as $plot){
-                if(is_array($plot->backup_plots) && $plot->backup_plots != NULL){
+            foreach ($plots as $plot) {
+                if (is_array($plot->backup_plots) && $plot->backup_plots != NULL) {
                     $backupPlots = CompanyPlot::whereIn("id", $plot->backup_plots)->get();
                     $plot->backup_plots_data = $backupPlots;
                 }
@@ -178,8 +186,7 @@ class PlotController extends Controller
                 'success' => 1,
                 'list' => $plots
             ]);
-        }
-        catch(\Exception $e){
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
