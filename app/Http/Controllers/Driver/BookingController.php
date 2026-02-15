@@ -334,6 +334,12 @@ class BookingController extends Controller
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->driving_status = "idle";
             $driver->cancel_rides_per_day += 1;
+            
+            $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+            if ($companySetting->package_type == "per_ride_commission_topup") {
+                $checkAmount = $companySetting->package_amount;
+                $driver->wallet_balance += $checkAmount;
+            }
             $driver->save();
 
             Http::withHeaders([

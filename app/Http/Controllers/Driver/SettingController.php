@@ -101,7 +101,7 @@ class SettingController extends Controller
         try{
             $userId = auth('driver')->user()->id;
             
-            $transactionHistory = WalletTransaction::where("user_id", $userId)->where("user_type", "driver")->orderBy("id", "DESC")->get();
+            $transactionHistory = WalletTransaction::where("user_id", $userId)->where("user_type", "driver")->orderBy("id", "DESC")->where("comment", "!=", "Client Admin Amount Collected")->get();
 
             return response()->json([
                 'success' => 1,
@@ -471,7 +471,7 @@ class SettingController extends Controller
 
     public function getPurchasePackage(Request $request){
         try{
-            $package = DriverPackage::orderBy("updated_at", "DESC")->first();
+            $package = DriverPackage::where('driver_id', auth("driver")->user()->id)->orderBy("updated_at", "DESC")->whereDate('expire_date', '>=', now()->toDateString())->first();
 
             return response()->json([
                 'success' => 1,

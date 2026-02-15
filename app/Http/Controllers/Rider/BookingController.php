@@ -508,7 +508,7 @@ class BookingController extends Controller
                     }
                     $driver->wallet_balance -= $checkAmount;
                     $driver->save();
-                    
+
                     $wallet = new WalletTransaction;
                     $wallet->user_type = "driver";
                     $wallet->user_id = $driver->id;
@@ -719,7 +719,12 @@ class BookingController extends Controller
             }
 
             $driver = CompanyBooking::where("id", $booking->driver)->first();
-
+            $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+            if ($companySetting->package_type == "per_ride_commission_topup") {
+                $checkAmount = $companySetting->package_amount;
+                $driver->wallet_balance += $checkAmount;
+                $driver->save();
+            }
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
