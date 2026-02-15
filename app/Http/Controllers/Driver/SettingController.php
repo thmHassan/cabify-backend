@@ -447,6 +447,14 @@ class SettingController extends Controller
                 'package_top_up_id' => $request->package_top_up_id,
                 'package_top_up_name' => $request->package_top_up_name,
             ]);
+
+            $wallet = new WalletTransaction;
+            $wallet->user_type = "driver";
+            $wallet->user_id = $driverId;
+            $wallet->type = 'deduct';
+            $wallet->amount = $request->post_paid_amount;
+            $wallet->comment = "Package purchase";
+            $wallet->save();
             
             return response()->json([
                 'success' => 1,
