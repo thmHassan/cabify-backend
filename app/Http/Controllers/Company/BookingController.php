@@ -14,6 +14,7 @@ use App\Jobs\AutoDispatchPlotJob;
 use App\Jobs\SendBiddingFixedFareNotificationJob;
 use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
+use App\Models\CompanySendNewRide;
 
 class BookingController extends Controller
 {
@@ -141,7 +142,7 @@ class BookingController extends Controller
                         $newBooking->booking_id = "RD" . strtoupper(uniqid());
                         $newBooking->sub_company = $request->sub_company;
                         $newBooking->pickup_time = $request->pickup_time;
-                        $newBooking->booking_date = $date;
+                        $newBooking->booking_date = $date->toDateString();
                         $newBooking->booking_type = $request->booking_type;
                         $newBooking->pickup_point = $request->pickup_point;
                         $newBooking->pickup_location = $request->pickup_location;
@@ -182,6 +183,35 @@ class BookingController extends Controller
                         $newBooking->save();
                     }
                 }
+
+                if (isset($newBooking) && isset($request->driver) && $request->driver != NULL) {
+                    Http::withHeaders([
+                        'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+                        'drivers' => [$newBooking->driver],
+                        'booking' => [
+                            'id' => $newBooking->id,
+                            'booking_id' => $newBooking->booking_id,
+                            'pickup_point' => $newBooking->pickup_point,
+                            'destination_point' => $newBooking->destination_point,
+                            'offered_amount' => $newBooking->offered_amount,
+                            'distance' => $newBooking->distance,
+                            'user_id' => $newBooking->user_id,
+                            'user_name' => $newBooking->name,
+                            'user_profile' => $newBooking->userDetail->profile_image,
+                            'pickup_location' => $newBooking->pickup_location,
+                            'destination_location' => $newBooking->destination_location,
+                            'note' => $newBooking->note,
+                            'pickup_time' => (isset($request->pickup_time) && $request->pickup_time != NULL) ? $request->pickup_time : NULL,
+                            'booking_date' => (isset($date) && $date != NULL) ? $date : NULL,
+                        ]
+                    ]);
+
+                    $sendRide = new CompanySendNewRide;
+                    $sendRide->booking_id = $newBooking->id;
+                    $sendRide->driver_id = $newBooking->driver;
+                    $sendRide->save();
+                }
             } else {
                 if ($request->pickup_time != 'asap' && $request->driver != NULL) {
                     $date = $request->booking_date;
@@ -197,7 +227,7 @@ class BookingController extends Controller
                     $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)
                         ->where(function ($q) {
                             $q->where("booking_status", 'started')
-                                ->orWhere("booking_status", 'started')
+                                ->orWhere("booking_status", 'arrived')
                                 ->orWhere("booking_status", 'ongoing');
                         })
                         ->first();
@@ -272,6 +302,32 @@ class BookingController extends Controller
                     } elseif ($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver") {
                         AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
                     }
+                }
+                else{
+                    Http::withHeaders([
+                        'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+                        'drivers' => [$newBooking->driver],
+                        'booking' => [
+                            'id' => $newBooking->id,
+                            'booking_id' => $newBooking->booking_id,
+                            'pickup_point' => $newBooking->pickup_point,
+                            'destination_point' => $newBooking->destination_point,
+                            'offered_amount' => $newBooking->offered_amount,
+                            'distance' => $newBooking->distance,
+                            'user_id' => $newBooking->user_id,
+                            'user_name' => $newBooking->name,
+                            'user_profile' => $newBooking->userDetail->profile_image,
+                            'pickup_location' => $newBooking->pickup_location,
+                            'destination_location' => $newBooking->destination_location,
+                            'note' => $newBooking->note,
+                        ]
+                    ]);
+
+                    $sendRide = new CompanySendNewRide;
+                    $sendRide->booking_id = $newBooking->id;
+                    $sendRide->driver_id = $newBooking->driver;
+                    $sendRide->save();
                 }
             }
 

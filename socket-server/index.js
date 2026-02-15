@@ -762,9 +762,11 @@ app.post("/driver/collect-commission", async (req, res) => {
         `, [formatDateTime(newSettlementDate), driver_id]);
 
         const transactionType = settings.package_type === 'packages_post_paid' ? 'add' : 'add';
-        const transactionComment = settings.package_type === 'packages_post_paid'
-            ? `Commission collected - ${firstEntry.description}`
-            : `Commission collected - ${firstEntry.description}`;
+        // const transactionComment = settings.package_type === 'packages_post_paid'
+        //     ? `Commission collected - ${firstEntry.description}`
+        //     : `Commission collected - ${firstEntry.description}`;
+
+        const transactionComment = "Client Admin Amount Collected";
 
         await db.query(`
             INSERT INTO wallet_transactions 
