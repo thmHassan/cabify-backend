@@ -5,7 +5,16 @@ const { Server } = require("socket.io");
 const axios = require("axios");
 const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
-const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
+console.log("Loaded VIP Token:", process.env.VIP_WEBHOOK_TOKEN);;
 
 const app = express();
 const server = http.createServer(app);
@@ -1848,6 +1857,59 @@ app.post("/send-reminder", (req, res) => {
     return res.json({
         success: true,
     });
+});
+
+app.post("/voip-webhook", async (req, res) => {
+    try {
+        const { token, events } = req.body;
+
+        if (token !== process.env.VIP_WEBHOOK_TOKEN) {
+            console.log("❌ Invalid VOIP token");
+            return res.status(403).json({ success: false });
+        }
+
+        if (!Array.isArray(events)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid events format",
+            });
+        }
+
+        for (const event of events) {
+            console.log("📞 VOIP EVENT RECEIVED:", event);
+
+            const {
+                callId,
+                dialledNumber,
+                extension,
+                callerId,
+                status,
+                time,
+            } = event;
+
+            const voipData = {
+                callId,
+                dialledNumber,
+                extension,
+                callerId,
+                status,
+                time: new Date(time * 1000),
+            };
+
+            dispatcherSockets.forEach((socketId) => {
+                io.to(socketId).emit("voip-call-update", voipData);
+            });
+
+            adminSockets.forEach((socketId) => {
+                io.to(socketId).emit("voip-call-update", voipData);
+            });
+        }
+
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("❌ Webhook Error:", error);
+        return res.status(500).json({ success: false });
+    }
 });
 
 server.listen(3001, "0.0.0.0", () => {
