@@ -1,6 +1,6 @@
 const path = require("path");
 require("dotenv").config({
-  path: path.join(__dirname, "../.env"),
+    path: path.join(__dirname, "../.env"),
 });
 
 const express = require("express");
@@ -509,9 +509,13 @@ async function calculatePercentageEntries(driver, settings, db) {
         ? new Date(settings.package_updated_at)
         : (settings.updated_at ? new Date(settings.updated_at) : new Date(driver.created_at));
 
-    const lastSettlementDate = driver.last_settlement_date
-        ? new Date(driver.last_settlement_date)
-        : packageStartDate;
+    let lastSettlementDate;
+    if (driver.last_settlement_date) {
+        const settlDate = new Date(driver.last_settlement_date);
+        lastSettlementDate = settlDate >= packageStartDate ? settlDate : packageStartDate;
+    } else {
+        lastSettlementDate = packageStartDate;
+    }
 
     const currentDate = new Date();
 
@@ -530,18 +534,19 @@ async function calculatePercentageEntries(driver, settings, db) {
 
         const cycleEndDate = new Date(cycleStartDate);
         cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
+        cycleEndDate.setHours(23, 59, 59, 999); 
 
         const [bookingRows] = await db.query(`
             SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
             FROM bookings
             WHERE driver = ?
             AND booking_status = 'completed'
-            AND updated_at >= ?
-            AND updated_at <= ?
+            AND DATE(booking_date) >= ?
+            AND DATE(booking_date) <= ?
         `, [
             driver.id,
-            formatDateTime(cycleStartDate),
-            formatDateTime(new Date(cycleEndDate.getTime() + 24 * 60 * 60 * 1000 - 1))
+            formatDate(cycleStartDate),
+            formatDate(cycleEndDate)
         ]);
 
         const totalRidesAmount = parseFloat(bookingRows[0]?.total_rides_amount || 0);
@@ -574,12 +579,12 @@ async function calculatePercentageEntries(driver, settings, db) {
         FROM bookings
         WHERE driver = ?
         AND booking_status = 'completed'
-        AND updated_at >= ?
-        AND updated_at <= ?
+        AND DATE(booking_date) >= ?
+        AND DATE(booking_date) <= ?
     `, [
         driver.id,
-        formatDateTime(currentCycleStart),
-        formatDateTime(new Date(currentCycleEnd.getTime() + 24 * 60 * 60 * 1000 - 1))
+        formatDate(currentCycleStart),
+        formatDate(currentCycleEnd)
     ]);
 
     const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
