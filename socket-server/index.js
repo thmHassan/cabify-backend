@@ -121,15 +121,6 @@ io.on("connection", (socket) => {
     });
 });
 
-app.use((req, res, next) => {
-    // if (req.headers.authorization !== `Bearer INTERNAL_NODE_SECRET`) {
-    //     return res.status(401).json({ error: "Unauthorized" });
-    // }
-    next();
-});
-
-app.use(express.json());
-
 app.use(cors({
     origin: [
         "http://localhost:5173",
@@ -143,6 +134,15 @@ app.use(cors({
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
 }));
+
+app.use(express.json());
+
+app.use((req, res, next) => {
+    // if (req.headers.authorization !== `Bearer INTERNAL_NODE_SECRET`) {
+    //     return res.status(401).json({ error: "Unauthorized" });
+    // }
+    next();
+});
 
 const broadcastDashboardCardsUpdate = async (tenantDb) => {
     try {
