@@ -31,6 +31,119 @@ const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
 
+io.use(async (socket, next) => {
+
+    const authHeader = socket.handshake.headers.authorization;
+    const driverId = socket.handshake.query.driver_id;
+    const userId = socket.handshake.query.user_id;
+    const adminId = socket.handshake.query.admin_id;
+    const role = socket.handshake.query.role;
+    const dispatcherId = socket.handshake.query.dispatcher_id;
+    const clientId = socket.handshake.query.client_id;
+    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) || (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) || (role === 'user' && !userId)) {
+        return next(new Error("Unauthorized"));
+    }
+    socket.token = authHeader.split(" ")[1];
+    socket.driverId = driverId;
+    socket.dispatcherId = dispatcherId;
+    socket.clientId = clientId;
+    socket.userId = userId;
+    socket.adminId = adminId;
+
+    next();
+});
+
+io.on("connection", (socket) => {
+    const role = socket.handshake.query.role;
+    const driverId = socket.handshake.query.driver_id;
+    const dispatcherId = socket.handshake.query.dispatcher_id;
+    const userId = socket.handshake.query.user_id;
+    const clientId = socket.handshake.query.client_id;
+    const adminId = socket.handshake.query.admin_id;
+
+    if (role === "dispatcher" && dispatcherId) {
+        dispatcherSockets.set(dispatcherId.toString(), socket.id);
+    }
+    if (role === "user" && userId) {
+        userSockets.set(userId.toString(), socket.id);
+    }
+    if (role === "client" && clientId) {
+        clientSockets.set(clientId.toString(), socket.id);
+    }
+    if (role === "admin" && adminId) {
+        adminSockets.set(adminId.toString(), socket.id);
+    }
+    if (driverId) {
+        driverSockets.set(driverId.toString(), socket.id);
+    }
+
+    // Event call when from Flutter to Update location for driver
+    socket.on("driver-location", async (data) => {
+        //Send to Laravel (store in DB)
+        try {
+            var dataArray;
+            if (typeof data === "string") {
+                dataArray = JSON.parse(data);
+            }
+            else {
+                dataArray = data;
+            }
+            const response = await axios.post(
+                "https://backend.cabifyit.com/api/driver/location",
+                dataArray,
+                {
+                    headers: {
+                        Authorization: `Bearer ${socket.token}`,
+                        database: `${dataArray.database}`,
+                    }
+                }
+            );
+            // Broadcast to React users
+            socket.broadcast.emit("driver-location-update", response.data.driver);
+        } catch (err) {
+            console.error("Laravel Socket error", err);
+        }
+    });
+
+    socket.on("disconnect", () => {
+        if (driverId) {
+            driverSockets.delete(driverId.toString());
+        }
+        if (role === "dispatcher" && dispatcherId) {
+            dispatcherSockets.delete(dispatcherId.toString());
+        }
+        if (role === "user" && userId) {
+            userSockets.delete(userId.toString());
+        }
+        if (role === "client" && clientId) {
+            clientSockets.delete(clientId.toString());
+        }
+    });
+});
+
+app.use((req, res, next) => {
+    // if (req.headers.authorization !== `Bearer INTERNAL_NODE_SECRET`) {
+    //     return res.status(401).json({ error: "Unauthorized" });
+    // }
+    next();
+});
+
+app.use(express.json());
+
+app.use(cors({
+    origin: [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "https://clientadmin.cabifyit.com",
+        "https://admin.cabifyit.com",
+        "https://dispatcher.cabifyit.com"
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
+}));
+
 const broadcastDashboardCardsUpdate = async (tenantDb) => {
     try {
         const db = getConnection(tenantDb);
@@ -286,156 +399,6 @@ const autoDispatchRide = async ({
         console.error("Auto Dispatch Error:", error.message);
     }
 };
-
-io.use(async (socket, next) => {
-    const authHeader = socket.handshake.headers.authorization;
-    const driverId = socket.handshake.query.driver_id;
-    const userId = socket.handshake.query.user_id;
-    const adminId = socket.handshake.query.admin_id;
-    const role = socket.handshake.query.role;
-    const dispatcherId = socket.handshake.query.dispatcher_id;
-    const clientId = socket.handshake.query.client_id;
-
-    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) ||
-        (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) ||
-        (role === 'user' && !userId)) {
-        return next(new Error("Unauthorized"));
-    }
-
-    socket.token = authHeader.split(" ")[1];
-    socket.driverId = driverId;
-    socket.dispatcherId = dispatcherId;
-    socket.clientId = clientId;
-    socket.userId = userId;
-    socket.adminId = adminId;
-
-    next();
-});
-
-io.on("connection", (socket) => {
-    const role = socket.handshake.query.role;
-    const driverId = socket.handshake.query.driver_id;
-    const dispatcherId = socket.handshake.query.dispatcher_id;
-    const userId = socket.handshake.query.user_id;
-    const clientId = socket.handshake.query.client_id;
-    const adminId = socket.handshake.query.admin_id;
-
-    if (role === "dispatcher" && dispatcherId) {
-        dispatcherSockets.set(dispatcherId.toString(), socket.id);
-        console.log(`✅ Dispatcher ${dispatcherId} connected`);
-    }
-    if (role === "user" && userId) {
-        userSockets.set(userId.toString(), socket.id);
-    }
-    if (role === "client" && clientId) {
-        clientSockets.set(clientId.toString(), socket.id);
-    }
-    if (role === "admin" && adminId) {
-        adminSockets.set(adminId.toString(), socket.id);
-        console.log(`✅ Admin ${adminId} connected`);
-    }
-    if (driverId) {
-        driverSockets.set(driverId.toString(), socket.id);
-    }
-
-    socket.on("driver-location", async (data) => {
-        try {
-            var dataArray;
-            if (typeof data === "string") {
-                dataArray = JSON.parse(data);
-            } else {
-                dataArray = data;
-            }
-            const response = await axios.post(
-                "https://backend.cabifyit.com/api/driver/location",
-                dataArray,
-                {
-                    headers: {
-                        Authorization: `Bearer ${socket.token}`,
-                        database: `${dataArray.database}`,
-                    }
-                }
-            );
-            socket.broadcast.emit("driver-location-update", response.data.driver);
-        } catch (err) {
-            console.error("Laravel Socket error", err);
-        }
-    });
-
-    socket.on("get-driver-location", async (data) => {
-        try {
-            var dataArray;
-            if (typeof data === "string") {
-                dataArray = JSON.parse(data);
-            } else {
-                dataArray = data;
-            }
-            const response = await axios.post(
-                "https://backend.cabifyit.com/api/driver/get-location",
-                dataArray,
-                {
-                    headers: {
-                        database: `${dataArray.database}`,
-                    }
-                }
-            );
-
-            const location = response.data;
-
-            socket.emit("get-driver-location-on-user", {
-                success: true,
-                data: location,
-            });
-        } catch (err) {
-            console.error("Laravel Socket error", err);
-        }
-    });
-
-    socket.on("disconnect", () => {
-        if (driverId) {
-            driverSockets.delete(driverId.toString());
-        }
-        if (role === "dispatcher" && dispatcherId) {
-            dispatcherSockets.delete(dispatcherId.toString());
-            console.log(`❌ Dispatcher ${dispatcherId} disconnected`);
-        }
-        if (role === "user" && userId) {
-            userSockets.delete(userId.toString());
-        }
-        if (role === "client" && clientId) {
-            clientSockets.delete(clientId.toString());
-        }
-        if (role === "admin" && adminId) {
-            adminSockets.delete(adminId.toString());
-            console.log(`❌ Admin ${adminId} disconnected`);
-        }
-    });
-});
-
-app.use((req, res, next) => {
-    const databaseHeader = req.headers['database'];
-    if (databaseHeader) {
-        req.tenantDb = `tenant${databaseHeader}`;
-        console.log(`📂 Using database: ${req.tenantDb}`);
-    }
-    next();
-});
-
-app.use(express.json());
-
-app.use(cors({
-    origin: [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "https://clientadmin.cabifyit.com",
-        "https://admin.cabifyit.com",
-        "https://dispatcher.cabifyit.com"
-    ],
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
-}));
 
 async function calculatePostPaidEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
