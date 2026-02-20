@@ -534,10 +534,22 @@ async function calculatePercentageEntries(driver, settings, db) {
 
         const cycleEndDate = new Date(cycleStartDate);
         cycleEndDate.setDate(cycleEndDate.getDate() + packageDays - 1);
-        cycleEndDate.setHours(23, 59, 59, 999); 
+        cycleEndDate.setHours(23, 59, 59, 999);
 
         const [bookingRows] = await db.query(`
-            SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
+            SELECT 
+                COUNT(*) as total_rides,
+                COALESCE(SUM(
+                    CASE 
+                        WHEN booking_amount IS NOT NULL AND booking_amount > 0 
+                            THEN booking_amount
+                        WHEN offered_amount IS NOT NULL AND offered_amount > 0 
+                            THEN offered_amount
+                        WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 
+                            THEN recommended_amount
+                        ELSE 0
+                    END
+                ), 0) as total_rides_amount
             FROM bookings
             WHERE driver = ?
             AND booking_status = 'completed'
@@ -550,6 +562,7 @@ async function calculatePercentageEntries(driver, settings, db) {
         ]);
 
         const totalRidesAmount = parseFloat(bookingRows[0]?.total_rides_amount || 0);
+        const totalRides = parseInt(bookingRows[0]?.total_rides || 0);
         const commissionAmount = (totalRidesAmount * packagePercentage) / 100;
 
         entries.push({
@@ -557,11 +570,12 @@ async function calculatePercentageEntries(driver, settings, db) {
             cycle_start_date: formatDate(cycleStartDate),
             cycle_end_date: formatDate(cycleEndDate),
             days_in_cycle: packageDays,
+            total_rides: totalRides,
             total_rides_amount: totalRidesAmount.toFixed(2),
             commission_percentage: packagePercentage,
             amount: commissionAmount.toFixed(2),
             status: 'pending',
-            description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides`
+            description: `${packagePercentage}% of ${totalRidesAmount.toFixed(2)} Rs rides (${totalRides} rides)`
         });
     }
 
@@ -575,7 +589,19 @@ async function calculatePercentageEntries(driver, settings, db) {
     const daysRemainingInCycle = packageDays - daysElapsedInCycle;
 
     const [currentBookingRows] = await db.query(`
-        SELECT COALESCE(SUM(booking_amount), 0) as total_rides_amount
+        SELECT 
+            COUNT(*) as total_rides,
+            COALESCE(SUM(
+                CASE 
+                    WHEN booking_amount IS NOT NULL AND booking_amount > 0 
+                        THEN booking_amount
+                    WHEN offered_amount IS NOT NULL AND offered_amount > 0 
+                        THEN offered_amount
+                    WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 
+                        THEN recommended_amount
+                    ELSE 0
+                END
+            ), 0) as total_rides_amount
         FROM bookings
         WHERE driver = ?
         AND booking_status = 'completed'
@@ -588,6 +614,7 @@ async function calculatePercentageEntries(driver, settings, db) {
     ]);
 
     const currentRidesAmount = parseFloat(currentBookingRows[0]?.total_rides_amount || 0);
+    const currentTotalRides = parseInt(currentBookingRows[0]?.total_rides || 0);
     const currentCommission = (currentRidesAmount * packagePercentage) / 100;
 
     entries.push({
@@ -597,11 +624,12 @@ async function calculatePercentageEntries(driver, settings, db) {
         days_in_cycle: packageDays,
         days_elapsed: daysElapsedInCycle,
         days_remaining: daysRemainingInCycle,
+        total_rides: currentTotalRides,
         total_rides_amount: currentRidesAmount.toFixed(2),
         commission_percentage: packagePercentage,
         amount: currentCommission.toFixed(2),
         status: 'pending',
-        description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides`
+        description: `Current cycle - ${packagePercentage}% of ${currentRidesAmount.toFixed(2)} Rs rides (${currentTotalRides} rides)`
     });
 
     return entries;
