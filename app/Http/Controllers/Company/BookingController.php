@@ -15,6 +15,7 @@ use App\Jobs\SendBiddingFixedFareNotificationJob;
 use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
 use App\Models\CompanySendNewRide;
+use App\Models\CompanyUser;
 
 class BookingController extends Controller
 {
@@ -138,6 +139,15 @@ class BookingController extends Controller
                             }
                         }
 
+                        $existUser = CompanyUser::where("phone_no", $request->phone_no)->first();
+                        if(!isset($existUser) || $existUser == NULL){
+                            $existUser = new CompanyUser;
+                            $existUser->name = $request->name;
+                            $existUser->email = $request->email;
+                            $existUser->phone_no = $request->phone_no;
+                            $existUser->save();                        
+                        }
+
                         $newBooking = new CompanyBooking;
                         $newBooking->booking_id = "RD" . strtoupper(uniqid());
                         $newBooking->sub_company = $request->sub_company;
@@ -150,7 +160,7 @@ class BookingController extends Controller
                         $newBooking->destination_location = $request->destination_location;
                         $newBooking->via_point = json_encode($request->via_point);
                         $newBooking->via_location = json_encode($request->via_location);
-                        $newBooking->user_id = $request->user_id;
+                        $newBooking->user_id = isset($existUser) ? $existUser->id : NULL;
                         $newBooking->name = $request->name;
                         $newBooking->email = $request->email;
                         $newBooking->phone_no = $request->phone_no;
@@ -198,7 +208,7 @@ class BookingController extends Controller
                             'distance' => $newBooking->distance,
                             'user_id' => $newBooking->user_id,
                             'user_name' => $newBooking->name,
-                            'user_profile' => $newBooking->userDetail->profile_image,
+                            'user_profile' => isset($newBooking->userDetail->profile_image) ? $newBooking->userDetail->profile_image : NULL,
                             'pickup_location' => $newBooking->pickup_location,
                             'destination_location' => $newBooking->destination_location,
                             'note' => $newBooking->note,
@@ -236,6 +246,15 @@ class BookingController extends Controller
                     }
                 }
 
+                $existUser = CompanyUser::where("phone_no", $request->phone_no)->first();
+                if(!isset($existUser) || $existUser == NULL){
+                    $existUser = new CompanyUser;
+                    $existUser->name = $request->name;
+                    $existUser->email = $request->email;
+                    $existUser->phone_no = $request->phone_no;
+                    $existUser->save();                        
+                }
+
                 $newBooking = new CompanyBooking;
                 $newBooking->booking_id = "RD" . strtoupper(uniqid());
                 $newBooking->sub_company = $request->sub_company;
@@ -252,7 +271,7 @@ class BookingController extends Controller
                 $newBooking->destination_plot_id = $request->destination_plot_id;
                 $newBooking->via_point = json_encode($request->via_point);
                 $newBooking->via_location = json_encode($request->via_location);
-                $newBooking->user_id = $request->user_id;
+                $newBooking->user_id = isset($existUser) ? $existUser->id : NULL;
                 $newBooking->name = $request->name;
                 $newBooking->email = $request->email;
                 $newBooking->phone_no = $request->phone_no;
