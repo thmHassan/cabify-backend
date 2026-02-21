@@ -28,10 +28,13 @@ class SetTenantDatabase
 
         $tenantDb = 'tenant' . $database;
         try {
-            $exists = DB::select(
-                "SHOW DATABASES LIKE ?", 
-                [$tenantDb]
-            );
+             $exists = DB::selectOne(
+                    "SELECT SCHEMA_NAME 
+                    FROM INFORMATION_SCHEMA.SCHEMATA 
+                    WHERE SCHEMA_NAME = ?",
+                    [$tenantDb]
+                );
+
 
             if (empty($exists)) {
                 return response()->json([
