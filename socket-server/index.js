@@ -29,6 +29,19 @@ const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
 
+const storeNotification = async (db, { user_type, user_id, title, message }) => {
+    try {
+        await db.query(
+            `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'unread', NOW(), NOW())`,
+            [user_type, user_id, title, message]
+        );
+        console.log(`🔔 Notification stored → [${user_type} #${user_id}] ${title}`);
+    } catch (error) {
+        console.error("❌ Failed to store notification:", error.message);
+    }
+};
+
 const broadcastDashboardCardsUpdate = async (tenantDb) => {
     try {
         const db = getConnection(tenantDb);
@@ -78,7 +91,6 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
             cancelled: counts.cancelled
         };
 
-        // Broadcast to all connected dispatchers, admins, and clients
         console.log("Broadcasting dashboard cards update:", dashboardData);
 
         dispatcherSockets.forEach((socketId) => {
@@ -124,8 +136,7 @@ const autoDispatchRide = async ({
         }
 
         if (!currentPlotId) {
-            currentPlotId =
-                booking.pickup_plot_id || booking.destination_plot_id;
+            currentPlotId = booking.pickup_plot_id || booking.destination_plot_id;
         }
 
         if (!currentPlotId) {
@@ -135,12 +146,10 @@ const autoDispatchRide = async ({
 
         if (visitedPlots.includes(currentPlotId)) {
             console.log("All plots tried. No driver accepted.");
-
             io.emit("auto-dispatch-failed", {
                 booking_id: bookingId,
                 message: "No drivers accepted the ride."
             });
-
             return;
         }
 
@@ -162,9 +171,7 @@ const autoDispatchRide = async ({
                 [currentPlotId]
             );
 
-            const backupPlots = JSON.parse(
-                plotRows[0]?.backup_plots || "[]"
-            );
+            const backupPlots = JSON.parse(plotRows[0]?.backup_plots || "[]");
 
             for (let backupPlot of backupPlots) {
                 await autoDispatchRide({
@@ -193,9 +200,7 @@ const autoDispatchRide = async ({
                 [currentPlotId]
             );
 
-            const backupPlots = JSON.parse(
-                plotRows[0]?.backup_plots || "[]"
-            );
+            const backupPlots = JSON.parse(plotRows[0]?.backup_plots || "[]");
 
             for (let backupPlot of backupPlots) {
                 await autoDispatchRide({
@@ -221,9 +226,7 @@ const autoDispatchRide = async ({
         console.log("Sending ride to:", driver.name);
 
         await db.query(
-            `UPDATE bookings 
-             SET driver = ?, driver_response = NULL 
-             WHERE id = ?`,
+            `UPDATE bookings SET driver = ?, driver_response = NULL WHERE id = ?`,
             [driver.id, bookingId]
         );
 
@@ -238,7 +241,6 @@ const autoDispatchRide = async ({
         }
 
         setTimeout(async () => {
-
             const [updatedRows] = await db.query(
                 "SELECT driver_response FROM bookings WHERE id = ?",
                 [bookingId]
@@ -249,24 +251,19 @@ const autoDispatchRide = async ({
             const response = updatedRows[0].driver_response;
 
             if (response === "accepted") {
-
                 console.log("Accepted by:", driver.name);
-
                 io.emit("job-accepted-by-driver", {
                     booking_id: bookingId,
                     driver_id: driver.id,
                     message: `${driver.name} accepted the ride`
                 });
-
                 return;
             }
 
             console.log("Timeout or rejected. Trying next driver.");
 
             await db.query(
-                `UPDATE bookings 
-                 SET driver = NULL, driver_response = NULL 
-                 WHERE id = ?`,
+                `UPDATE bookings SET driver = NULL, driver_response = NULL WHERE id = ?`,
                 [bookingId]
             );
 
@@ -801,7 +798,6 @@ app.post("/driver/collect-commission", async (req, res) => {
             WHERE id = ?
         `, [formatDateTime(newSettlementDate), driver_id]);
 
-        const transactionType = settings.package_type === 'packages_post_paid' ? 'add' : 'add';
         const transactionComment = settings.package_type === 'packages_post_paid'
             ? `Commission collected - ${firstEntry.description}`
             : `Commission collected - ${firstEntry.description}`;
@@ -813,7 +809,7 @@ app.post("/driver/collect-commission", async (req, res) => {
         `, [
             'driver',
             driver_id,
-            transactionType,
+            'add',
             transactionComment,
             formatDateTime(currentDateTime),
             formatDateTime(currentDateTime),
@@ -1124,6 +1120,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             [driver_id, id]
         );
 
+        // Send socket event to driver
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
             io.to(driverSocketId).emit("job-assignment-request", {
@@ -1131,24 +1128,27 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
                 message: "You have been assigned a new job. Accept or reject."
             });
         }
-        const [tokens] = await db.query(
-            "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'driver'",
-            [driver_id]
-        );
 
-        console.log("Booking ID :", bookingRows[0].booking_id);
-        console.log("Driver Name :", driverRows[0].name);
-        console.log("Body:", `You have been assigned a new ride #${bookingRows[0].booking_id}`);
+        // Send FCM push notification to driver
+        const notifTitle = "New Ride Assigned";
+        const notifMessage = `You have been assigned a new ride #${bookingRows[0].booking_id}`;
 
         await sendNotificationToDriver(
             db,
             driver_id,
-            "New Ride Assigned",
-            `You have been assigned a new ride #${bookingRows[0].booking_id}`,
+            notifTitle,
+            notifMessage,
             { booking_id: String(id) }
         );
 
         console.log("✅ Notification sent successfully to driver:", driverRows[0].name);
+
+        await storeNotification(db, {
+            user_type: 'driver',
+            user_id: driver_id,
+            title: notifTitle,
+            message: notifMessage
+        });
 
         return res.json({ success: true, message: "Driver assigned successfully. Waiting for driver response." });
 
@@ -1351,19 +1351,13 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
         `, [id]);
 
         if (bookings.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found"
-            });
+            return res.status(404).json({ success: false, message: "Booking not found" });
         }
 
         const booking = bookings[0];
 
         if (!booking.email) {
-            return res.status(400).json({
-                success: false,
-                message: "Booking does not have an email address"
-            });
+            return res.status(400).json({ success: false, message: "Booking does not have an email address" });
         }
 
         const {
@@ -1423,10 +1417,7 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 
     } catch (error) {
         console.error("Error sending confirmation email:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -1455,6 +1446,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         await db.query(updateQuery, params);
 
+        // Update driver status
         if (booking.driver) {
             let driverStatus = null;
             if (['cancelled', 'completed', 'no_show'].includes(booking_status)) driverStatus = 'idle';
@@ -1464,43 +1456,51 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
+        // Send FCM notification + store in notifications table
         if (booking.driver) {
-
             const [driverInfo] = await db.query(
                 "SELECT id, name, phone_no FROM drivers WHERE id = ?",
-                [booking.driver]
-            );
-            const [tokens] = await db.query(
-                "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'driver'",
                 [booking.driver]
             );
 
             if (booking_status === 'cancelled') {
                 const cancelledByText = cancelled_by === 'user' ? 'Rider' : 'Admin';
                 const notifTitle = "Ride Cancelled";
-                const notifBody = `Ride #${booking.booking_id} has been cancelled by ${cancelledByText}`;
+                const notifMessage = `Ride #${booking.booking_id} has been cancelled by ${cancelledByText}`;
 
                 console.log("Booking ID:", booking.booking_id);
                 console.log("Driver Name:", driverInfo[0]?.name);
                 console.log("Cancelled By:", cancelledByText);
-                console.log("Body:", notifBody);
 
-                await sendNotificationToDriver(db, booking.driver, notifTitle, notifBody, { booking_id: String(id) });
-
+                // Send FCM push
+                await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, { booking_id: String(id) });
                 console.log("✅ Cancel notification sent to driver:", driverInfo[0]?.name);
+
+                // ✅ Store notification in notifications table
+                await storeNotification(db, {
+                    user_type: 'driver',
+                    user_id: booking.driver,
+                    title: notifTitle,
+                    message: notifMessage
+                });
 
             } else if (booking_status === 'completed') {
                 const notifTitle = "Ride Completed";
-                const notifBody = `Ride #${booking.booking_id} has been marked as completed`;
+                const notifMessage = `Ride #${booking.booking_id} has been marked as completed`;
 
                 console.log("Booking ID:", booking.booking_id);
                 console.log("Driver Name:", driverInfo[0]?.name);
                 console.log("Status:", "Completed");
-                console.log("Body:", notifBody);
 
-                await sendNotificationToDriver(db, booking.driver, notifTitle, notifBody, { booking_id: String(id) });
-
+                await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, { booking_id: String(id) });
                 console.log("✅ Complete notification sent to driver:", driverInfo[0]?.name);
+
+                await storeNotification(db, {
+                    user_type: 'driver',
+                    user_id: booking.driver,
+                    title: notifTitle,
+                    message: notifMessage
+                });
             }
         }
 
@@ -1534,19 +1534,13 @@ app.post("/bookings/:id/follow-driver", async (req, res) => {
         `, [id]);
 
         if (bookings.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found"
-            });
+            return res.status(404).json({ success: false, message: "Booking not found" });
         }
 
         const booking = bookings[0];
 
         if (!booking.driver) {
-            return res.status(400).json({
-                success: false,
-                message: "No driver assigned to this booking"
-            });
+            return res.status(400).json({ success: false, message: "No driver assigned to this booking" });
         }
 
         const driverInfo = {
@@ -1596,10 +1590,7 @@ app.post("/bookings/:id/follow-driver", async (req, res) => {
 
     } catch (error) {
         console.error("Error starting driver tracking:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -1614,17 +1605,13 @@ app.post("/bookings/broadcast", async (req, res) => {
 
         const db = getConnection(finalDb);
 
-
         const [rows] = await db.query(
             "SELECT * FROM bookings WHERE id = ?",
             [booking_id]
         );
 
         if (!rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found"
-            });
+            return res.status(404).json({ success: false, message: "Booking not found" });
         }
 
         const booking = rows[0];
@@ -1655,10 +1642,7 @@ app.post("/bookings/broadcast", async (req, res) => {
 
     } catch (error) {
         console.error("Broadcast error:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -1672,10 +1656,7 @@ app.post("/send-new-ride", (req, res) => {
             sentCount++;
         }
     });
-    return res.json({
-        success: true,
-        sent_to: sentCount
-    });
+    return res.json({ success: true, sent_to: sentCount });
 });
 
 app.post("/change-cancel-ride", (req, res) => {
@@ -1688,10 +1669,7 @@ app.post("/change-cancel-ride", (req, res) => {
             sentCount++;
         }
     });
-    return res.json({
-        success: true,
-        sent_to: sentCount
-    });
+    return res.json({ success: true, sent_to: sentCount });
 });
 
 app.post("/send-new-booking", (req, res) => {
@@ -1704,10 +1682,7 @@ app.post("/send-new-booking", (req, res) => {
             sentCount++;
         }
     });
-    return res.json({
-        success: true,
-        sent_to: sentCount
-    });
+    return res.json({ success: true, sent_to: sentCount });
 });
 
 app.post("/bid-accept", (req, res) => {
@@ -1716,9 +1691,7 @@ app.post("/bid-accept", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("bid-accept-event", booking);
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/place-bid", (req, res) => {
@@ -1727,9 +1700,7 @@ app.post("/place-bid", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("place-bid-event", bid);
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/change-ride-status", (req, res) => {
@@ -1738,9 +1709,7 @@ app.post("/change-ride-status", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("user-ride-status-event", { status, booking });
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/user-message-notification", (req, res) => {
@@ -1749,9 +1718,7 @@ app.post("/user-message-notification", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("user-message-event", chat);
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/driver-message-notification", (req, res) => {
@@ -1760,9 +1727,7 @@ app.post("/driver-message-notification", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("driver-message-event", chat);
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/change-driver-ride-status", (req, res) => {
@@ -1771,9 +1736,7 @@ app.post("/change-driver-ride-status", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("driver-ride-status-event", { status, booking });
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/on-job-driver", (req, res) => {
@@ -1782,9 +1745,7 @@ app.post("/on-job-driver", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("on-job-driver-event", driverName);
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/waiting-driver", (req, res) => {
@@ -1793,9 +1754,7 @@ app.post("/waiting-driver", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("waiting-driver-event", { driverName, plot });
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/send-reminder", (req, res) => {
@@ -1804,9 +1763,7 @@ app.post("/send-reminder", (req, res) => {
     if (socketId) {
         io.to(socketId).emit("send-reminder", { title, description });
     }
-    return res.json({
-        success: true,
-    });
+    return res.json({ success: true });
 });
 
 app.post("/voip-webhook", async (req, res) => {
@@ -1819,23 +1776,13 @@ app.post("/voip-webhook", async (req, res) => {
         }
 
         if (!Array.isArray(events)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid events format",
-            });
+            return res.status(400).json({ success: false, message: "Invalid events format" });
         }
 
         for (const event of events) {
             console.log("📞 VOIP EVENT RECEIVED:", event);
 
-            const {
-                callId,
-                dialledNumber,
-                extension,
-                callerId,
-                status,
-                time,
-            } = event;
+            const { callId, dialledNumber, extension, callerId, status, time } = event;
 
             const voipData = {
                 callId,
