@@ -175,7 +175,7 @@ class BookingController extends Controller
                         $newBooking->special_request = $request->special_request;
                         $newBooking->payment_reference = $request->payment_reference;
                         $newBooking->booking_system = $request->booking_system;
-                        $newBooking->parking_charge = $request->parking_charge;
+                        $newBooking->parking_charge = $request->parking_charge; 
                         $newBooking->waiting_charge = $request->waiting_charge;
                         $newBooking->ac_fares = $request->ac_fares;
                         $newBooking->return_ac_fares = $request->return_ac_fares;
