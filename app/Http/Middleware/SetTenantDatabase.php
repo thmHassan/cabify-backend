@@ -26,6 +26,27 @@ class SetTenantDatabase
             ], 400);
         }
 
+        $tenantDb = 'tenant' . $database;
+        try {
+            $exists = DB::select(
+                "SHOW DATABASES LIKE ?", 
+                [$tenantDb]
+            );
+
+            if (empty($exists)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => "Company Id is Invalid. Please contact your Company Admin"
+                ], 400);
+            }
+        } catch (QueryException $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Unable to verify tenant database.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+
          Config::set('database.connections.tenant', [
             'driver' => 'mysql',
             'host' => env('DB_HOST', '127.0.0.1'),
