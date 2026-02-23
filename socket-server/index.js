@@ -336,6 +336,8 @@ io.on("connection", (socket) => {
     socket.on("driver-location", async (data) => {
         try {
             var dataArray;
+            console.log("dataArray")
+            console.log(dataArray)
             if (typeof data === "string") {
                 dataArray = JSON.parse(data);
             } else {
