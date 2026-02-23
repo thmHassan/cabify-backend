@@ -32,13 +32,13 @@ class DispatchSystemCompanySeeder extends Seeder
                 $exists = $query->first();
 
                 if ($exists) {
-                    DB::table('dispatch_system')
-                        ->where('id', $exists->id)
-                        ->update([
-                            'priority' => $row['priority'],
-                            'sub_priority' => $row['sub_priority'],
-                            'status' => $row['status'],
-                        ]);
+                    // DB::table('dispatch_system')
+                    //     ->where('id', $exists->id)
+                    //     ->update([
+                    //         'priority' => $row['priority'],
+                    //         'sub_priority' => $row['sub_priority'],
+                    //         'status' => $row['status'],
+                    //     ]);
                 } else {
                     DB::table('dispatch_system')->insert($row);
                 }
