@@ -1276,6 +1276,13 @@ class CompanyController extends Controller
         if (!Hash::check($request->password, $user->password)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
+
+        if($user->status == "inactive"){
+            return response()->json([
+                'error' => 1,
+                'message' => 'Your account is Inactive. Please contact your admin'
+            ], 500);
+        }
         
         $token = JWTAuth::fromUser($user);
 

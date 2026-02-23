@@ -60,7 +60,6 @@ class UserController extends Controller
             $newUser->name = $request->name;
             $newUser->email = $request->email;
             $newUser->phone_no = $request->phone_no;
-            $newUser->password = Hash::make($request->password);
             $newUser->address = $request->address;
             $newUser->city = $request->city;
             $newUser->dispatcher_id = $request->dispatcher_id;
@@ -139,7 +138,7 @@ class UserController extends Controller
             }
 
             if ($request->filled('dispatcher_id')) {
-                $users->where("dispatcher_id", $request->dispatcher_id);
+                // $users->where("dispatcher_id", $request->dispatcher_id);
             }
 
             $data = $users->paginate($perPage);
