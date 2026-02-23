@@ -14,6 +14,7 @@ use App\Notifications\CompanyNotification;
 use App\Models\CompanyNotification as CompanyNotificationTable;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
+use App\Models\CompanyBooking;
 
 class DispatcherController extends Controller
 {
