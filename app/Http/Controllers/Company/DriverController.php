@@ -119,7 +119,7 @@ class DriverController extends Controller
             $driver = CompanyDriver::where("id", $request->id)->first();
             $driver->name = $request->name;
             $driver->email = $request->email;
-            $driver->phone_no = $request->phone_no;
+            $driver->phone_no = $request->phone_no; 
             $driver->address = $request->address;
             $driver->driver_license = $request->driver_license;
             $driver->assigned_vehicle = $request->assigned_vehicle;
