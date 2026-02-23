@@ -554,7 +554,7 @@ class BookingController extends Controller
                 }
             }
 
-            if (isset($request->journey_type) && $request->journey_type == "return") {
+            if (isset($request->journey) && $request->journey == "return") {
                 $distance = 2 * $distance;
                 $amount = 2 * $amount;
             }
