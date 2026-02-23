@@ -22,7 +22,13 @@ class UserController extends Controller
             $request->validate([
                 'name' => 'required|max:255',
                 'email' => 'required|email|unique:users,email',
-                'phone_no' => 'required|max:255',
+                'phone_no' => [
+                    'required',
+                    'max:255',
+                    Rule::unique('users')->where(function ($query) use ($request) {
+                        return $query->where('country_code', $request->country_code);
+                    }),
+                ],
                 'password' => 'required|string|min:6',
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
@@ -83,7 +89,13 @@ class UserController extends Controller
                     'email',
                     Rule::unique('users')->ignore($request->id),
                 ],
-                'phone_no' => 'required|max:255',
+                'phone_no' => [
+                    'required',
+                    'max:255',
+                    Rule::unique('users', 'phone_no')
+                        ->where(fn ($q) => $q->where('country_code', $request->country_code))
+                        ->ignore($user->id),
+                ],
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
             ]);

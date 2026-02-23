@@ -16,6 +16,7 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
+use App\Models\CompanyVehicleType;
 
 class DriverController extends Controller
 {
@@ -25,13 +26,16 @@ class DriverController extends Controller
             $request->validate([
                 'name' => 'required|max:255',
                 'email' => 'required|email|unique:drivers,email',
-                'phone_no' => 'required|max:255',
-                'password' => 'required|string|min:6',
+                'phone_no' => [
+                    'required',
+                    'max:255',
+                    Rule::unique('drivers')->where(function ($query) use ($request) {
+                        return $query->where('country_code', $request->country_code);
+                    }),
+                ],
                 'address' => 'required|max:255',
                 'driver_license' => 'required|max:255',
-                'assigned_vehicle' => 'required',
-                'joined_date' => 'required',
-                'sub_company' => 'required'
+                'joined_date' => 'required'
             ]);
 
             $dataCheck = (new TenantUser)
@@ -56,14 +60,18 @@ class DriverController extends Controller
                 ]);
             }
 
+            $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
+
             $driver = new CompanyDriver;
             $driver->name = $request->name;
             $driver->email = $request->email;
             $driver->phone_no = $request->phone_no;
-            $driver->password = $request->password;
             $driver->address = $request->address;
             $driver->driver_license = $request->driver_license;
             $driver->assigned_vehicle = $request->assigned_vehicle;
+            $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
+            $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
+            $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
             $driver->status = "pending";
             $driver->joined_date = $request->joined_date;
             $driver->sub_company = $request->sub_company;
@@ -94,13 +102,19 @@ class DriverController extends Controller
                     'email',
                     Rule::unique('drivers')->ignore($request->id),
                 ],
-                'phone_no' => 'required|max:255',
+                'phone_no' => [
+                    'required',
+                    'max:255',
+                    Rule::unique('drivers', 'phone_no')
+                        ->where(fn ($q) => $q->where('country_code', $request->country_code))
+                        ->ignore($driver->id),
+                ],
                 'address' => 'required|max:255',
                 'driver_license' => 'required|max:255',
-                'assigned_vehicle' => 'required',
                 'joined_date' => 'required',
-                'sub_company' => 'required'
             ]);
+            
+            $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
 
             $driver = CompanyDriver::where("id", $request->id)->first();
             $driver->name = $request->name;
@@ -109,6 +123,9 @@ class DriverController extends Controller
             $driver->address = $request->address;
             $driver->driver_license = $request->driver_license;
             $driver->assigned_vehicle = $request->assigned_vehicle;
+            $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
+            $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
+            $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
             $driver->joined_date = $request->joined_date;
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
