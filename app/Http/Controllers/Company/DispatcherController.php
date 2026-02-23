@@ -167,7 +167,7 @@ class DispatcherController extends Controller
         try{
             $totalDispatcher = Dispatcher::count();
             $activeDispatcher = Dispatcher::where('status', 'active')->count();
-            $ridesDispatchToday = CompanyBooking::where("booking_date", date("Y-m-d"))->status("booking_status", "completed")->count();
+            $ridesDispatchToday = CompanyBooking::where("booking_date", date("Y-m-d"))->where("booking_status", "completed")->count();
 
             return response()->json([
                 'success' => 1,
