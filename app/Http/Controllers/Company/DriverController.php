@@ -320,7 +320,7 @@ class DriverController extends Controller
             ]);
 
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
-            $driver->vehicle_change_request = 2;
+            $driver->vehicle_change_request = "2";
             $driver->vehicle_service = $driver->change_vehicle_service;
             $driver->vehicle_type = $driver->change_vehicle_type;
             $driver->color = $driver->change_color;
