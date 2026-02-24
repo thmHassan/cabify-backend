@@ -1796,15 +1796,28 @@ app.post("/waiting-driver", async (req, res) => {
     try {
         const { clientId, driverName, plot } = req.body;
 
+        if (!clientId || !driverName) {
+            return res.status(400).json({
+                success: false,
+                message: "clientId and driverName required"
+            });
+        }
+
         const db = getConnection(req.tenantDb);
 
         const [driverRows] = await db.query(
-            `SELECT driving_status FROM drivers WHERE name = ?`,
+            `SELECT driving_status 
+             FROM drivers 
+             WHERE name = ? 
+             LIMIT 1`,
             [driverName]
         );
 
         if (!driverRows.length) {
-            return res.json({ success: false, message: "Driver not found" });
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found"
+            });
         }
 
         if (driverRows[0].driving_status !== "idle") {
@@ -1814,14 +1827,19 @@ app.post("/waiting-driver", async (req, res) => {
             });
         }
 
-        const socketId = clientSockets.get(clientId.toString());
+        const emitData = {
+            driverName,
+            plot: plot ?? "Unassigned"
+        };
 
+        const socketId = clientSockets.get(clientId.toString());
         if (socketId) {
-            io.to(socketId).emit("waiting-driver-event", {
-                driverName,
-                plot
-            });
+            io.to(socketId).emit("waiting-driver-event", emitData);
         }
+
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("waiting-driver-event", emitData);
+        });
 
         return res.json({ success: true });
 
