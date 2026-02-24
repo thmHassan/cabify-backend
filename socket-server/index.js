@@ -1682,6 +1682,7 @@ app.post("/send-new-ride", (req, res) => {
 });
 
 app.post("/send-notification-dispatcher", (req, res) => {
+    console.log("mmediate");
     const { dispatchers, booking } = req.body;
     let sentCount = 0;
     dispatchers.forEach(dispatcherId => {
