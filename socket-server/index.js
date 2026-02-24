@@ -1100,10 +1100,70 @@ app.get("/bookings/:id", async (req, res) => {
     }
 });
 
+// app.put("/bookings/:id/assign-driver", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { driver_id } = req.body;
+
+//         if (!driver_id) {
+//             return res.status(400).json({ success: false, message: "Driver ID is required" });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [bookingRows] = await db.query("SELECT id, booking_status, booking_id FROM bookings WHERE id = ?", [id]);
+//         if (bookingRows.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
+
+//         const [driverRows] = await db.query("SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?", [driver_id]);
+//         if (driverRows.length === 0) return res.status(404).json({ success: false, message: "Driver not found" });
+
+//         await db.query(
+//             `UPDATE bookings SET driver = ?, driver_response = NULL WHERE id = ?`,
+//             [driver_id, id]
+//         );
+
+//         // Send socket event to driver
+//         const driverSocketId = driverSockets.get(driver_id.toString());
+//         if (driverSocketId) {
+//             io.to(driverSocketId).emit("job-assignment-request", {
+//                 booking_id: id,
+//                 message: "You have been assigned a new job. Accept or reject."
+//             });
+//         }
+
+//         // Send FCM push notification to driver
+//         const notifTitle = "New Ride Assigned";
+//         const notifMessage = `You have been assigned a new ride #${bookingRows[0].booking_id}`;
+
+//         await sendNotificationToDriver(
+//             db,
+//             driver_id,
+//             notifTitle,
+//             notifMessage,
+//             { booking_id: String(id) }
+//         );
+
+//         console.log("✅ Notification sent successfully to driver:", driverRows[0].name);
+
+//         await storeNotification(db, {
+//             user_type: 'driver',
+//             user_id: driver_id,
+//             title: notifTitle,
+//             message: notifMessage
+//         });
+
+//         return res.json({ success: true, message: "Driver assigned successfully. Waiting for driver response." });
+
+//     } catch (error) {
+//         console.error("❌ Assign driver error:", error);
+//         return res.status(500).json({ success: false, message: "Something went wrong" });
+//     }
+// });
+
 app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
-        const { driver_id } = req.body;
+        const { driver_id, assignment_type } = req.body;
 
         if (!driver_id) {
             return res.status(400).json({ success: false, message: "Driver ID is required" });
@@ -1122,41 +1182,49 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             [driver_id, id]
         );
 
-        // Send socket event to driver
+        const isPreJob = assignment_type === "pre_job";
+        const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
+        const notifMessage = isPreJob
+            ? `You have a pre-job assigned for ride #${bookingRows[0].booking_id}. Please accept or reject.`
+            : `You have been assigned a new ride #${bookingRows[0].booking_id}. Please accept or reject.`;
+
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
             io.to(driverSocketId).emit("job-assignment-request", {
                 booking_id: id,
-                message: "You have been assigned a new job. Accept or reject."
+                assignment_type: isPreJob ? "pre_job" : "allocate_driver",
+                message: notifMessage,
             });
         }
 
-        // Send FCM push notification to driver
-        const notifTitle = "New Ride Assigned";
-        const notifMessage = `You have been assigned a new ride #${bookingRows[0].booking_id}`;
+        try {
+            await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, { booking_id: String(id) });
+            console.log("✅ Notification sent successfully to driver:", driverRows[0].name);
+        } catch (fcmError) {
+            console.error("⚠️ FCM notification failed (non-fatal):", fcmError.message);
+        }
 
-        await sendNotificationToDriver(
-            db,
-            driver_id,
-            notifTitle,
-            notifMessage,
-            { booking_id: String(id) }
-        );
+        try {
+            await storeNotification(db, {
+                user_type: 'driver',
+                user_id: driver_id,
+                title: notifTitle,
+                message: notifMessage
+            });
+        } catch (storeError) {
+            console.error("⚠️ Store notification failed (non-fatal):", storeError.message);
+        }
 
-        console.log("✅ Notification sent successfully to driver:", driverRows[0].name);
-
-        await storeNotification(db, {
-            user_type: 'driver',
-            user_id: driver_id,
-            title: notifTitle,
-            message: notifMessage
+        return res.json({
+            success: true,
+            message: isPreJob
+                ? "Pre-job assigned successfully. Waiting for driver response."
+                : "Driver assigned successfully. Waiting for driver response."
         });
-
-        return res.json({ success: true, message: "Driver assigned successfully. Waiting for driver response." });
 
     } catch (error) {
         console.error("❌ Assign driver error:", error);
-        return res.status(500).json({ success: false, message: "Something went wrong" });
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
