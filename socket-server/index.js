@@ -226,7 +226,7 @@ const autoDispatchRide = async ({
         console.log("Sending ride to:", driver.name);
 
         await db.query(
-            `UPDATE bookings SET driver = ?, driver_response = NULL WHERE id = ?`,
+            `UPDATE bookings SET driver = ? WHERE id = ?`,
             [driver.id, bookingId]
         );
 
@@ -242,7 +242,7 @@ const autoDispatchRide = async ({
 
         setTimeout(async () => {
             const [updatedRows] = await db.query(
-                "SELECT driver_response FROM bookings WHERE id = ?",
+                "SELECT booking_status FROM bookings WHERE id = ?",
                 [bookingId]
             );
 
@@ -263,7 +263,7 @@ const autoDispatchRide = async ({
             console.log("Timeout or rejected. Trying next driver.");
 
             await db.query(
-                `UPDATE bookings SET driver = NULL, driver_response = NULL WHERE id = ?`,
+                `UPDATE bookings SET driver = NULL WHERE id = ?`,
                 [bookingId]
             );
 
@@ -1171,14 +1171,24 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        const [bookingRows] = await db.query("SELECT id, booking_status, booking_id FROM bookings WHERE id = ?", [id]);
-        if (bookingRows.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
+        const [bookingRows] = await db.query(
+            "SELECT id, booking_status, booking_id FROM bookings WHERE id = ?",
+            [id]
+        );
+        if (bookingRows.length === 0) {
+            return res.status(404).json({ success: false, message: "Booking not found" });
+        }
 
-        const [driverRows] = await db.query("SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?", [driver_id]);
-        if (driverRows.length === 0) return res.status(404).json({ success: false, message: "Driver not found" });
+        const [driverRows] = await db.query(
+            "SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?",
+            [driver_id]
+        );
+        if (driverRows.length === 0) {
+            return res.status(404).json({ success: false, message: "Driver not found" });
+        }
 
         await db.query(
-            `UPDATE bookings SET driver = ?, driver_response = NULL WHERE id = ?`,
+            `UPDATE bookings SET driver = ? WHERE id = ?`,
             [driver_id, id]
         );
 
@@ -1199,9 +1209,9 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         try {
             await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, { booking_id: String(id) });
-            console.log("✅ Notification sent successfully to driver:", driverRows[0].name);
+            console.log("✅ Notification sent to driver:", driverRows[0].name);
         } catch (fcmError) {
-            console.error("⚠️ FCM notification failed (non-fatal):", fcmError.message);
+            console.error("⚠️ FCM failed (non-fatal):", fcmError.message);
         }
 
         try {
@@ -1218,7 +1228,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         return res.json({
             success: true,
             message: isPreJob
-                ? "Pre-job assigned successfully. Waiting for driver response."
+                ? "Pre-job sent successfully. Waiting for driver response."
                 : "Driver assigned successfully. Waiting for driver response."
         });
 
