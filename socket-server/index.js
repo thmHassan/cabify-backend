@@ -1745,7 +1745,7 @@ app.post("/send-notification-dispatcher", (req, res) => {
     drivers.forEach(driverId => {
         const socketId = driverSockets.get(driverId.toString());
         if (socketId) {
-            io.to(socketId).emit("new-ride", booking);
+            io.to(socketId).emit("notification-ride", booking);
             sentCount++;
         }
     });
