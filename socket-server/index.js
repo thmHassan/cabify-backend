@@ -332,26 +332,30 @@ io.on("connection", (socket) => {
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
     }
+
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
         console.log(`Driver ${driverId} connected`);
 
+        const database = socket.handshake.query.database;
+
+        if (!database) {
+            console.log("❌ No database provided in query");
+            return;
+        }
         (async () => {
             try {
-                if (!database) {
-                    console.log("❌ No database header found");
-                    return;
-                }
-
-                const db = getConnection(database);
+                const db = getConnection(`tenant${database}`);
 
                 const [rows] = await db.query(
                     `SELECT name, driving_status, plot_id, priority_plot 
-                     FROM drivers 
-                     WHERE id = ? 
-                     LIMIT 1`,
+                 FROM drivers 
+                 WHERE id = ? 
+                 LIMIT 1`,
                     [driverId]
                 );
+
+                console.log("Driver row:", rows);
 
                 if (!rows.length) return;
 
@@ -366,11 +370,19 @@ io.on("connection", (socket) => {
                         rank: driver.priority_plot ?? "-"
                     };
 
+                    console.log("🔥 Emitting waiting-driver-event:", emitData);
+
                     dispatcherSockets.forEach((sid) => {
                         io.to(sid).emit("waiting-driver-event", emitData);
                     });
 
-                    console.log("✅ Waiting driver emitted on connect:", driver.name);
+                    clientSockets.forEach((sid) => {
+                        io.to(sid).emit("waiting-driver-event", emitData);
+                    });
+
+                    adminSockets.forEach((sid) => {
+                        io.to(sid).emit("waiting-driver-event", emitData);
+                    });
                 }
 
             } catch (err) {
