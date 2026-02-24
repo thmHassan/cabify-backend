@@ -332,6 +332,52 @@ io.on("connection", (socket) => {
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
     }
+    if (driverId) {
+        driverSockets.set(driverId.toString(), socket.id);
+        console.log(`Driver ${driverId} connected`);
+
+        (async () => {
+            try {
+                if (!database) {
+                    console.log("❌ No database header found");
+                    return;
+                }
+
+                const db = getConnection(database);
+
+                const [rows] = await db.query(
+                    `SELECT name, driving_status, plot_id, priority_plot 
+                     FROM drivers 
+                     WHERE id = ? 
+                     LIMIT 1`,
+                    [driverId]
+                );
+
+                if (!rows.length) return;
+
+                const driver = rows[0];
+
+                if (driver.driving_status === "idle") {
+
+                    const emitData = {
+                        driverId,
+                        driverName: driver.name,
+                        plot: driver.plot_id ?? "Unassigned",
+                        rank: driver.priority_plot ?? "-"
+                    };
+
+                    dispatcherSockets.forEach((sid) => {
+                        io.to(sid).emit("waiting-driver-event", emitData);
+                    });
+
+                    console.log("✅ Waiting driver emitted on connect:", driver.name);
+                }
+
+            } catch (err) {
+                console.error("Driver connect waiting error:", err);
+            }
+        })();
+    }
 
     socket.on("driver-location", async (data) => {
         try {
