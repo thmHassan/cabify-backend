@@ -122,9 +122,12 @@ class AutoDispatchPlotJob implements ShouldQueue
                     return;
                 }
             }
+            \Log::info("Priority");
+            \Log::info($priority);
 
             if($priority < 4){
                 $dispatch_system_followup = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->orderBy("sub_priority")->get();
+                \Log::info($dispatch_system_followup);
         
                 foreach($dispatch_system_followup as $i => $followup){
                     if($followup->steps == "immediately_show_on_dispatcher_panel"){
