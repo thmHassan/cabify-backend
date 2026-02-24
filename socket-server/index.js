@@ -1525,7 +1525,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         }
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
-        
+
         return res.json({ success: true, message: "Booking status updated successfully" });
 
     } catch (error) {
@@ -1784,13 +1784,52 @@ app.post("/on-job-driver", (req, res) => {
     return res.json({ success: true });
 });
 
-app.post("/waiting-driver", (req, res) => {
-    const { clientId, driverName, plot } = req.body;
-    const socketId = clientSockets.get(clientId.toString());
-    if (socketId) {
-        io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+// app.post("/waiting-driver", (req, res) => {
+//     const { clientId, driverName, plot } = req.body;
+//     const socketId = clientSockets.get(clientId.toString());
+//     if (socketId) {
+//         io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+//     }
+//     return res.json({ success: true });
+// });
+
+app.post("/waiting-driver", async (req, res) => {
+    try {
+        const { clientId, driverName, plot } = req.body;
+
+        const db = getConnection(req.tenantDb);
+
+        const [driverRows] = await db.query(
+            `SELECT driving_status FROM drivers WHERE name = ?`,
+            [driverName]
+        );
+
+        if (!driverRows.length) {
+            return res.json({ success: false, message: "Driver not found" });
+        }
+
+        if (driverRows[0].driving_status !== "idle") {
+            return res.json({
+                success: false,
+                message: "Driver not idle"
+            });
+        }
+
+        const socketId = clientSockets.get(clientId.toString());
+
+        if (socketId) {
+            io.to(socketId).emit("waiting-driver-event", {
+                driverName,
+                plot
+            });
+        }
+
+        return res.json({ success: true });
+
+    } catch (error) {
+        console.error("Waiting driver error:", error);
+        return res.status(500).json({ success: false });
     }
-    return res.json({ success: true });
 });
 
 app.post("/send-reminder", (req, res) => {
