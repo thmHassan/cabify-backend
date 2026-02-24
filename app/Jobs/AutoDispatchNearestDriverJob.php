@@ -98,7 +98,7 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
 
             if(!isset($driver) || $driver == NULL){
                 $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_nearest_driver")->first();
-                $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
                 if(!isset($dispatch_system) || count($dispatch_system) <= 0){
                     return;

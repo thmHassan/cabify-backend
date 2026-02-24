@@ -428,7 +428,7 @@ class BookingController extends Controller
                     'tenantDb'   => $request->header('database'),
                  ]);
 
-            $dispatch_system = CompanyDispatchSystem::where("priority", "1")->get();
+            $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "DESC")->get();
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                 AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));

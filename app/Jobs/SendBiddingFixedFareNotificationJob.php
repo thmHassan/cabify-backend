@@ -118,6 +118,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                     }
                 });
 
+            $plotId = NULL;
             $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
             $backupPlots = $plotData->backup_plots;
             if(isset($backupPlots) && $backupPlots != NULL){
@@ -127,7 +128,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
 
             if(!isset($plotId) || $plotId == NULL){
                 $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "bidding_fixed_fare_plot_base")->first();
-                $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
                 if(!isset($dispatch_system) || count($dispatch_system) <= 0){
                     return;

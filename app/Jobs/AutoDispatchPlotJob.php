@@ -78,7 +78,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 if(!isset($plotData) || $plotData == NULL || $plotData == ""){
                     \Log::info("plot not found");
                     $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
-                    $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
                     if(!isset($dispatch_system) || count($dispatch_system) <= 0){
                         return;
@@ -93,7 +93,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 }
 
                 $backupPlots = $plotData->backup_plots;
-
+                $plotId = NULL;
                 if(isset($backupPlots) && $backupPlots != NULL){
                     $currentIndex = array_search($plotId, $backupPlots);
                     $plotId = $backupPlots[$currentIndex + 1] ?? null;
@@ -103,7 +103,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 if(!isset($plotId) || $plotId == NULL || $plotId == ""){
                     \Log::info("new plot not found");
                     $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
-                    $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
                     if(!isset($dispatch_system) || count($dispatch_system) <= 0){
                         return;
@@ -128,7 +128,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 if(!isset($driver) || $driver == NULL || $driver == ""){
                     \Log::info("new plot not found & Driver Found");
                     $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
-                    $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
                     if(!isset($dispatch_system) || count($dispatch_system) <= 0){
                         return;
