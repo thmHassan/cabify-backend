@@ -1661,6 +1661,20 @@ app.post("/send-new-ride", (req, res) => {
     return res.json({ success: true, sent_to: sentCount });
 });
 
+app.post("/send-notification-dispatcher", (req, res) => {
+    const { drivers, booking } = req.body;
+    let sentCount = 0;
+    drivers.forEach(driverId => {
+        const socketId = driverSockets.get(driverId.toString());
+        if (socketId) {
+            io.to(socketId).emit("new-ride", booking);
+            sentCount++;
+        }
+    });
+    return res.json({ success: true, sent_to: sentCount });
+});
+
+
 app.post("/change-cancel-ride", (req, res) => {
     const { drivers, status, booking } = req.body;
     let sentCount = 0;

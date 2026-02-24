@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanySendNewRide;
 use App\Models\TenantUser;
+use App\Models\Dispatcher;
 
 class AutoDispatchNearestDriverJob implements ShouldQueue
 {
@@ -173,25 +174,113 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 foreach($dispatch_system_followup as $i => $followup){
                     if($followup->steps == "immediately_show_on_dispatcher_panel"){
                         if(count($this->driverIds) == 1){
-                            event(new BookingShownOnDispatcher($booking));
+                            // event(new BookingShownOnDispatcher($booking));
+                            $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
+                            Http::withHeaders([
+                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'dispatchers' => $dispatchers,
+                                'booking' => [
+                                    'id' => $booking->id,
+                                    'booking_id' => $booking->booking_id,
+                                    'pickup_point' => $booking->pickup_point,
+                                    'destination_point' => $booking->destination_point,
+                                    'offered_amount' => $booking->offered_amount,
+                                    'distance' => $booking->distance,
+                                    'user_id' => $booking->user_id,
+                                    'user_name' => $booking->name,
+                                    'user_profile' => $booking->userDetail->profile_image,
+                                    'pickup_location' => $booking->pickup_location,
+                                    'destination_location' => $booking->destination_location,
+                                    'note' => $booking->note,
+                                    'pickup_time' => $booking->pickup_time,
+                                    'booking_date' => $booking->booking_date
+                                ]
+                            ]);
                             break;
                         }
                     }
                     elseif($followup->steps == "show_only_after_not_selected_in_auto_dispatch_first_try"){
                         if(count($this->driverIds) == 2){
-                            event(new BookingShownOnDispatcher($booking));
+                            // event(new BookingShownOnDispatcher($booking));
+                            $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
+                            Http::withHeaders([
+                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'dispatchers' => $dispatchers,
+                                'booking' => [
+                                    'id' => $booking->id,
+                                    'booking_id' => $booking->booking_id,
+                                    'pickup_point' => $booking->pickup_point,
+                                    'destination_point' => $booking->destination_point,
+                                    'offered_amount' => $booking->offered_amount,
+                                    'distance' => $booking->distance,
+                                    'user_id' => $booking->user_id,
+                                    'user_name' => $booking->name,
+                                    'user_profile' => $booking->userDetail->profile_image,
+                                    'pickup_location' => $booking->pickup_location,
+                                    'destination_location' => $booking->destination_location,
+                                    'note' => $booking->note,
+                                    'pickup_time' => $booking->pickup_time,
+                                    'booking_date' => $booking->booking_date
+                                ]
+                            ]);
                             break;
                         }
                     }
                     elseif($followup->steps == "show_only_after_not_selected_in_auto_dispatch_second_try"){
                         if(count($this->driverIds) == 3){
-                            event(new BookingShownOnDispatcher($booking));
+                            // event(new BookingShownOnDispatcher($booking));
+                            $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
+                            Http::withHeaders([
+                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'dispatchers' => $dispatchers,
+                                'booking' => [
+                                    'id' => $booking->id,
+                                    'booking_id' => $booking->booking_id,
+                                    'pickup_point' => $booking->pickup_point,
+                                    'destination_point' => $booking->destination_point,
+                                    'offered_amount' => $booking->offered_amount,
+                                    'distance' => $booking->distance,
+                                    'user_id' => $booking->user_id,
+                                    'user_name' => $booking->name,
+                                    'user_profile' => $booking->userDetail->profile_image,
+                                    'pickup_location' => $booking->pickup_location,
+                                    'destination_location' => $booking->destination_location,
+                                    'note' => $booking->note,
+                                    'pickup_time' => $booking->pickup_time,
+                                    'booking_date' => $booking->booking_date
+                                ]
+                            ]);
                             break;
                         }
                     }
                     elseif($followup->steps == "show_only_after_not_selected_in_auto_dispatch_third_try"){
                         if(count($this->driverIds) == 4){
-                            event(new BookingShownOnDispatcher($booking));
+                            // event(new BookingShownOnDispatcher($booking));
+                            $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
+                            Http::withHeaders([
+                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'dispatchers' => $dispatchers,
+                                'booking' => [
+                                    'id' => $booking->id,
+                                    'booking_id' => $booking->booking_id,
+                                    'pickup_point' => $booking->pickup_point,
+                                    'destination_point' => $booking->destination_point,
+                                    'offered_amount' => $booking->offered_amount,
+                                    'distance' => $booking->distance,
+                                    'user_id' => $booking->user_id,
+                                    'user_name' => $booking->name,
+                                    'user_profile' => $booking->userDetail->profile_image,
+                                    'pickup_location' => $booking->pickup_location,
+                                    'destination_location' => $booking->destination_location,
+                                    'note' => $booking->note,
+                                    'pickup_time' => $booking->pickup_time,
+                                    'booking_date' => $booking->booking_date
+                                ]
+                            ]);
                             break;
                         }
                     }
