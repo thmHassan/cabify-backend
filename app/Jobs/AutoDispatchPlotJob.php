@@ -75,9 +75,29 @@ class AutoDispatchPlotJob implements ShouldQueue
             if(!isset($driver) || $driver == NULL){
                 \Log::info("driver not fount");
                 $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
+                if(!isset($plotData) || $plotData == NULL || $plotData == ""){
+                    \Log::info("plot not found");
+                    $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
+                    $dispatch_system = CompanyDispatchSystem::where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+
+                    if(!isset($dispatch_system) || count($dispatch_system) <= 0){
+                        return;
+                    }
+                    if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                        SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
+                    }
+                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
+                    }
+                    return;
+                }
+
                 $backupPlots = $plotData->backup_plots;
-                $currentIndex = array_search($plotId, $backupPlots);
-                $plotId = $backupPlots[$currentIndex + 1] ?? null;
+
+                if(isset($backupPlots) && $backupPlots != NULL){
+                    $currentIndex = array_search($plotId, $backupPlots);
+                    $plotId = $backupPlots[$currentIndex + 1] ?? null;
+                }
                 $priority = 0;
 
                 if(!isset($plotId) || $plotId == NULL || $plotId == ""){
@@ -122,9 +142,12 @@ class AutoDispatchPlotJob implements ShouldQueue
                     return;
                 }
             }
+            \Log::info("Priority");
+            \Log::info($priority);
 
             if($priority < 4){
                 $dispatch_system_followup = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->orderBy("sub_priority")->get();
+                \Log::info($dispatch_system_followup);
         
                 foreach($dispatch_system_followup as $i => $followup){
                     if($followup->steps == "immediately_show_on_dispatcher_panel"){
