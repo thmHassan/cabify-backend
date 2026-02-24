@@ -333,6 +333,64 @@ io.on("connection", (socket) => {
         driverSockets.set(driverId.toString(), socket.id);
     }
 
+    if (driverId) {
+        driverSockets.set(driverId.toString(), socket.id);
+        console.log(`Driver ${driverId} connected`);
+
+        const database = socket.handshake.query.database;
+
+        if (!database) {
+            console.log("❌ No database provided in query");
+            return;
+        }
+        (async () => {
+            try {
+                const db = getConnection(`tenant${database}`);
+
+                const [rows] = await db.query(
+                    `SELECT name, driving_status, plot_id, priority_plot 
+                 FROM drivers 
+                 WHERE id = ? 
+                 LIMIT 1`,
+                    [driverId]
+                );
+
+                console.log("Driver row:", rows);
+
+                if (!rows.length) return;
+
+                const driver = rows[0];
+
+                if (driver.driving_status === "idle") {
+
+                    const emitData = {
+                        driverId,
+                        driverName: driver.name,
+                        plot: driver.plot_id ?? "Unassigned",
+                        rank: driver.priority_plot ?? "-"
+                    };
+
+                    console.log("🔥 Emitting waiting-driver-event:", emitData);
+
+                    dispatcherSockets.forEach((sid) => {
+                        io.to(sid).emit("waiting-driver-event", emitData);
+                    });
+
+                    clientSockets.forEach((sid) => {
+                        io.to(sid).emit("waiting-driver-event", emitData);
+                    });
+
+                    adminSockets.forEach((sid) => {
+                        io.to(sid).emit("waiting-driver-event", emitData);
+                    });
+                }
+
+            } catch (err) {
+                console.error("Driver connect waiting error:", err);
+            }
+        })();
+    }
+
     socket.on("driver-location", async (data) => {
         try {
             var dataArray;
@@ -1525,7 +1583,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         }
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
-        
+
         return res.json({ success: true, message: "Booking status updated successfully" });
 
     } catch (error) {
@@ -1784,13 +1842,70 @@ app.post("/on-job-driver", (req, res) => {
     return res.json({ success: true });
 });
 
-app.post("/waiting-driver", (req, res) => {
-    const { clientId, driverName, plot } = req.body;
-    const socketId = clientSockets.get(clientId.toString());
-    if (socketId) {
-        io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+// app.post("/waiting-driver", (req, res) => {
+//     const { clientId, driverName, plot } = req.body;
+//     const socketId = clientSockets.get(clientId.toString());
+//     if (socketId) {
+//         io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+//     }
+//     return res.json({ success: true });
+// });
+
+app.post("/waiting-driver", async (req, res) => {
+    try {
+        const { clientId, driverName, plot } = req.body;
+
+        if (!clientId || !driverName) {
+            return res.status(400).json({
+                success: false,
+                message: "clientId and driverName required"
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        const [driverRows] = await db.query(
+            `SELECT driving_status 
+             FROM drivers 
+             WHERE name = ? 
+             LIMIT 1`,
+            [driverName]
+        );
+
+        if (!driverRows.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found"
+            });
+        }
+
+        if (driverRows[0].driving_status !== "idle") {
+            return res.json({
+                success: false,
+                message: "Driver not idle"
+            });
+        }
+
+        const emitData = {
+            driverName,
+            plot: plot ?? "Unassigned"
+        };
+
+        const socketId = clientSockets.get(clientId.toString());
+        if (socketId) {
+            io.to(socketId).emit("waiting-driver-event", emitData);
+        }
+
+        dispatcherSockets.forEach((socketId) => {
+            io.to(socketId).emit("waiting-driver-event", emitData);
+        });
+
+        return res.json({ success: true });
+
+    } catch (error) {
+        console.error("Waiting driver error:", error);
+        return res.status(500).json({ success: false });
     }
-    return res.json({ success: true });
 });
 
 app.post("/send-reminder", (req, res) => {

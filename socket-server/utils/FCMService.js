@@ -53,7 +53,7 @@ const sendToDevice = async (deviceToken, title, body, data = {}) => {
 const sendNotificationToDriver = async (db, driverId, title, body, data = {}) => {
   try {
     const [tokens] = await db.query(
-      "SELECT fcm_token FROM company_tokens WHERE user_id = ? AND user_type = 'driver'",
+      "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'driver'",
       [driverId]
     );
 
