@@ -120,8 +120,10 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
 
             $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
             $backupPlots = $plotData->backup_plots;
-            $currentIndex = array_search($plotId, $backupPlots);
-            $plotId = $backupPlots[$currentIndex + 1] ?? null;
+            if(isset($backupPlots) && $backupPlots != NULL){
+                $currentIndex = array_search($plotId, $backupPlots);
+                $plotId = $backupPlots[$currentIndex + 1] ?? null;
+            }
 
             if(!isset($plotId) || $plotId == NULL){
                 $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "bidding_fixed_fare_plot_base")->first();
