@@ -1682,10 +1682,10 @@ app.post("/send-new-ride", (req, res) => {
 });
 
 app.post("/send-notification-dispatcher", (req, res) => {
-    const { drivers, booking } = req.body;
+    const { dispatchers, booking } = req.body;
     let sentCount = 0;
-    drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
+    dispatchers.forEach(dispatcherId => {
+        const socketId = dispatcherSockets.get(dispatcherId.toString());
         if (socketId) {
             io.to(socketId).emit("notification-ride", booking);
             sentCount++;
