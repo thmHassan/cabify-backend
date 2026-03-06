@@ -29,7 +29,6 @@ class UserController extends Controller
                         return $query->where('country_code', $request->country_code);
                     }),
                 ],
-                'password' => 'required|string|min:6',
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
             ]);
@@ -59,6 +58,7 @@ class UserController extends Controller
             $newUser = new CompanyUser;
             $newUser->name = $request->name;
             $newUser->email = $request->email;
+            $newUser->country_code = $request->country_code;
             $newUser->phone_no = $request->phone_no;
             $newUser->address = $request->address;
             $newUser->city = $request->city;
@@ -102,6 +102,7 @@ class UserController extends Controller
             $editUser = CompanyUser::where("id", $request->id)->first();
             $editUser->name = $request->name;
             $editUser->email = $request->email;
+            $editUser->country_code = $request->country_code;
             $editUser->phone_no = $request->phone_no;
             $editUser->address = $request->address;
             $editUser->city = $request->city;

@@ -135,6 +135,13 @@ class AuthController extends Controller
                 ]);
             }
 
+            if($existUser->status == "inactive"){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Your account is not active. Please contact to Company Admin.'
+                ]);
+            }
+
             $otp = rand(1000, 9999);
             $expiresAt = Carbon::now()->addMinutes(5);
             $existUser->otp = $otp;

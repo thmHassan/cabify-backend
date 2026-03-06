@@ -65,6 +65,7 @@ class DriverController extends Controller
             $driver = new CompanyDriver;
             $driver->name = $request->name;
             $driver->email = $request->email;
+            $driver->country_code = $request->country_code;
             $driver->phone_no = $request->phone_no;
             $driver->address = $request->address;
             $driver->driver_license = $request->driver_license;
@@ -107,7 +108,7 @@ class DriverController extends Controller
                     'max:255',
                     Rule::unique('drivers', 'phone_no')
                         ->where(fn ($q) => $q->where('country_code', $request->country_code))
-                        ->ignore($driver->id),
+                        ->ignore($request->id),
                 ],
                 'address' => 'required|max:255',
                 'driver_license' => 'required|max:255',
@@ -119,6 +120,7 @@ class DriverController extends Controller
             $driver = CompanyDriver::where("id", $request->id)->first();
             $driver->name = $request->name;
             $driver->email = $request->email;
+            $driver->country_code = $request->country_code; 
             $driver->phone_no = $request->phone_no; 
             $driver->address = $request->address;
             $driver->driver_license = $request->driver_license;
