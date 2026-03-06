@@ -226,10 +226,10 @@ class SettingController extends Controller
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
             if(!isset($google_api_keys) || $google_api_keys == NULL){
-                $google_map_key = $data->google_map_key;
+                $google_api_keys = $data->google_map_key;
             }
             if(!isset($barikoi_api_keys) || $barikoi_api_keys == NULL){
-                $google_map_key = $data->barikoi_key;
+                $barikoi_api_keys = $data->barikoi_key;
             }
             if(!isset($company_timezone) || $company_timezone == NULL){
                 $company_timezone = json_decode($companyData->data)->time_zone;
