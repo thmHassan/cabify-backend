@@ -135,7 +135,7 @@ class AuthController extends Controller
                 ]);
             }
 
-            if($existUser->status == "inactive"){
+            if($existUser->status == "deactive"){
                 return response()->json([
                     'error' => 1,
                     'message' => 'Your account is not active. Please contact to Company Admin.'
