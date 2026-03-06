@@ -556,10 +556,10 @@ class DriverController extends Controller
                 ]);
 
                 Mail::send('emails.document-status', [
-                    'name' => $user->name ?? 'User',
+                    'name' => $driver->name ?? 'Driver',
                     'status' => "approved",
-                ], function ($message) use ($user) {
-                    $message->to($user->email)
+                ], function ($message) use ($driver) {
+                    $message->to($driver->email)
                         ->subject('Document Status Updated');
                 });
             }
