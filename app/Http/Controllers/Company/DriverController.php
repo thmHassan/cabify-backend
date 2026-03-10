@@ -118,18 +118,18 @@ class DriverController extends Controller
             $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
 
             $driver = CompanyDriver::where("id", $request->id)->first();
-            $driver->name = $request->name;
-            $driver->email = $request->email;
-            $driver->country_code = $request->country_code; 
-            $driver->phone_no = $request->phone_no; 
-            $driver->address = $request->address;
-            $driver->driver_license = $request->driver_license;
-            $driver->assigned_vehicle = $request->assigned_vehicle;
+            $driver->name = isset($request->name) ? $request->name : $driver->name;
+            $driver->email = isset($request->email) ? $request->email : $driver->email;
+            $driver->country_code = isset($request->country_code) ? $request->country_code : $driver->country_code; 
+            $driver->phone_no = isset($request->phone_no) ? $request->phone_no : $driver->phone_no; 
+            $driver->address = isset($request->address) ? $request->address : $driver->address;
+            $driver->driver_license = isset($request->driver_license) ? $request->driver_license : $driver->driver_license;
+            $driver->assigned_vehicle = isset($request->assigned_vehicle) ? $request->assigned_vehicle : $driver->assigned_vehicle;
             $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
             $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
             $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
-            $driver->joined_date = $request->joined_date;
-            $driver->sub_company = $request->sub_company;
+            $driver->joined_date = isset($request->joined_date) ? $request->joined_date : $driver->joined_date;
+            $driver->sub_company = isset($request->sub_company) ? $request->sub_company : $driver->sub_company;
             $driver->package_id = $request->package_id;
             $driver->bank_name = isset($request->bank_name) ? $request->bank_name : $driver->bank_name;
             $driver->bank_account_number = isset($request->bank_account_number) ? $request->bank_account_number : $driver->bank_account_number;
