@@ -131,6 +131,11 @@ class DriverController extends Controller
             $driver->joined_date = $request->joined_date;
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
+            $driver->bank_name = isset($request->bank_name) ? $request->bank_name : $driver->bank_name;
+            $driver->bank_account_number = isset($request->bank_account_number) ? $request->bank_account_number : $driver->bank_account_number;
+            $driver->account_holder_name = isset($request->account_holder_name) ? $request->account_holder_name : $driver->account_holder_name;
+            $driver->bank_phone_no = isset($request->bank_phone_no) ? $request->bank_phone_no : $driver->bank_phone_no;
+            $driver->iban_no = isset($request->iban_no) ? $request->iban_no : $driver->iban_no;
             $driver->dispatcher_id = $request->dispatcher_id;
             $driver->save();
 
