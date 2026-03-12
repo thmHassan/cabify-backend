@@ -386,7 +386,7 @@ class BookingController extends Controller
             }
             if ($companySetting->package_type == "packages_topup") {
                 $package = DriverPackage::where("driver_id", auth("driver")->user()->id)
-                    ->where("package_type", "packages_topup")
+                    ->where("package_type", "packages_postpaid")
                     ->orderBy("id", "DESC")
                     ->first();
 
