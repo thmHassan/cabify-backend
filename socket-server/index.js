@@ -1150,53 +1150,24 @@ app.get("/bookings", async (req, res) => {
             }
         }
 
-        if (status) {
-            baseQuery += ` AND b.booking_status = ?`;
-            params.push(status);
-        }
-        if (date) {
-            baseQuery += ` AND DATE(b.booking_date) = ?`;
-            params.push(date);
-        }
-        if (user_id) {
-            baseQuery += ` AND b.user_id = ?`;
-            params.push(user_id);
-        }
-        if (driver_id) {
-            baseQuery += ` AND b.driver = ?`;
-            params.push(driver_id);
-        }
-        if (sub_company) {
-            baseQuery += ` AND b.sub_company = ?`;
-            params.push(sub_company);
-        }
+        if (status) { baseQuery += ` AND b.booking_status = ?`; params.push(status); }
+        if (date) { baseQuery += ` AND DATE(b.booking_date) = ?`; params.push(date); }
+        if (user_id) { baseQuery += ` AND b.user_id = ?`; params.push(user_id); }
+        if (driver_id) { baseQuery += ` AND b.driver = ?`; params.push(driver_id); }
+        if (sub_company) { baseQuery += ` AND b.sub_company = ?`; params.push(sub_company); }
         if (search) {
-            baseQuery += ` AND (
-                b.booking_id LIKE ? OR 
-                b.name LIKE ? OR 
-                b.phone_no LIKE ? OR 
-                b.email LIKE ? OR
-                d.name LIKE ? OR
-                vt.vehicle_type_name LIKE ?
-            )`;
-            const searchParam = `%${search}%`;
-            params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
+            baseQuery += ` AND (b.booking_id LIKE ? OR b.name LIKE ? OR b.phone_no LIKE ? OR b.email LIKE ? OR d.name LIKE ? OR vt.vehicle_type_name LIKE ?)`;
+            const s = `%${search}%`;
+            params.push(s, s, s, s, s, s);
         }
 
         const dataQuery = `
             SELECT 
                 b.*,
-                d.id as driver_id,
-                d.name as driver_name,
-                d.email as driver_email,
-                d.phone_no as driver_phone,
-                d.profile_image as driver_profile_image,
-                vt.id as vehicle_type_id,
-                vt.vehicle_type_name as vehicle_type_name,
-                vt.vehicle_type_service as vehicle_type_service,
-                sc.id as sub_company_id,
-                sc.name as sub_company_name,
-                sc.email as sub_company_email
+                d.id as driver_id, d.name as driver_name, d.email as driver_email,
+                d.phone_no as driver_phone, d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id, vt.vehicle_type_name, vt.vehicle_type_service,
+                sc.id as sub_company_id, sc.name as sub_company_name, sc.email as sub_company_email
             ${baseQuery}
             ORDER BY b.booking_date DESC, b.id DESC
             LIMIT ? OFFSET ?
@@ -1214,23 +1185,9 @@ app.get("/bookings", async (req, res) => {
 
             return {
                 ...bookingData,
-                driverDetail: driver_id ? {
-                    id: driver_id,
-                    name: driver_name,
-                    email: driver_email,
-                    phone_no: driver_phone,
-                    profile_image: driver_profile_image
-                } : null,
-                vehicleDetail: vehicle_type_id ? {
-                    id: vehicle_type_id,
-                    vehicle_type_name: vehicle_type_name,
-                    vehicle_type_service: vehicle_type_service
-                } : null,
-                subCompanyDetail: sub_company_id ? {
-                    id: sub_company_id,
-                    name: sub_company_name,
-                    email: sub_company_email
-                } : null
+                driverDetail: driver_id ? { id: driver_id, name: driver_name, email: driver_email, phone_no: driver_phone, profile_image: driver_profile_image } : null,
+                vehicleDetail: vehicle_type_id ? { id: vehicle_type_id, vehicle_type_name, vehicle_type_service } : null,
+                subCompanyDetail: sub_company_id ? { id: sub_company_id, name: sub_company_name, email: sub_company_email } : null
             };
         });
 
@@ -1241,9 +1198,7 @@ app.get("/bookings", async (req, res) => {
             success: true,
             data: formattedBookings,
             pagination: {
-                total,
-                page: pageNum,
-                limit: limitNum,
+                total, page: pageNum, limit: limitNum,
                 total_pages: Math.ceil(total / limitNum),
                 hasNext: pageNum * limitNum < total,
                 hasPrev: pageNum > 1
@@ -1252,10 +1207,7 @@ app.get("/bookings", async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching bookings:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -1263,28 +1215,16 @@ app.get("/bookings/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const db = getConnection(req.tenantDb);
-
-        const query = `SELECT * FROM bookings WHERE id = ?`;
-        const [bookings] = await db.query(query, [id]);
+        const [bookings] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
 
         if (bookings.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Booking not found"
-            });
+            return res.status(404).json({ success: false, message: "Booking not found" });
         }
 
-        return res.json({
-            success: true,
-            data: bookings[0]
-        });
-
+        return res.json({ success: true, data: bookings[0] });
     } catch (error) {
         console.error("Error fetching booking:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -1385,6 +1325,124 @@ app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
             success: false,
             message: error.message
         });
+    }
+});
+
+app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { follow_on_booking_id } = req.body;
+
+        if (!follow_on_booking_id) {
+            return res.status(400).json({ success: false, message: "follow_on_booking_id is required" });
+        }
+
+        if (parseInt(id) === parseInt(follow_on_booking_id)) {
+            return res.status(400).json({ success: false, message: "A booking cannot be a follow-on of itself" });
+        }
+
+        const db = getConnection(req.tenantDb);
+
+        // Validate Job 1 (must be active with a driver)
+        const [job1Rows] = await db.query(
+            "SELECT id, booking_id, booking_status, driver, follow_on_job_id FROM bookings WHERE id = ?",
+            [id]
+        );
+        if (!job1Rows.length) return res.status(404).json({ success: false, message: "Job 1 not found" });
+
+        const job1 = job1Rows[0];
+
+        if (!job1.driver) {
+            return res.status(400).json({ success: false, message: "Job 1 has no driver assigned. Assign a driver first." });
+        }
+
+        if (!['ongoing', 'arrived', 'started'].includes(job1.booking_status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Job 1 must be active (ongoing/arrived/started). Current status: ${job1.booking_status}`
+            });
+        }
+
+        // Validate Job 2 (must be pending)
+        const [job2Rows] = await db.query(
+            "SELECT id, booking_id, booking_status FROM bookings WHERE id = ?",
+            [follow_on_booking_id]
+        );
+        if (!job2Rows.length) return res.status(404).json({ success: false, message: "Follow-on booking (Job 2) not found" });
+
+        const job2 = job2Rows[0];
+
+        if (!['pending', 'pending_acceptance'].includes(job2.booking_status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Job 2 must be pending. Current status: ${job2.booking_status}`
+            });
+        }
+
+        // Check Job 2 is not already linked to another booking
+        const [alreadyLinked] = await db.query(
+            "SELECT id FROM bookings WHERE follow_on_job_id = ?",
+            [follow_on_booking_id]
+        );
+        if (alreadyLinked.length) {
+            return res.status(400).json({
+                success: false,
+                message: `Booking #${job2.booking_id} is already queued as a follow-on for another job`
+            });
+        }
+
+        // Get driver name
+        const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
+        const driverName = driverRows[0]?.name || "Driver";
+
+        // Link: store follow_on_job_id on Job 1
+        await db.query("UPDATE bookings SET follow_on_job_id = ? WHERE id = ?", [follow_on_booking_id, id]);
+
+        const responseData = {
+            job1_id: job1.id,
+            job1_booking_id: job1.booking_id,
+            job2_id: job2.id,
+            job2_booking_id: job2.booking_id,
+            driver_id: job1.driver,
+            driver_name: driverName,
+            message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
+        };
+
+        // Notify all dispatchers/admins
+        dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+        adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+        clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+
+        console.log(`🔗 Follow-on linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
+
+        return res.json({ success: true, message: responseData.message, data: responseData });
+
+    } catch (error) {
+        console.error("❌ Set follow-on job error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.delete("/bookings/:id/remove-follow-on-job", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const db = getConnection(req.tenantDb);
+
+        const [rows] = await db.query(
+            "SELECT id, booking_id, follow_on_job_id FROM bookings WHERE id = ?", [id]
+        );
+        if (!rows.length) return res.status(404).json({ success: false, message: "Booking not found" });
+        if (!rows[0].follow_on_job_id) return res.status(400).json({ success: false, message: "No follow-on job linked" });
+
+        await db.query("UPDATE bookings SET follow_on_job_id = NULL WHERE id = ?", [id]);
+
+        dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-removed", { booking_id: parseInt(id) }));
+        adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-removed", { booking_id: parseInt(id) }));
+
+        return res.json({ success: true, message: "Follow-on job unlinked successfully" });
+    } catch (error) {
+        console.error("❌ Remove follow-on job error:", error);
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -1676,39 +1734,130 @@ app.put("/bookings/:id/status", async (req, res) => {
                 const notifTitle = "Ride Cancelled";
                 const notifMessage = `Ride #${booking.booking_id} has been cancelled by ${cancelledByText}`;
 
-                console.log("Booking ID:", booking.booking_id);
-                console.log("Driver Name:", driverInfo[0]?.name);
-                console.log("Cancelled By:", cancelledByText);
-
-                // Send FCM push
                 await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, { booking_id: String(id) });
                 console.log("✅ Cancel notification sent to driver:", driverInfo[0]?.name);
 
-                // ✅ Store notification in notifications table
                 await storeNotification(db, {
-                    user_type: 'driver',
-                    user_id: booking.driver,
-                    title: notifTitle,
-                    message: notifMessage
+                    user_type: 'driver', user_id: booking.driver,
+                    title: notifTitle, message: notifMessage
                 });
 
             } else if (booking_status === 'completed') {
                 const notifTitle = "Ride Completed";
                 const notifMessage = `Ride #${booking.booking_id} has been marked as completed`;
 
-                console.log("Booking ID:", booking.booking_id);
-                console.log("Driver Name:", driverInfo[0]?.name);
-                console.log("Status:", "Completed");
-
                 await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, { booking_id: String(id) });
                 console.log("✅ Complete notification sent to driver:", driverInfo[0]?.name);
 
                 await storeNotification(db, {
-                    user_type: 'driver',
-                    user_id: booking.driver,
-                    title: notifTitle,
-                    message: notifMessage
+                    user_type: 'driver', user_id: booking.driver,
+                    title: notifTitle, message: notifMessage
                 });
+
+                // ─────────────────────────────────────────────────────────
+                // FOLLOW-ON JOB: When Job 1 completes, send Job 2 to driver
+                // as a normal ride request — driver must accept or reject
+                // ─────────────────────────────────────────────────────────
+                if (booking.follow_on_job_id) {
+                    const followOnId = booking.follow_on_job_id;
+                    console.log(`🔁 Follow-on job detected: #${followOnId} — sending to driver #${booking.driver}`);
+
+                    try {
+                        const [followOnRows] = await db.query(
+                            "SELECT * FROM bookings WHERE id = ?",
+                            [followOnId]
+                        );
+
+                        if (followOnRows.length && ['pending', 'pending_acceptance'].includes(followOnRows[0].booking_status)) {
+                            const followOnBooking = followOnRows[0];
+                            const driverId = booking.driver;
+
+                            // Pre-assign driver but keep status as pending_acceptance
+                            // so driver must still accept/reject
+                            await db.query(
+                                `UPDATE bookings 
+                                 SET driver = ?, booking_status = 'pending_acceptance', driver_response = 'pending'
+                                 WHERE id = ?`,
+                                [driverId, followOnId]
+                            );
+
+                            // Send ride request via socket (same event as normal dispatch)
+                            const driverSocketId = driverSockets.get(driverId.toString());
+                            if (driverSocketId) {
+                                io.to(driverSocketId).emit("new-ride-request", {
+                                    booking_id: followOnBooking.id,
+                                    message: "You have a follow-on ride request",
+                                    booking: { ...followOnBooking, driver: driverId }
+                                });
+                                console.log(`📲 Follow-on ride request sent to driver socket: ${driverId}`);
+                            }
+
+                            // FCM push to driver
+                            const foNotifTitle = "New Follow-On Job";
+                            const foNotifMsg = `Your next job #${followOnBooking.booking_id} is ready. Please accept or reject.`;
+                            await sendNotificationToDriver(db, driverId, foNotifTitle, foNotifMsg, { booking_id: String(followOnId) });
+                            await storeNotification(db, {
+                                user_type: 'driver', user_id: driverId,
+                                title: foNotifTitle, message: foNotifMsg
+                            });
+
+                            // Notify dispatchers/admins that follow-on was sent to driver
+                            const foEventData = {
+                                booking_id: followOnId,
+                                driver_id: driverId,
+                                driver_name: driverInfo[0]?.name,
+                                booking: { ...followOnBooking, driver: driverId, booking_status: 'pending_acceptance' },
+                                message: `Follow-on job #${followOnBooking.booking_id} sent to ${driverInfo[0]?.name} — waiting for acceptance`
+                            };
+                            dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
+                            adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
+                            clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
+
+                            // 30-second timeout — if driver doesn't respond, reset to pending
+                            setTimeout(async () => {
+                                try {
+                                    const [checkRows] = await db.query(
+                                        "SELECT booking_status, driver_response FROM bookings WHERE id = ?",
+                                        [followOnId]
+                                    );
+                                    if (!checkRows.length) return;
+
+                                    const { booking_status: currentStatus, driver_response } = checkRows[0];
+
+                                    if (currentStatus === 'pending_acceptance' && driver_response !== 'accepted') {
+                                        await db.query(
+                                            `UPDATE bookings 
+                                             SET driver = NULL, booking_status = 'pending', driver_response = NULL 
+                                             WHERE id = ?`,
+                                            [followOnId]
+                                        );
+
+                                        const timeoutEvent = {
+                                            booking_id: followOnId,
+                                            driver_id: driverId,
+                                            driver_name: driverInfo[0]?.name,
+                                            message: `Driver ${driverInfo[0]?.name} did not respond to follow-on job #${followOnBooking.booking_id} — reset to pending`
+                                        };
+                                        dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+                                        adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+                                        clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+
+                                        console.log(`⏱ Follow-on job #${followOnId} timed out — reset to pending`);
+                                    }
+                                } catch (timeoutErr) {
+                                    console.error("Follow-on timeout check error:", timeoutErr.message);
+                                }
+                            }, 30000);
+
+                            console.log(`✅ Follow-on job #${followOnId} sent to driver #${driverId}`);
+                        } else {
+                            console.log(`⚠️ Follow-on job #${followOnId} is not in pending state — skipping`);
+                        }
+                    } catch (foError) {
+                        // Don't fail the main completion — follow-on is best-effort
+                        console.error(`❌ Error dispatching follow-on job #${followOnId}:`, foError.message);
+                    }
+                }
             }
         }
 
@@ -1728,39 +1877,25 @@ app.post("/bookings/:id/follow-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookings] = await db.query(`
-            SELECT 
-                b.*,
-                d.id as driver_id,
-                d.name as driver_name,
-                d.email as driver_email,
-                d.phone_no as driver_phone,
-                d.profile_image as driver_profile_image,
-                d.latitude as driver_latitude,
-                d.longitude as driver_longitude,
+            SELECT b.*,
+                d.id as driver_id, d.name as driver_name, d.email as driver_email,
+                d.phone_no as driver_phone, d.profile_image as driver_profile_image,
+                d.latitude as driver_latitude, d.longitude as driver_longitude,
                 d.driving_status as driver_status
             FROM bookings b
             LEFT JOIN drivers d ON b.driver = d.id
             WHERE b.id = ?
         `, [id]);
 
-        if (bookings.length === 0) {
-            return res.status(404).json({ success: false, message: "Booking not found" });
-        }
+        if (bookings.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
 
         const booking = bookings[0];
-
-        if (!booking.driver) {
-            return res.status(400).json({ success: false, message: "No driver assigned to this booking" });
-        }
+        if (!booking.driver) return res.status(400).json({ success: false, message: "No driver assigned to this booking" });
 
         const driverInfo = {
-            id: booking.driver_id,
-            name: booking.driver_name,
-            email: booking.driver_email,
-            phone_no: booking.driver_phone,
-            profile_image: booking.driver_profile_image,
-            latitude: booking.driver_latitude,
-            longitude: booking.driver_longitude,
+            id: booking.driver_id, name: booking.driver_name, email: booking.driver_email,
+            phone_no: booking.driver_phone, profile_image: booking.driver_profile_image,
+            latitude: booking.driver_latitude, longitude: booking.driver_longitude,
             status: booking.driver_status
         };
 
@@ -1775,27 +1910,18 @@ app.post("/bookings/:id/follow-driver", async (req, res) => {
         if (booking.dispatcher_id) {
             const dispatcherSocketId = dispatcherSockets.get(booking.dispatcher_id.toString());
             if (dispatcherSocketId) {
-                io.to(dispatcherSocketId).emit("driver-location-tracking-started", {
-                    booking_id: booking.id,
-                    driver: driverInfo
-                });
+                io.to(dispatcherSocketId).emit("driver-location-tracking-started", { booking_id: booking.id, driver: driverInfo });
             }
         }
 
         adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("driver-location-tracking-started", {
-                booking_id: booking.id,
-                driver: driverInfo
-            });
+            io.to(socketId).emit("driver-location-tracking-started", { booking_id: booking.id, driver: driverInfo });
         });
 
         return res.json({
             success: true,
             message: "Driver location tracking started",
-            data: {
-                booking_id: booking.id,
-                driver: driverInfo
-            }
+            data: { booking_id: booking.id, driver: driverInfo }
         });
 
     } catch (error) {
