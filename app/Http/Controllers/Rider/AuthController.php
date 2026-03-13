@@ -30,6 +30,8 @@ class AuthController extends Controller
                 ->where("id", $request->header('database'))
                 ->first();
 
+            $countUser = CompanyRider::count();
+
             if($countUser >= $dataCheck->data['passengers_allowed']){
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
