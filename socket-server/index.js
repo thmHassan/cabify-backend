@@ -2199,6 +2199,59 @@ app.post("/voip-webhook", async (req, res) => {
     }
 });
 
+app.get("/contact-us", async (req, res) => {
+    try {
+        const db = getConnection(req.tenantDb);
+
+        const { type, status, search, page = 1, limit = 10 } = req.query;
+
+        const pageNum = Math.max(parseInt(page) || 1, 1);
+        const limitNum = Math.max(parseInt(limit) || 10, 1);
+        const offset = (pageNum - 1) * limitNum;
+
+        let baseQuery = `FROM contact_us WHERE 1=1`;
+        const params = [];
+
+        if (type && ['user', 'driver'].includes(type)) {
+            baseQuery += ` AND user_type = ?`;
+            params.push(type);
+        }
+
+        if (status) {
+            baseQuery += ` AND status = ?`;
+            params.push(status);
+        }
+
+        if (search) {
+            baseQuery += ` AND message LIKE ?`;
+            params.push(`%${search}%`);
+        }
+
+        const dataQuery = `SELECT * ${baseQuery} ORDER BY id DESC LIMIT ? OFFSET ?`;
+        const [list] = await db.query(dataQuery, [...params, limitNum, offset]);
+
+        const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+        const [[{ total }]] = await db.query(countQuery, params);
+
+        return res.json({
+            success: true,
+            data: list,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                total_pages: Math.ceil(total / limitNum),
+                hasNext: pageNum * limitNum < total,
+                hasPrev: pageNum > 1
+            }
+        });
+
+    } catch (error) {
+        console.error("Contact Us fetch error:", error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
