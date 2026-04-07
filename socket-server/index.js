@@ -2444,7 +2444,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
                 b.booking_amount,
                 b.offered_amount,
                 b.recommended_amount,
-                // b.payment_mode,
                 b.cancel_reason,
                 b.created_at,
                 b.updated_at,
