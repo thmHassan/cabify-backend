@@ -2572,7 +2572,7 @@ app.post("/account/collect-and-email", async (req, res) => {
         const [bookings] = await db.query(`
             SELECT id as booking_id, booking_date as date, 
                    COALESCE(booking_amount, offered_amount, recommended_amount, 0) as amount,
-                   CONCAT(pickup_address, ' to ', destination_address) as route
+                   CONCAT(pickup_location, ' to ', destination_address) as route
             FROM bookings 
             WHERE account = ? AND account_payment = 'no'
         `, [account_id]);
