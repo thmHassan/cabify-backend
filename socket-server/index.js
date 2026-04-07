@@ -2252,6 +2252,301 @@ app.get("/contact-us", async (req, res) => {
     }
 });
 
+app.get("/driver/:id/riding-details", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            page = 1,
+            limit = 10,
+            start_date,
+            end_date,
+            status
+        } = req.query;
+
+        const databaseHeader =
+            req.headers["x-database"] ||
+            req.headers["database"] ||
+            req.query.database;
+
+        if (!databaseHeader) {
+            return res.status(400).json({
+                success: false,
+                message: "Database header is required"
+            });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        // ── 1. Fetch driver details ─────────────────────────────────────────
+        const [driverRows] = await db.query(
+            `SELECT id, name, email, phone_no, profile_image, driving_status,
+                    plot_id, priority_plot, wallet_balance, last_settlement_date,
+                    created_at
+             FROM drivers WHERE id = ?`,
+            [id]
+        );
+
+        if (!driverRows.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found"
+            });
+        }
+
+        const driver = driverRows[0];
+
+        // 2. Revenue summary (all time)
+        const [revenueSummary] = await db.query(
+            `SELECT
+                COUNT(*) AS total_rides,
+
+                COUNT(CASE WHEN booking_status = 'completed' THEN 1 END) AS completed_rides,
+                COUNT(CASE WHEN booking_status = 'cancelled' THEN 1 END) AS cancelled_rides,
+                COUNT(CASE WHEN booking_status = 'ongoing' THEN 1 END) AS ongoing_rides,
+                COUNT(CASE WHEN booking_status = 'arrived' THEN 1 END) AS arrived_rides,
+                COUNT(CASE WHEN booking_status = 'no_show' THEN 1 END) AS no_show_rides,
+                COUNT(CASE WHEN booking_status = 'pending' THEN 1 END) AS pending_rides,
+
+                COALESCE(SUM(
+                    CASE WHEN booking_status = 'completed' THEN
+                        CASE
+                            WHEN booking_amount IS NOT NULL AND booking_amount > 0 THEN booking_amount
+                            WHEN offered_amount IS NOT NULL AND offered_amount > 0 THEN offered_amount
+                            WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 THEN recommended_amount
+                            ELSE 0
+                        END
+                    ELSE 0 END
+                ), 0) AS total_revenue,
+
+                COALESCE(SUM(
+                    CASE
+                        WHEN booking_amount IS NOT NULL AND booking_amount > 0 THEN booking_amount
+                        WHEN offered_amount IS NOT NULL AND offered_amount > 0 THEN offered_amount
+                        WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 THEN recommended_amount
+                        ELSE 0
+                    END
+                ), 0) AS gross_fare_all_rides,
+
+                COALESCE(AVG(
+                    CASE WHEN booking_status = 'completed' THEN
+                        CASE
+                            WHEN booking_amount IS NOT NULL AND booking_amount > 0 THEN booking_amount
+                            WHEN offered_amount IS NOT NULL AND offered_amount > 0 THEN offered_amount
+                            WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 THEN recommended_amount
+                            ELSE NULL
+                        END
+                    ELSE NULL END
+                ), 0) AS average_fare
+
+             FROM bookings
+             WHERE driver = ?`,
+            [id]
+        );
+
+        const revenue = revenueSummary[0];
+
+        // 3. Today's stats 
+        const [todayStats] = await db.query(
+            `SELECT
+                COUNT(*) AS today_total_rides,
+                COUNT(CASE WHEN booking_status = 'completed' THEN 1 END) AS today_completed,
+                COALESCE(SUM(
+                    CASE WHEN booking_status = 'completed' THEN
+                        CASE
+                            WHEN booking_amount IS NOT NULL AND booking_amount > 0 THEN booking_amount
+                            WHEN offered_amount IS NOT NULL AND offered_amount > 0 THEN offered_amount
+                            WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 THEN recommended_amount
+                            ELSE 0
+                        END
+                    ELSE 0 END
+                ), 0) AS today_revenue
+             FROM bookings
+             WHERE driver = ? AND DATE(booking_date) = CURDATE()`,
+            [id]
+        );
+
+        // 4. This week's stats
+        const [weekStats] = await db.query(
+            `SELECT
+                COUNT(*) AS week_total_rides,
+                COUNT(CASE WHEN booking_status = 'completed' THEN 1 END) AS week_completed,
+                COALESCE(SUM(
+                    CASE WHEN booking_status = 'completed' THEN
+                        CASE
+                            WHEN booking_amount IS NOT NULL AND booking_amount > 0 THEN booking_amount
+                            WHEN offered_amount IS NOT NULL AND offered_amount > 0 THEN offered_amount
+                            WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 THEN recommended_amount
+                            ELSE 0
+                        END
+                    ELSE 0 END
+                ), 0) AS week_revenue
+             FROM bookings
+             WHERE driver = ? AND booking_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`,
+            [id]
+        );
+
+        // 5. This month's stats 
+        const [monthStats] = await db.query(
+            `SELECT
+                COUNT(*) AS month_total_rides,
+                COUNT(CASE WHEN booking_status = 'completed' THEN 1 END) AS month_completed,
+                COALESCE(SUM(
+                    CASE WHEN booking_status = 'completed' THEN
+                        CASE
+                            WHEN booking_amount IS NOT NULL AND booking_amount > 0 THEN booking_amount
+                            WHEN offered_amount IS NOT NULL AND offered_amount > 0 THEN offered_amount
+                            WHEN recommended_amount IS NOT NULL AND recommended_amount > 0 THEN recommended_amount
+                            ELSE 0
+                        END
+                    ELSE 0 END
+                ), 0) AS month_revenue
+             FROM bookings
+             WHERE driver = ?
+               AND MONTH(booking_date) = MONTH(CURDATE())
+               AND YEAR(booking_date) = YEAR(CURDATE())`,
+            [id]
+        );
+
+        // 6. Paginated ride history with filters
+        const pageNum = Math.max(parseInt(page) || 1, 1);
+        const limitNum = Math.max(parseInt(limit) || 10, 1);
+        const offset = (pageNum - 1) * limitNum;
+
+        let rideWhereClause = `WHERE b.driver = ?`;
+        const rideParams = [id];
+
+        if (start_date) {
+            rideWhereClause += ` AND DATE(b.booking_date) >= ?`;
+            rideParams.push(start_date);
+        }
+        if (end_date) {
+            rideWhereClause += ` AND DATE(b.booking_date) <= ?`;
+            rideParams.push(end_date);
+        }
+        if (status) {
+            rideWhereClause += ` AND b.booking_status = ?`;
+            rideParams.push(status);
+        }
+
+        const [rides] = await db.query(
+            `SELECT
+                b.id,
+                b.booking_id,
+                b.name AS passenger_name,
+                b.phone_no AS passenger_phone,
+                b.email AS passenger_email,
+                b.pickup_location,
+                b.destination_location,
+                b.booking_date,
+                b.pickup_time,
+                b.booking_status,
+                b.booking_amount,
+                b.offered_amount,
+                b.recommended_amount,
+                b.payment_mode,
+                b.cancel_reason,
+                b.created_at,
+                b.updated_at,
+                vt.vehicle_type_name,
+                vt.vehicle_type_service,
+                sc.name AS sub_company_name,
+                CASE
+                    WHEN b.booking_amount IS NOT NULL AND b.booking_amount > 0 THEN b.booking_amount
+                    WHEN b.offered_amount IS NOT NULL AND b.offered_amount > 0 THEN b.offered_amount
+                    WHEN b.recommended_amount IS NOT NULL AND b.recommended_amount > 0 THEN b.recommended_amount
+                    ELSE 0
+                END AS effective_fare
+             FROM bookings b
+             LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+             LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+             ${rideWhereClause}
+             ORDER BY b.booking_date DESC, b.id DESC
+             LIMIT ? OFFSET ?`,
+            [...rideParams, limitNum, offset]
+        );
+
+        const [[{ total }]] = await db.query(
+            `SELECT COUNT(*) AS total FROM bookings b ${rideWhereClause}`,
+            rideParams
+        );
+
+        const totalPages = Math.ceil(total / limitNum);
+
+        // 7. Build response
+        return res.json({
+            success: true,
+            data: {
+                driver: {
+                    id: driver.id,
+                    name: driver.name,
+                    email: driver.email,
+                    phone_no: driver.phone_no,
+                    profile_image: driver.profile_image,
+                    driving_status: driver.driving_status,
+                    plot_id: driver.plot_id,
+                    priority_plot: driver.priority_plot,
+                    wallet_balance: parseFloat(driver.wallet_balance || 0).toFixed(2),
+                    last_settlement_date: driver.last_settlement_date,
+                    member_since: driver.created_at
+                },
+
+                revenue_summary: {
+                    total_revenue: parseFloat(revenue.total_revenue).toFixed(2),
+                    gross_fare_all_rides: parseFloat(revenue.gross_fare_all_rides).toFixed(2),
+                    average_fare: parseFloat(revenue.average_fare).toFixed(2),
+                    today: {
+                        rides: todayStats[0].today_total_rides,
+                        completed: todayStats[0].today_completed,
+                        revenue: parseFloat(todayStats[0].today_revenue).toFixed(2)
+                    },
+                    this_week: {
+                        rides: weekStats[0].week_total_rides,
+                        completed: weekStats[0].week_completed,
+                        revenue: parseFloat(weekStats[0].week_revenue).toFixed(2)
+                    },
+                    this_month: {
+                        rides: monthStats[0].month_total_rides,
+                        completed: monthStats[0].month_completed,
+                        revenue: parseFloat(monthStats[0].month_revenue).toFixed(2)
+                    }
+                },
+
+                ride_statistics: {
+                    total_rides: revenue.total_rides,
+                    completed: revenue.completed_rides,
+                    cancelled: revenue.cancelled_rides,
+                    ongoing: revenue.ongoing_rides,
+                    arrived: revenue.arrived_rides,
+                    no_show: revenue.no_show_rides,
+                    pending: revenue.pending_rides,
+                    completion_rate: revenue.total_rides > 0
+                        ? ((revenue.completed_rides / revenue.total_rides) * 100).toFixed(1) + "%"
+                        : "0.0%"
+                },
+
+                rides: rides,
+
+                pagination: {
+                    total,
+                    page: pageNum,
+                    limit: limitNum,
+                    total_pages: totalPages,
+                    hasNext: pageNum < totalPages,
+                    hasPrev: pageNum > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Driver riding details error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
