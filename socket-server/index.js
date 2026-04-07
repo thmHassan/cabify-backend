@@ -2546,6 +2546,155 @@ app.get("/driver/:id/riding-details", async (req, res) => {
     }
 });
 
+app.post("/account/collect-and-email", async (req, res) => {
+    try {
+        const { account_id } = req.body;
+        if (!account_id) {
+            return res.status(400).json({ success: 0, message: "Account ID is required" });
+        }
+
+        const databaseHeader = req.headers["x-database"] || req.headers["database"];
+        if (!databaseHeader) {
+            return res.status(400).json({ success: 0, message: "Database header is required" });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        // Fetch account details
+        const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
+        if (!accountRows.length) {
+            return res.status(404).json({ success: 0, message: "Account not found" });
+        }
+        const account = accountRows[0];
+
+        // Fetch uncollected bookings
+        const [bookings] = await db.query(`
+            SELECT id as booking_id, booking_date as date, 
+                   COALESCE(booking_amount, offered_amount, recommended_amount, 0) as amount,
+                   CONCAT(pickup_address, ' to ', destination_address) as route
+            FROM bookings 
+            WHERE account = ? AND account_payment = 'no'
+        `, [account_id]);
+
+        if (!bookings.length) {
+            return res.status(400).json({ success: 0, message: "No uncollected rides found for this account" });
+        }
+
+        const totalAmount = bookings.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
+        const dateOfCollection = new Date().toLocaleDateString();
+
+        // Generate responsive email HTML
+        const ridesTableRows = bookings.map(b => `
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: left;">#${b.booking_id}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: left;">${new Date(b.date).toLocaleString()}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: left;">${b.route || 'N/A'}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold; color: #333;">$${parseFloat(b.amount || 0).toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+        const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; }
+                .email-container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                .header { background-color: #2c3e50; color: #ffffff; padding: 20px; text-align: center; }
+                .header h2 { margin: 0; font-size: 24px; letter-spacing: 1px; }
+                .body-content { padding: 30px; }
+                .account-info { margin-bottom: 25px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #3498db; border-radius: 4px; }
+                .account-info p { margin: 5px 0; color: #555; font-size: 15px; }
+                .total-amount-box { text-align: center; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3); }
+                .total-amount-box h3 { margin: 0; font-size: 16px; font-weight: normal; text-transform: uppercase; letter-spacing: 1px; }
+                .total-amount-box h1 { margin: 10px 0 0; font-size: 38px; }
+                .rides-table-container { overflow-x: auto; }
+                .rides-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                .rides-table th { background-color: #ecf0f1; padding: 12px 10px; text-align: left; font-size: 14px; color: #34495e; border-bottom: 2px solid #bdc3c7; }
+                .rides-table td { font-size: 14px; color: #555; }
+                .footer { text-align: center; padding: 20px; font-size: 12px; color: #aaa; border-top: 1px solid #eee; background-color: #fafafa; }
+                @media only screen and (max-width: 600px) {
+                    .body-content { padding: 15px; }
+                    .total-amount-box h1 { font-size: 32px; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="email-container">
+                <div class="header">
+                    <h2>Invoice & Ride Collection</h2>
+                </div>
+                
+                <div class="body-content">
+                    <div class="account-info">
+                        <p><strong>Account Name:</strong> ${account.name}</p>
+                        <p><strong>Email:</strong> ${account.email}</p>
+                        ${account.company ? `<p><strong>Company:</strong> ${account.company}</p>` : ''}
+                        <p><strong>Collection Date:</strong> ${dateOfCollection}</p>
+                    </div>
+
+                    <div class="total-amount-box">
+                        <h3>Total Collected Amount</h3>
+                        <h1>$${totalAmount.toFixed(2)}</h1>
+                    </div>
+
+                    <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px; display: inline-block;">Ride Details</h3>
+                    <div class="rides-table-container">
+                        <table class="rides-table">
+                            <thead>
+                                <tr>
+                                    <th>Booking ID</th>
+                                    <th>Date</th>
+                                    <th>Route</th>
+                                    <th style="text-align: right;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${ridesTableRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="footer">
+                    <p>Thank you for choosing our services.</p>
+                    <p>&copy; ${new Date().getFullYear()} Cabify IT. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+        const mailOptions = {
+            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+            to: account.email,
+            subject: 'Invoice & Ride Collection Summary',
+            html: htmlContent
+        };
+
+        // Send Email
+        await transporter.sendMail(mailOptions);
+
+        // Mark rides as collected
+        await db.query(`
+            UPDATE bookings 
+            SET account_payment = 'yes' 
+            WHERE account = ? AND account_payment = 'no'
+        `, [account_id]);
+
+        return res.json({ 
+            success: 1, 
+            message: "Email sent successfully and rides marked as collected." 
+        });
+
+    } catch (err) {
+        console.error("Account Collect & Email Error:", err);
+        return res.status(500).json({ success: 0, message: err.message });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
