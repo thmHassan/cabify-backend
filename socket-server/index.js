@@ -2760,6 +2760,89 @@ app.post('/driver/send-invoice', async (req, res) => {
     }
 });
 
+app.post('/user/send-invoice', async (req, res) => {
+    try {
+        const { user_id } = req.body;
+        if (!user_id) return res.status(400).json({ success: 0, message: "User ID is required" });
+
+        const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
+        if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [userRows] = await db.query("SELECT * FROM users WHERE id = ?", [user_id]);
+        if (!userRows.length) return res.status(404).json({ success: 0, message: "User not found" });
+        const user = userRows[0];
+
+        if (!user.email) return res.status(400).json({ success: 0, message: "User email not found" });
+
+        const [rides] = await db.query(`
+            SELECT id, booking_id, booking_date, pickup_location, destination_location, booking_amount 
+            FROM bookings 
+            WHERE user_id = ? AND booking_status = 'completed' 
+            ORDER BY booking_date DESC LIMIT 50
+        `, [user_id]);
+
+        let totalAmount = rides.reduce((sum, r) => sum + parseFloat(r.booking_amount || 0), 0);
+
+        const doc = new PDFDocument({ margin: 50 });
+        let buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', async () => {
+            try {
+                let pdfData = Buffer.concat(buffers);
+                
+                const mailOptions = {
+                    from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                    to: user.email,
+                    subject: 'Your User Invoice',
+                    text: 'Please find attached your invoice details and completed rides.',
+                    attachments: [{
+                        filename: `invoice-${user_id}.pdf`,
+                        content: pdfData,
+                        contentType: 'application/pdf'
+                    }]
+                };
+
+                await transporter.sendMail(mailOptions);
+                return res.json({ 
+                    success: 1, 
+                    message: "Invoice sent successfully",
+                    pdf_base64: pdfData.toString('base64')
+                });
+            } catch (mailErr) {
+                console.error("Email Sending Error:", mailErr);
+                return res.status(500).json({ success: 0, message: "Failed to send email" });
+            }
+        });
+
+        doc.fontSize(20).text('User Invoice', { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(12).text(`User Name: ${user.name || user.first_name || 'N/A'}`);
+        doc.text(`Email: ${user.email}`);
+        doc.text(`Phone: ${user.phone || user.mobile || 'N/A'}`);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`);
+        doc.moveDown();
+        
+        doc.fontSize(14).text('Recent Completed Rides Summary', { underline: true });
+        doc.moveDown();
+
+        rides.forEach((r, idx) => {
+            doc.fontSize(10).text(`${idx + 1}. Booking ID: ${r.booking_id} | Date: ${new Date(r.booking_date).toLocaleDateString()} | Amount: $${(parseFloat(r.booking_amount)||0).toFixed(2)}`);
+        });
+
+        doc.moveDown();
+        doc.fontSize(14).text(`Total Amount: $${totalAmount.toFixed(2)}`, { align: 'right' });
+
+        doc.end();
+
+    } catch (err) {
+        console.error("User Invoice Error:", err);
+        return res.status(500).json({ success: 0, message: err.message });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
