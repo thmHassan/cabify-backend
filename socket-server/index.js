@@ -4,9 +4,10 @@ require("dotenv").config({
 });
 
 const express = require("express");
-const cors = require("cors")
+const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
+const PDFDocument = require('pdfkit');
 const axios = require("axios");
 const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
@@ -2561,14 +2562,12 @@ app.post("/account/collect-and-email", async (req, res) => {
         const tenantDb = `tenant${databaseHeader}`;
         const db = getConnection(tenantDb);
 
-        // Fetch account details
         const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
         if (!accountRows.length) {
             return res.status(404).json({ success: 0, message: "Account not found" });
         }
         const account = accountRows[0];
 
-        // Fetch uncollected bookings
         const [bookings] = await db.query(`
             SELECT id as booking_id, booking_date as date, 
                    COALESCE(booking_amount, offered_amount, recommended_amount, 0) as amount,
@@ -2674,6 +2673,89 @@ app.post("/account/collect-and-email", async (req, res) => {
 
     } catch (err) {
         console.error("Account Collect & Email Error:", err);
+        return res.status(500).json({ success: 0, message: err.message });
+    }
+});
+
+app.post('/driver/send-invoice', async (req, res) => {
+    try {
+        const { driver_id } = req.body;
+        if (!driver_id) return res.status(400).json({ success: 0, message: "Driver ID is required" });
+
+        const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
+        if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
+        if (!driverRows.length) return res.status(404).json({ success: 0, message: "Driver not found" });
+        const driver = driverRows[0];
+
+        if (!driver.email) return res.status(400).json({ success: 0, message: "Driver email not found" });
+
+        const [rides] = await db.query(`
+            SELECT id, booking_id, booking_date, pickup_location, destination_location, booking_amount 
+            FROM bookings 
+            WHERE driver = ? AND booking_status = 'completed' 
+            ORDER BY booking_date DESC LIMIT 50
+        `, [driver_id]);
+
+        let totalAmount = rides.reduce((sum, r) => sum + parseFloat(r.booking_amount || 0), 0);
+
+        const doc = new PDFDocument({ margin: 50 });
+        let buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', async () => {
+            try {
+                let pdfData = Buffer.concat(buffers);
+                
+                const mailOptions = {
+                    from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                    to: driver.email,
+                    subject: 'Your Driver Invoice',
+                    text: 'Please find attached your invoice details and completed rides.',
+                    attachments: [{
+                        filename: `invoice-${driver_id}.pdf`,
+                        content: pdfData,
+                        contentType: 'application/pdf'
+                    }]
+                };
+
+                await transporter.sendMail(mailOptions);
+                return res.json({ 
+                    success: 1, 
+                    message: "Invoice sent successfully",
+                    pdf_base64: pdfData.toString('base64')
+                });
+            } catch (mailErr) {
+                console.error("Email Sending Error:", mailErr);
+                return res.status(500).json({ success: 0, message: "Failed to send email" });
+            }
+        });
+
+        doc.fontSize(20).text('Driver Invoice', { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(12).text(`Driver Name: ${driver.name}`);
+        doc.text(`Email: ${driver.email}`);
+        doc.text(`Phone: ${driver.phone_no || 'N/A'}`);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`);
+        doc.moveDown();
+        
+        doc.fontSize(14).text('Recent Completed Rides Summary', { underline: true });
+        doc.moveDown();
+
+        rides.forEach((r, idx) => {
+            doc.fontSize(10).text(`${idx + 1}. Booking ID: ${r.booking_id} | Date: ${new Date(r.booking_date).toLocaleDateString()} | Amount: $${(parseFloat(r.booking_amount)||0).toFixed(2)}`);
+        });
+
+        doc.moveDown();
+        doc.fontSize(14).text(`Total Amount: $${totalAmount.toFixed(2)}`, { align: 'right' });
+
+        doc.end();
+
+    } catch (err) {
+        console.error("Driver Invoice Error:", err);
         return res.status(500).json({ success: 0, message: err.message });
     }
 });
