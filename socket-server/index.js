@@ -2666,9 +2666,9 @@ app.post("/account/collect-and-email", async (req, res) => {
             WHERE account = ? AND account_payment = 'no'
         `, [account_id]);
 
-        return res.json({ 
-            success: 1, 
-            message: "Email sent successfully and rides marked as collected." 
+        return res.json({
+            success: 1,
+            message: "Email sent successfully and rides marked as collected."
         });
 
     } catch (err) {
@@ -2709,7 +2709,7 @@ app.post('/driver/send-invoice', async (req, res) => {
         doc.on('end', async () => {
             try {
                 let pdfData = Buffer.concat(buffers);
-                
+
                 const mailOptions = {
                     from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
                     to: driver.email,
@@ -2723,8 +2723,8 @@ app.post('/driver/send-invoice', async (req, res) => {
                 };
 
                 await transporter.sendMail(mailOptions);
-                return res.json({ 
-                    success: 1, 
+                return res.json({
+                    success: 1,
                     message: "Invoice sent successfully",
                     pdf_base64: pdfData.toString('base64')
                 });
@@ -2741,12 +2741,12 @@ app.post('/driver/send-invoice', async (req, res) => {
         doc.text(`Phone: ${driver.phone_no || 'N/A'}`);
         doc.text(`Date: ${new Date().toLocaleDateString()}`);
         doc.moveDown();
-        
+
         doc.fontSize(14).text('Recent Completed Rides Summary', { underline: true });
         doc.moveDown();
 
         rides.forEach((r, idx) => {
-            doc.fontSize(10).text(`${idx + 1}. Booking ID: ${r.booking_id} | Date: ${new Date(r.booking_date).toLocaleDateString()} | Amount: $${(parseFloat(r.booking_amount)||0).toFixed(2)}`);
+            doc.fontSize(10).text(`${idx + 1}. Booking ID: ${r.booking_id} | Date: ${new Date(r.booking_date).toLocaleDateString()} | Amount: $${(parseFloat(r.booking_amount) || 0).toFixed(2)}`);
         });
 
         doc.moveDown();
@@ -2792,7 +2792,7 @@ app.post('/user/send-invoice', async (req, res) => {
         doc.on('end', async () => {
             try {
                 let pdfData = Buffer.concat(buffers);
-                
+
                 const mailOptions = {
                     from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
                     to: user.email,
@@ -2806,8 +2806,8 @@ app.post('/user/send-invoice', async (req, res) => {
                 };
 
                 await transporter.sendMail(mailOptions);
-                return res.json({ 
-                    success: 1, 
+                return res.json({
+                    success: 1,
                     message: "Invoice sent successfully",
                     pdf_base64: pdfData.toString('base64')
                 });
@@ -2824,12 +2824,12 @@ app.post('/user/send-invoice', async (req, res) => {
         doc.text(`Phone: ${user.phone || user.mobile || 'N/A'}`);
         doc.text(`Date: ${new Date().toLocaleDateString()}`);
         doc.moveDown();
-        
+
         doc.fontSize(14).text('Recent Completed Rides Summary', { underline: true });
         doc.moveDown();
 
         rides.forEach((r, idx) => {
-            doc.fontSize(10).text(`${idx + 1}. Booking ID: ${r.booking_id} | Date: ${new Date(r.booking_date).toLocaleDateString()} | Amount: $${(parseFloat(r.booking_amount)||0).toFixed(2)}`);
+            doc.fontSize(10).text(`${idx + 1}. Booking ID: ${r.booking_id} | Date: ${new Date(r.booking_date).toLocaleDateString()} | Amount: $${(parseFloat(r.booking_amount) || 0).toFixed(2)}`);
         });
 
         doc.moveDown();
@@ -2895,8 +2895,7 @@ app.post('/account/send-invoice', async (req, res) => {
         doc.on('end', async () => {
             try {
                 let pdfData = Buffer.concat(buffers);
-                
-                // Send email first if account has email
+
                 if (account.email) {
                     try {
                         const mailOptions = {
@@ -2914,17 +2913,22 @@ app.post('/account/send-invoice', async (req, res) => {
                         await transporter.sendMail(mailOptions);
                         console.log(`Invoice email sent to account: ${account.email}`);
                     } catch (emailErr) {
-                        console.error("Email sending failed (but continuing with download):", emailErr.message);
-                        // Continue with PDF download even if email fails
+                        console.error("Email sending failed:", emailErr.message);
                     }
                 }
+                return res.json({
+                    success: 1,
+                    message: "Account invoice sent successfully",
+                    account_id: account_id,
+                    account_name: account.name || account.company,
+                    email: account.email,
+                    total_bookings: bookings.length,
+                    total_amount: totalAmount.toFixed(2),
+                    completed_bookings: completedBookings.length,
+                    completed_amount: completedAmount.toFixed(2),
+                    pdf_base64: pdfData.toString('base64')
+                });
 
-                // Return PDF for download
-                res.setHeader('Content-Type', 'application/pdf');
-                res.setHeader('Content-Disposition', `attachment; filename="account-invoice-${account_id}.pdf"`);
-                res.setHeader('Content-Length', pdfData.length);
-                return res.send(pdfData);
-                
             } catch (err) {
                 console.error("Account Invoice Error:", err);
                 return res.status(500).json({ success: 0, message: "Failed to generate PDF" });
