@@ -2843,6 +2843,142 @@ app.post('/user/send-invoice', async (req, res) => {
     }
 });
 
+app.post('/account/send-invoice', async (req, res) => {
+    try {
+        const { account_id } = req.body;
+        if (!account_id) {
+            return res.status(400).json({ success: 0, message: "Account ID is required" });
+        }
+
+        const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
+        if (!databaseHeader) {
+            return res.status(400).json({ success: 0, message: "Database header is required" });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
+        if (!accountRows.length) {
+            return res.status(404).json({ success: 0, message: "Account not found" });
+        }
+        const account = accountRows[0];
+
+        if (!account.email) {
+            return res.status(400).json({ success: 0, message: "Account email not found" });
+        }
+
+        const [bookings] = await db.query(`
+            SELECT 
+                id as booking_id, 
+                booking_id as booking_reference,
+                booking_date, 
+                pickup_time,
+                pickup_location, 
+                destination_location,
+                COALESCE(booking_amount, offered_amount, recommended_amount, 0) as amount,
+                booking_status,
+                name as passenger_name,
+                phone_no as passenger_phone
+            FROM bookings 
+            WHERE account = ? 
+            ORDER BY booking_date DESC, id DESC
+        `, [account_id]);
+
+        if (!bookings.length) {
+            return res.status(400).json({ success: 0, message: "No bookings found for this account" });
+        }
+
+        const totalAmount = bookings.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
+        const completedBookings = bookings.filter(b => b.booking_status === 'completed');
+        const completedAmount = completedBookings.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
+
+        const doc = new PDFDocument({ margin: 50 });
+        let buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', async () => {
+            try {
+                let pdfData = Buffer.concat(buffers);
+                
+                const mailOptions = {
+                    from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                    to: account.email,
+                    subject: `Invoice for Account - ${account.name || account.company}`,
+                    text: 'Please find attached your invoice with all booking details.',
+                    attachments: [{
+                        filename: `account-invoice-${account_id}.pdf`,
+                        content: pdfData,
+                        contentType: 'application/pdf'
+                    }]
+                };
+
+                await transporter.sendMail(mailOptions);
+                console.log(`✅ Invoice email sent to account: ${account.email}`);
+                
+                return res.json({ 
+                    success: 1, 
+                    message: "Account invoice sent successfully",
+                    data: {
+                        account_id: account_id,
+                        account_name: account.name || account.company,
+                        email: account.email,
+                        total_bookings: bookings.length,
+                        total_amount: totalAmount.toFixed(2),
+                        pdf_base64: pdfData.toString('base64')
+                    }
+                });
+            } catch (mailErr) {
+                console.error("Account Invoice Email Sending Error:", mailErr);
+                return res.status(500).json({ success: 0, message: "Failed to send email" });
+            }
+        });
+
+        doc.fontSize(20).text('Account Invoice', { align: 'center' });
+        doc.moveDown();
+
+        doc.fontSize(14).text('Account Information', { underline: true });
+        doc.fontSize(12);
+        doc.text(`Account Name: ${account.name || 'N/A'}`);
+        if (account.company) doc.text(`Company: ${account.company}`);
+        doc.text(`Email: ${account.email}`);
+        if (account.phone) doc.text(`Phone: ${account.phone}`);
+        doc.text(`Invoice Date: ${new Date().toLocaleDateString()}`);
+        doc.moveDown();
+
+        doc.fontSize(14).text('Summary', { underline: true });
+        doc.fontSize(12);
+        doc.text(`Total Bookings: ${bookings.length}`);
+        doc.text(`Completed Bookings: ${completedBookings.length}`);
+        doc.text(`Total Amount: $${totalAmount.toFixed(2)}`);
+        doc.text(`Completed Amount: $${completedAmount.toFixed(2)}`);
+        doc.moveDown();
+
+        doc.fontSize(14).text('Booking Details', { underline: true });
+        doc.moveDown();
+
+        bookings.forEach((booking, idx) => {
+            doc.fontSize(10);
+            doc.text(`${idx + 1}. Booking ID: ${booking.booking_reference}`);
+            doc.text(`   Date: ${new Date(booking.booking_date).toLocaleDateString()} ${booking.pickup_time || ''}`);
+            doc.text(`   Route: ${booking.pickup_location} → ${booking.destination_location}`);
+            doc.text(`   Passenger: ${booking.passenger_name} (${booking.passenger_phone})`);
+            doc.text(`   Status: ${booking.booking_status}`);
+            doc.text(`   Amount: $${parseFloat(booking.amount || 0).toFixed(2)}`);
+            doc.moveDown(0.5);
+        });
+
+        doc.moveDown();
+        doc.fontSize(10).text('This is a computer-generated invoice.', { align: 'center' });
+        doc.text(`Generated on: ${new Date().toLocaleString()}`, { align: 'center' });
+
+        doc.end();
+
+    } catch (err) {
+        console.error("Account Invoice Error:", err);
+        return res.status(500).json({ success: 0, message: err.message });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
