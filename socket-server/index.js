@@ -2639,23 +2639,6 @@ app.post("/account/collect-and-email", async (req, res) => {
                         <h3>Total Collected Amount</h3>
                         <h1>$${totalAmount.toFixed(2)}</h1>
                     </div>
-
-                    <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px; display: inline-block;">Ride Details</h3>
-                    <div class="rides-table-container">
-                        <table class="rides-table">
-                            <thead>
-                                <tr>
-                                    <th>Booking ID</th>
-                                    <th>Date</th>
-                                    <th>Route</th>
-                                    <th style="text-align: right;">Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${ridesTableRows}
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
 
                 <div class="footer">
