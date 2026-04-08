@@ -2864,10 +2864,6 @@ app.post('/account/send-invoice', async (req, res) => {
         }
         const account = accountRows[0];
 
-        if (!account.email) {
-            return res.status(400).json({ success: 0, message: "Account email not found" });
-        }
-
         const [bookings] = await db.query(`
             SELECT 
                 id as booking_id, 
@@ -2900,36 +2896,38 @@ app.post('/account/send-invoice', async (req, res) => {
             try {
                 let pdfData = Buffer.concat(buffers);
                 
-                const mailOptions = {
-                    from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
-                    to: account.email,
-                    subject: `Invoice for Account - ${account.name || account.company}`,
-                    text: 'Please find attached your invoice with all booking details.',
-                    attachments: [{
-                        filename: `account-invoice-${account_id}.pdf`,
-                        content: pdfData,
-                        contentType: 'application/pdf'
-                    }]
-                };
+                // Send email first if account has email
+                if (account.email) {
+                    try {
+                        const mailOptions = {
+                            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                            to: account.email,
+                            subject: `Invoice for Account - ${account.name || account.company}`,
+                            text: 'Please find attached your invoice with all booking details.',
+                            attachments: [{
+                                filename: `account-invoice-${account_id}.pdf`,
+                                content: pdfData,
+                                contentType: 'application/pdf'
+                            }]
+                        };
 
-                await transporter.sendMail(mailOptions);
-                console.log(`✅ Invoice email sent to account: ${account.email}`);
-                
-                return res.json({ 
-                    success: 1, 
-                    message: "Account invoice sent successfully",
-                    data: {
-                        account_id: account_id,
-                        account_name: account.name || account.company,
-                        email: account.email,
-                        total_bookings: bookings.length,
-                        total_amount: totalAmount.toFixed(2),
-                        pdf_base64: pdfData.toString('base64')
+                        await transporter.sendMail(mailOptions);
+                        console.log(`Invoice email sent to account: ${account.email}`);
+                    } catch (emailErr) {
+                        console.error("Email sending failed (but continuing with download):", emailErr.message);
+                        // Continue with PDF download even if email fails
                     }
-                });
-            } catch (mailErr) {
-                console.error("Account Invoice Email Sending Error:", mailErr);
-                return res.status(500).json({ success: 0, message: "Failed to send email" });
+                }
+
+                // Return PDF for download
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `attachment; filename="account-invoice-${account_id}.pdf"`);
+                res.setHeader('Content-Length', pdfData.length);
+                return res.send(pdfData);
+                
+            } catch (err) {
+                console.error("Account Invoice Error:", err);
+                return res.status(500).json({ success: 0, message: "Failed to generate PDF" });
             }
         });
 
@@ -2960,7 +2958,7 @@ app.post('/account/send-invoice', async (req, res) => {
             doc.fontSize(10);
             doc.text(`${idx + 1}. Booking ID: ${booking.booking_reference}`);
             doc.text(`   Date: ${new Date(booking.booking_date).toLocaleDateString()} ${booking.pickup_time || ''}`);
-            doc.text(`   Route: ${booking.pickup_location} → ${booking.destination_location}`);
+            doc.text(`   Route: ${booking.pickup_location} -> ${booking.destination_location}`);
             doc.text(`   Passenger: ${booking.passenger_name} (${booking.passenger_phone})`);
             doc.text(`   Status: ${booking.booking_status}`);
             doc.text(`   Amount: $${parseFloat(booking.amount || 0).toFixed(2)}`);
