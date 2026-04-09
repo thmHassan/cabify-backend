@@ -3140,35 +3140,41 @@ app.post('/driver/send-package-history', async (req, res) => {
 
         if (!driver.email) return res.status(400).json({ success: 0, message: "Driver email not found" });
 
+        const packageTypeMapping = {
+            "per_ride_commission_top_up": "Per Ride Commission (Top Up)",
+            "packages_top_up": "Packages (Top Up)",
+            "commission_without_topup": "Commission without Top Up Settled Later",
+            "packages_post_paid": "Packages Post Paid"
+        };
+        const packageTypeFormatted = packageTypeMapping[settings.package_type] || settings.package_type;
+
         let allEntries = [];
         if (settings.package_type === "packages_post_paid") {
             allEntries = await calculatePostPaidEntries(driver, settings, db);
         } else if (settings.package_type === "commission_without_topup") {
             allEntries = await calculatePercentageEntries(driver, settings, db);
-        } else {
-            return res.status(400).json({ success: 0, message: "Invalid package type" });
         }
 
         const totalAmount = allEntries.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
 
-        const entriesHtml = allEntries.map((e, idx) => `
+        const entriesHtml = allEntries.length > 0 ? allEntries.map((e, idx) => `
             <tr>
                 <td>${idx + 1}</td>
                 <td>${e.cycle_start_date} to ${e.cycle_end_date}</td>
                 <td>${e.description}</td>
                 <td>$${(parseFloat(e.amount) || 0).toFixed(2)}</td>
             </tr>
-        `).join('');
+        `).join('') : '<tr><td colspan="4" style="text-align:center;">No history available</td></tr>';
 
         const htmlContent = `
             <h2>Driver Package History</h2>
             <p><strong>Driver Name:</strong> ${driver.name || 'N/A'}</p>
             <p><strong>Email:</strong> ${driver.email}</p>
             <p><strong>Phone:</strong> ${driver.phone_no || 'N/A'}</p>
-            <p><strong>Package Type:</strong> ${settings.package_type}</p>
+            <p><strong>Package Type:</strong> ${packageTypeFormatted}</p>
             <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
             <h3>Package Details Summary</h3>
-            <table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
+            <table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse; width: 100%;">
                 <tr>
                     <th>#</th>
                     <th>Period</th>
@@ -3192,6 +3198,7 @@ app.post('/driver/send-package-history', async (req, res) => {
             return res.json({
                 success: 1,
                 message: "Package history sent successfully",
+                package_type: packageTypeFormatted,
                 data: allEntries
             });
         } catch (mailErr) {
