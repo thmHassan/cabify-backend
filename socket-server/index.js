@@ -2981,6 +2981,144 @@ app.post('/account/send-invoice', async (req, res) => {
     }
 });
 
+app.post('/sub-company/send-invoice', async (req, res) => {
+    try {
+        const { sub_company_id } = req.body;
+        if (!sub_company_id) {
+            return res.status(400).json({ success: 0, message: "Sub Company ID is required" });
+        }
+
+        const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
+        if (!databaseHeader) {
+            return res.status(400).json({ success: 0, message: "Database header is required" });
+        }
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [subCompanyRows] = await db.query("SELECT * FROM sub_companies WHERE id = ?", [sub_company_id]);
+        if (!subCompanyRows.length) {
+            return res.status(404).json({ success: 0, message: "Sub company not found" });
+        }
+        const subCompany = subCompanyRows[0];
+
+        const [bookings] = await db.query(`
+            SELECT 
+                id as booking_id, 
+                booking_id as booking_reference,
+                booking_date, 
+                pickup_time,
+                pickup_location, 
+                destination_location,
+                COALESCE(booking_amount, offered_amount, recommended_amount, 0) as amount,
+                booking_status,
+                name as passenger_name,
+                phone_no as passenger_phone
+            FROM bookings 
+            WHERE sub_company = ? 
+            ORDER BY booking_date DESC, id DESC
+        `, [sub_company_id]);
+
+        if (!bookings.length) {
+            return res.status(400).json({ success: 0, message: "No bookings found for this sub company" });
+        }
+
+        const totalAmount = bookings.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
+        const completedBookings = bookings.filter(b => b.booking_status === 'completed');
+        const completedAmount = completedBookings.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
+
+        const doc = new PDFDocument({ margin: 50 });
+        let buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', async () => {
+            try {
+                let pdfData = Buffer.concat(buffers);
+
+                if (subCompany.email) {
+                    try {
+                        const mailOptions = {
+                            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                            to: subCompany.email,
+                            subject: `Invoice for Sub Company - ${subCompany.name || 'N/A'}`,
+                            text: 'Please find attached your invoice with all booking details.',
+                            attachments: [{
+                                filename: `sub-company-invoice-${sub_company_id}.pdf`,
+                                content: pdfData,
+                                contentType: 'application/pdf'
+                            }]
+                        };
+
+                        await transporter.sendMail(mailOptions);
+                        console.log(`Invoice email sent to sub company: ${subCompany.email}`);
+                    } catch (emailErr) {
+                        console.error("Email sending failed:", emailErr.message);
+                    }
+                }
+                return res.json({
+                    success: 1,
+                    message: "Sub company invoice sent successfully",
+                    sub_company_id: sub_company_id,
+                    sub_company_name: subCompany.name,
+                    email: subCompany.email,
+                    total_bookings: bookings.length,
+                    total_amount: totalAmount.toFixed(2),
+                    completed_bookings: completedBookings.length,
+                    completed_amount: completedAmount.toFixed(2),
+                    pdf_base64: pdfData.toString('base64')
+                });
+
+            } catch (err) {
+                console.error("Sub Company Invoice Error:", err);
+                return res.status(500).json({ success: 0, message: "Failed to generate PDF" });
+            }
+        });
+
+        doc.fontSize(20).text('Sub Company Invoice', { align: 'center' });
+        doc.moveDown();
+
+        doc.fontSize(14).text('Sub Company Information', { underline: true });
+        doc.fontSize(12);
+        doc.text(`Company Name: ${subCompany.name || 'N/A'}`);
+        doc.text(`Email: ${subCompany.email || 'N/A'}`);
+        if (subCompany.phone) doc.text(`Phone: ${subCompany.phone}`);
+        if (subCompany.address) doc.text(`Address: ${subCompany.address}`);
+        doc.text(`Invoice Date: ${new Date().toLocaleDateString()}`);
+        doc.moveDown();
+
+        doc.fontSize(14).text('Summary', { underline: true });
+        doc.fontSize(12);
+        doc.text(`Total Bookings: ${bookings.length}`);
+        doc.text(`Completed Bookings: ${completedBookings.length}`);
+        doc.text(`Total Amount: $${totalAmount.toFixed(2)}`);
+        doc.text(`Completed Amount: $${completedAmount.toFixed(2)}`);
+        doc.moveDown();
+
+        doc.fontSize(14).text('Booking Details', { underline: true });
+        doc.moveDown();
+
+        bookings.forEach((booking, idx) => {
+            doc.fontSize(10);
+            doc.text(`${idx + 1}. Booking ID: ${booking.booking_reference}`);
+            doc.text(`   Date: ${new Date(booking.booking_date).toLocaleDateString()} ${booking.pickup_time || ''}`);
+            doc.text(`   Route: ${booking.pickup_location} -> ${booking.destination_location}`);
+            doc.text(`   Passenger: ${booking.passenger_name} (${booking.passenger_phone || 'N/A'})`);
+            doc.text(`   Status: ${booking.booking_status}`);
+            doc.text(`   Amount: $${parseFloat(booking.amount || 0).toFixed(2)}`);
+            doc.moveDown(0.5);
+        });
+
+        doc.moveDown();
+        doc.fontSize(10).text('This is a computer-generated invoice.', { align: 'center' });
+        doc.text(`Generated on: ${new Date().toLocaleString()}`, { align: 'center' });
+
+        doc.end();
+
+    } catch (err) {
+        console.error("Sub Company Invoice Error:", err);
+        return res.status(500).json({ success: 0, message: err.message });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
