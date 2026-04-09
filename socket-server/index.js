@@ -3119,6 +3119,92 @@ app.post('/sub-company/send-invoice', async (req, res) => {
     }
 });
 
+app.post('/driver/send-package-history', async (req, res) => {
+    try {
+        const { driver_id } = req.body;
+        if (!driver_id) return res.status(400).json({ success: 0, message: "Driver ID is required" });
+
+        const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
+        if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
+
+        const tenantDb = `tenant${databaseHeader}`;
+        const db = getConnection(tenantDb);
+
+        const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
+        if (!settingsRows.length) return res.status(404).json({ success: 0, message: "Company settings not found" });
+        const settings = settingsRows[0];
+
+        const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
+        if (!driverRows.length) return res.status(404).json({ success: 0, message: "Driver not found" });
+        const driver = driverRows[0];
+
+        if (!driver.email) return res.status(400).json({ success: 0, message: "Driver email not found" });
+
+        let allEntries = [];
+        if (settings.package_type === "packages_post_paid") {
+            allEntries = await calculatePostPaidEntries(driver, settings, db);
+        } else if (settings.package_type === "commission_without_topup") {
+            allEntries = await calculatePercentageEntries(driver, settings, db);
+        } else {
+            return res.status(400).json({ success: 0, message: "Invalid package type" });
+        }
+
+        const totalAmount = allEntries.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
+
+        const entriesHtml = allEntries.map((e, idx) => `
+            <tr>
+                <td>${idx + 1}</td>
+                <td>${e.cycle_start_date} to ${e.cycle_end_date}</td>
+                <td>${e.description}</td>
+                <td>$${(parseFloat(e.amount) || 0).toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+        const htmlContent = `
+            <h2>Driver Package History</h2>
+            <p><strong>Driver Name:</strong> ${driver.name || 'N/A'}</p>
+            <p><strong>Email:</strong> ${driver.email}</p>
+            <p><strong>Phone:</strong> ${driver.phone_no || 'N/A'}</p>
+            <p><strong>Package Type:</strong> ${settings.package_type}</p>
+            <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+            <h3>Package Details Summary</h3>
+            <table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
+                <tr>
+                    <th>#</th>
+                    <th>Period</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                </tr>
+                ${entriesHtml}
+            </table>
+            <h3>Total Package Amount: $${totalAmount.toFixed(2)}</h3>
+        `;
+
+        const mailOptions = {
+            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+            to: driver.email,
+            subject: 'Your Driver Package History',
+            html: htmlContent
+        };
+
+        try {
+            await transporter.sendMail(mailOptions);
+            return res.json({
+                success: 1,
+                message: "Package history sent successfully",
+                data: allEntries
+            });
+        } catch (mailErr) {
+            console.error("Email Sending Error:", mailErr);
+            return res.status(500).json({ success: 0, message: "Failed to send email" });
+        }
+
+    } catch (err) {
+        console.error("Package History Error:", err);
+        return res.status(500).json({ success: 0, message: err.message });
+    }
+});
+
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
