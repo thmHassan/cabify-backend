@@ -93,7 +93,7 @@ class UserController extends Controller
                     'max:255',
                     Rule::unique('users', 'phone_no')
                         ->where(fn ($q) => $q->where('country_code', $request->country_code))
-                        ->ignore($user->id),
+                        ->ignore($request->id),
                 ],
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
