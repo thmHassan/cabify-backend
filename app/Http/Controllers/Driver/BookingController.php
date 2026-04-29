@@ -791,11 +791,12 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                'database' => $request->header('database'),
+                // 'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
-                'clientId' => $request->header('database'),
-                'driver_id' => auth('driver')->user()->id,
-            ]);
+                        'clientId' => $request->header('database'),
+                        'driverName' => auth("driver")->user()->name,
+                        'plot' => auth("driver")->user()->plot_id,
+                    ]);
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
             if ($settingData->map_settings == "default") {

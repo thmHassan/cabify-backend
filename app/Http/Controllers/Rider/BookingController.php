@@ -731,10 +731,11 @@ class BookingController extends Controller
             }
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                'database' => $request->header('database'),
+                // 'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
-                'driver_id' => $booking->driver,
+                'driverName' => $driver->name,
+                'plot' => $driver->plot_id,
             ]);
 
             return response()->json([
