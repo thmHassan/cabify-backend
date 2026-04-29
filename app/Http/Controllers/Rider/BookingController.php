@@ -520,6 +520,7 @@ class BookingController extends Controller
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
                 ])->post(env('NODE_SOCKET_URL') . '/bid-accept', [
                     'driverId' => $bid->driver_id,
                     'booking' => [
@@ -568,6 +569,7 @@ class BookingController extends Controller
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
                 ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
                     'clientId' => $request->header('database'),
                     'driverName' => $driver->name,
@@ -626,6 +628,7 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/change-cancel-ride', [
                 'drivers' => $driversList,
                 'status' => "cancel_ride",
@@ -674,6 +677,7 @@ class BookingController extends Controller
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-driver-ride-status', [
                     'driverId' => $booking->driver,
                     'status' => "cancel_confirm_ride",
@@ -727,6 +731,7 @@ class BookingController extends Controller
             }
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
                 'driverName' => $driver->name,
