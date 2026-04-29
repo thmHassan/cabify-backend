@@ -734,8 +734,7 @@ class BookingController extends Controller
                 'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
-                'driverName' => $driver->name,
-                'plot' => $driver->plot_id,
+                'driver_id' => $booking->driver,
             ]);
 
             return response()->json([

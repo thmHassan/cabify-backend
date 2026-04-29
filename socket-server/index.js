@@ -2168,63 +2168,84 @@ app.post("/on-job-driver", async (req, res) => {
 // });
 
 app.post("/waiting-driver", async (req, res) => {
-    const { clientId, driverName, plot } = req.body;
+    try {
+        const { clientId, driver_id } = req.body;
+        const db = getConnection(req.tenantDb);
 
-    const db = getConnection(req.tenantDb);
-
-    const [driverRows] = await db.query(
-        `SELECT d.driving_status, d.plot_id, p.plot_name 
+        const [driverRows] = await db.query(
+            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.plot_name 
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
-             WHERE d.name = ? 
+             WHERE d.id = ? 
              LIMIT 1`,
-        [driverName]
-    );
+            [driver_id]
+        );
 
-    if (!driverRows.length) {
-        return res.status(404).json({
-            success: false,
-            message: "Driver not found"
+        if (driverRows.length > 0 && driverRows[0].driving_status === "idle") {
+            const plotId = driverRows[0].plot_id;
+            const plotName = driverRows[0].plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+            const eventData = {
+                driver_id: driverRows[0].id,
+                driverName: driverRows[0].name,
+                driver_name: driverRows[0].name,
+                plot: plotId,
+                plot_name: plotName
+            };
+
+            dispatcherSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
+            adminSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
+        }
+
+        if (!driverRows.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found"
+            });
+        }
+
+        if (driverRows[0].driving_status !== "idle") {
+            return res.json({
+                success: false,
+                message: "Driver not idle"
+            });
+        }
+
+        const plotId = driverRows[0].plot_id;
+        const plotName = driverRows[0].plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+        const eventData = {
+            driverName,
+            driver_name: driverName,
+            plot: plotId,
+            plot_name: plotName
+        };
+
+        const socketId = clientSockets.get(clientId.toString());
+        if (socketId) {
+            io.to(socketId).emit("waiting-driver-event", eventData);
+        }
+
+        dispatcherSockets.forEach((sid) => {
+            io.to(sid).emit("waiting-driver-event", eventData);
         });
-    }
 
-    if (driverRows[0].driving_status !== "idle") {
-        return res.json({
-            success: false,
-            message: "Driver not idle"
+        adminSockets.forEach((sid) => {
+            io.to(sid).emit("waiting-driver-event", eventData);
         });
+
+        if (req.tenantDb) {
+            await broadcastDashboardCardsUpdate(req.tenantDb);
+        }
+
+        return res.json({ success: true });
+
     }
-
-    const plotId = driverRows[0].plot_id;
-    const plotName = driverRows[0].plot_name || (plotId ? `Plot #${plotId}` : "N/A");
-
-    const eventData = {
-        driverName,
-        driver_name: driverName,
-        plot: plotId,
-        plot_name: plotName
-    };
-
-    const socketId = clientSockets.get(clientId.toString());
-    if (socketId) {
-        io.to(socketId).emit("waiting-driver-event", eventData);
+    catch (error) {
+        console.error("❌ Waiting Driver Error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
-
-    dispatcherSockets.forEach((sid) => {
-        io.to(sid).emit("waiting-driver-event", eventData);
-    });
-
-    adminSockets.forEach((sid) => {
-        io.to(sid).emit("waiting-driver-event", eventData);
-    });
-
-    if (req.tenantDb) {
-        await broadcastDashboardCardsUpdate(req.tenantDb);
-    }
-
-    return res.json({ success: true });
-
-});
+})
 
 app.post("/send-reminder", (req, res) => {
     const { clientId, title, description } = req.body;
