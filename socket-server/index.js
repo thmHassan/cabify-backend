@@ -2173,9 +2173,10 @@ app.post("/waiting-driver", async (req, res) => {
     const db = getConnection(req.tenantDb);
 
     const [driverRows] = await db.query(
-        `SELECT driving_status 
-             FROM drivers 
-             WHERE name = ? 
+        `SELECT d.driving_status, d.plot_id, p.plot_name 
+             FROM drivers d
+             LEFT JOIN plots p ON d.plot_id = p.id
+             WHERE d.name = ? 
              LIMIT 1`,
         [driverName]
     );
@@ -2194,17 +2195,29 @@ app.post("/waiting-driver", async (req, res) => {
         });
     }
 
+    const plotData = {
+        plot_id: driverRows[0].plot_id,
+        plot_name: driverRows[0].plot_name || "N/A"
+    };
+
+    const eventData = { 
+        driverName, 
+        driver_name: driverName, 
+        plot: plotData.plot_id,
+        plot_name: plotData.plot_name
+    };
+
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
-        io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+        io.to(socketId).emit("waiting-driver-event", eventData);
     }
 
-    dispatcherSockets.forEach((socketId) => {
-        io.to(socketId).emit("waiting-driver-event", { driverName, driver_name: driverName, plot });
+    dispatcherSockets.forEach((sid) => {
+        io.to(sid).emit("waiting-driver-event", eventData);
     });
 
-    adminSockets.forEach((socketId) => {
-        io.to(socketId).emit("waiting-driver-event", { driverName, driver_name: driverName, plot });
+    adminSockets.forEach((sid) => {
+        io.to(sid).emit("waiting-driver-event", eventData);
     });
 
     if (req.tenantDb) {
