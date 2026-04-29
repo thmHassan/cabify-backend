@@ -198,6 +198,7 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/place-bid', [
                         'userId' => $booking->user_id,
                         'bid' => [
@@ -287,7 +288,6 @@ class BookingController extends Controller
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                    'database' => $request->header('database'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "cancel_confirm_ride",
@@ -345,7 +345,6 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
                         'clientId' => $request->header('database'),
                         'driverName' => auth("driver")->user()->name,
@@ -440,6 +439,7 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                 'userId' => $booking->user_id,
                 'status' => "accept_ride",
@@ -532,7 +532,6 @@ class BookingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                         'userId' => $booking->user_id,
                         'status' => "arrived_driver",
@@ -671,7 +670,6 @@ class BookingController extends Controller
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                    'database' => $request->header('database'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "ride_started",
@@ -787,6 +785,10 @@ class BookingController extends Controller
                 }
             }
 
+            $driver = CompanyDriver::where("id", auth('driver')->user()->id)->first();
+            $driver->driving_status = "idle";
+            $driver->save();
+
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 'database' => $request->header('database'),
@@ -795,10 +797,6 @@ class BookingController extends Controller
                         'driverName' => auth("driver")->user()->name,
                         'plot' => auth("driver")->user()->plot_id,
                     ]);
-
-            $driver = CompanyDriver::where("id", auth('driver')->user()->id)->first();
-            $driver->driving_status = "idle";
-            $driver->save();
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
             if ($settingData->map_settings == "default") {

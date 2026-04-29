@@ -2141,10 +2141,15 @@ app.post("/change-driver-ride-status", async (req, res) => {
 
 app.post("/on-job-driver", async (req, res) => {
     const { clientId, driverName } = req.body;
+    const eventData = { driverName, driver_name: driverName };
+
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
-        io.to(socketId).emit("on-job-driver-event", driverName);
+        io.to(socketId).emit("on-job-driver-event", eventData);
     }
+
+    dispatcherSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+    adminSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
 
     if (req.tenantDb) {
         await broadcastDashboardCardsUpdate(req.tenantDb);
@@ -2195,7 +2200,11 @@ app.post("/waiting-driver", async (req, res) => {
     }
 
     dispatcherSockets.forEach((socketId) => {
-        io.to(socketId).emit("waiting-driver-event", { driverName, plot });
+        io.to(socketId).emit("waiting-driver-event", { driverName, driver_name: driverName, plot });
+    });
+
+    adminSockets.forEach((socketId) => {
+        io.to(socketId).emit("waiting-driver-event", { driverName, driver_name: driverName, plot });
     });
 
     if (req.tenantDb) {
