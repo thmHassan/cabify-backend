@@ -2010,7 +2010,7 @@ app.post("/send-notification-dispatcher", (req, res) => {
     return res.json({ success: true, sent_to: sentCount });
 });
 
-app.post("/change-cancel-ride", (req, res) => {
+app.post("/change-cancel-ride", async (req, res) => {
     const { drivers, status, booking } = req.body;
     let sentCount = 0;
     drivers.forEach(driverId => {
@@ -2020,6 +2020,11 @@ app.post("/change-cancel-ride", (req, res) => {
             sentCount++;
         }
     });
+
+    if (req.tenantDb) {
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+    }
+
     return res.json({ success: true, sent_to: sentCount });
 });
 
@@ -2036,12 +2041,17 @@ app.post("/send-new-booking", (req, res) => {
     return res.json({ success: true, sent_to: sentCount });
 });
 
-app.post("/bid-accept", (req, res) => {
+app.post("/bid-accept", async (req, res) => {
     const { driverId, booking } = req.body;
     const socketId = driverSockets.get(driverId.toString());
     if (socketId) {
         io.to(socketId).emit("bid-accept-event", booking);
     }
+
+    if (req.tenantDb) {
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+    }
+
     return res.json({ success: true });
 });
 
@@ -2054,12 +2064,17 @@ app.post("/place-bid", (req, res) => {
     return res.json({ success: true });
 });
 
-app.post("/change-ride-status", (req, res) => {
+app.post("/change-ride-status", async (req, res) => {
     const { userId, status, booking } = req.body;
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
         io.to(socketId).emit("user-ride-status-event", { status, booking });
     }
+
+    if (req.tenantDb) {
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+    }
+
     return res.json({ success: true });
 });
 
@@ -2081,21 +2096,31 @@ app.post("/driver-message-notification", (req, res) => {
     return res.json({ success: true });
 });
 
-app.post("/change-driver-ride-status", (req, res) => {
+app.post("/change-driver-ride-status", async (req, res) => {
     const { driverId, status, booking } = req.body;
     const socketId = driverSockets.get(driverId.toString());
     if (socketId) {
         io.to(socketId).emit("driver-ride-status-event", { status, booking });
     }
+
+    if (req.tenantDb) {
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+    }
+
     return res.json({ success: true });
 });
 
-app.post("/on-job-driver", (req, res) => {
+app.post("/on-job-driver", async (req, res) => {
     const { clientId, driverName } = req.body;
     const socketId = clientSockets.get(clientId.toString());
     if (socketId) {
         io.to(socketId).emit("on-job-driver-event", driverName);
     }
+
+    if (req.tenantDb) {
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+    }
+
     return res.json({ success: true });
 });
 
@@ -2143,6 +2168,10 @@ app.post("/waiting-driver", async (req, res) => {
     dispatcherSockets.forEach((socketId) => {
         io.to(socketId).emit("waiting-driver-event", { driverName, plot });
     });
+
+    if (req.tenantDb) {
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+    }
 
     return res.json({ success: true });
 

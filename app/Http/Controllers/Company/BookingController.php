@@ -105,7 +105,6 @@ class BookingController extends Controller
                 'destination_point' => 'required',
                 'destination_location' => 'required',
                 'name' => 'required',
-                'email' => 'required',
                 'phone_no' => 'required',
                 'journey_type' => 'required',
                 'vehicle' => 'required',
