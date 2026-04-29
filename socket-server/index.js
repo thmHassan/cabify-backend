@@ -2029,9 +2029,9 @@ app.post("/change-cancel-ride", async (req, res) => {
         await broadcastDashboardCardsUpdate(req.tenantDb);
     }
 
-    const cancelNotif = { 
-        booking_id: booking.id, 
-        message: `Booking #${booking.booking_id} has been cancelled` 
+    const cancelNotif = {
+        booking_id: booking.id,
+        message: `Booking #${booking.booking_id} has been cancelled`
     };
     dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
     adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
@@ -2087,9 +2087,9 @@ app.post("/change-ride-status", async (req, res) => {
     }
 
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
-        const cancelNotif = { 
-            booking_id: booking.id, 
-            message: `Booking #${booking.booking_id} has been cancelled` 
+        const cancelNotif = {
+            booking_id: booking.id,
+            message: `Booking #${booking.booking_id} has been cancelled`
         };
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
@@ -2128,9 +2128,9 @@ app.post("/change-driver-ride-status", async (req, res) => {
     }
 
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
-        const cancelNotif = { 
-            booking_id: booking.id, 
-            message: `Booking #${booking.booking_id} has been cancelled` 
+        const cancelNotif = {
+            booking_id: booking.id,
+            message: `Booking #${booking.booking_id} has been cancelled`
         };
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
@@ -2195,16 +2195,14 @@ app.post("/waiting-driver", async (req, res) => {
         });
     }
 
-    const plotData = {
-        plot_id: driverRows[0].plot_id,
-        plot_name: driverRows[0].plot_name || "N/A"
-    };
+    const plotId = driverRows[0].plot_id;
+    const plotName = driverRows[0].plot_name || (plotId ? `Plot #${plotId}` : "N/A");
 
-    const eventData = { 
-        driverName, 
-        driver_name: driverName, 
-        plot: plotData.plot_id,
-        plot_name: plotData.plot_name
+    const eventData = {
+        driverName,
+        driver_name: driverName,
+        plot: plotId,
+        plot_name: plotName
     };
 
     const socketId = clientSockets.get(clientId.toString());
