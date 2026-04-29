@@ -22,6 +22,7 @@ use App\Models\CompanyToken;
 use App\Services\FCMService;
 use Illuminate\Support\Facades\DB;
 use App\Models\Setting;
+use App\Models\MobileAppSetting;
 
 class SettingController extends Controller
 {
@@ -479,6 +480,23 @@ class SettingController extends Controller
                 'package' => $package
             ]);
 
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getMobileSetting(Request $request)
+    {
+        try {
+            $settings = MobileAppSetting::get();
+
+            return response()->json([
+                'success' => 1,
+                'setting' => $settings
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,

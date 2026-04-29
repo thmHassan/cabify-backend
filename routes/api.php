@@ -298,6 +298,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
+        Route::get('/driver/get-mobile-setting', [DriverSettingController::class, 'getMobileSetting']);
         Route::post('/driver/purchase-package', [DriverSettingController::class, 'purchasePackage']);
 
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
@@ -356,6 +357,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/message-list', [RiderSettingController::class, 'messageList']);
         Route::get('/rider/message-history', [RiderSettingController::class, 'messageHistory']);
         Route::get('/rider/notification-list', [RiderSettingController::class, 'notificationList']);
+        Route::get('/rider/get-mobile-setting', [RiderSettingController::class, 'getMobileSetting']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
