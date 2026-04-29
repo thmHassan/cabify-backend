@@ -349,7 +349,7 @@ io.on("connection", (socket) => {
                 const db = getConnection(`tenant${database}`);
 
                 const [rows] = await db.query(
-                    `SELECT d.name, d.driving_status, d.plot_id, d.priority_plot, p.plot_name 
+                    `SELECT d.name, d.driving_status, d.plot_id, d.priority_plot, p.name AS plot_name 
                  FROM drivers d
                  LEFT JOIN plots p ON d.plot_id = p.id
                  WHERE d.id = ? 
@@ -2224,7 +2224,7 @@ app.post("/waiting-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [driverRows] = await db.query(
-            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.plot_name, d.priority_plot
+            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              WHERE d.id = ? 
@@ -2240,33 +2240,29 @@ app.post("/waiting-driver", async (req, res) => {
         const driver = driverRows[0];
         console.log(`🕒 Driver data found: ${driver.name}, status: ${driver.driving_status}`);
 
-        if (driver.driving_status === "idle") {
-            const plotId = driver.plot_id;
-            const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+        const plotId = driver.plot_id;
+        const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
 
-            const eventData = {
-                driver_id: driver.id,
-                driverName: driver.name,
-                driver_name: driver.name,
-                plot: plotId,
-                plot_name: plotName,
-                rank: driver.priority_plot ?? 1
-            };
+        const eventData = {
+            driver_id: driver.id,
+            driverName: driver.name,
+            driver_name: driver.name,
+            plot: plotId,
+            plot_name: plotName,
+            rank: driver.priority_plot ?? 1
+        };
 
-            console.log("🔥 Emitting waiting-driver-event:", eventData);
+        console.log("🔥 Emitting waiting-driver-event:", eventData);
 
-            const socketId = clientSockets.get(clientId?.toString());
-            if (socketId) {
-                io.to(socketId).emit("waiting-driver-event", eventData);
-            }
-
-            dispatcherSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
-            adminSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
-
-            await broadcastDashboardCardsUpdate(req.tenantDb);
-        } else {
-            console.warn(`⚠️ Driver ${driver_id} is NOT idle (status: ${driver.driving_status}), skipping event emission.`);
+        const socketId = clientSockets.get(clientId?.toString());
+        if (socketId) {
+            io.to(socketId).emit("waiting-driver-event", eventData);
         }
+
+        dispatcherSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
+        adminSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
+
+        await broadcastDashboardCardsUpdate(req.tenantDb);
 
         return res.json({ success: true });
     }
