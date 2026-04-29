@@ -2146,22 +2146,51 @@ app.post("/change-driver-ride-status", async (req, res) => {
 });
 
 app.post("/on-job-driver", async (req, res) => {
-    const { clientId, driverName } = req.body;
-    const eventData = { driverName, driver_name: driverName };
+    try {
+        const { clientId, driver_id, driverName } = req.body;
+        console.log(`🚕 On-Job Driver Request: clientId=${clientId}, driver_id=${driver_id}, driverName=${driverName}`);
 
-    const socketId = clientSockets.get(clientId.toString());
-    if (socketId) {
-        io.to(socketId).emit("on-job-driver-event", eventData);
-    }
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
 
-    dispatcherSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
-    adminSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+        const db = getConnection(req.tenantDb);
+        let finalDriverName = driverName;
+        let finalDriverId = driver_id;
 
-    if (req.tenantDb) {
+        // If driver_id is provided, fetch latest data
+        if (driver_id) {
+            const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [driver_id]);
+            if (driverRows.length > 0) {
+                finalDriverName = driverRows[0].name;
+                finalDriverId = driverRows[0].id;
+            }
+        }
+
+        const eventData = {
+            driver_id: finalDriverId,
+            driverName: finalDriverName,
+            driver_name: finalDriverName,
+            status: 'busy'
+        };
+
+        console.log("🚕 Emitting on-job-driver-event:", eventData);
+
+        const socketId = clientSockets.get(clientId?.toString());
+        if (socketId) {
+            io.to(socketId).emit("on-job-driver-event", eventData);
+        }
+
+        dispatcherSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+        adminSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+
         await broadcastDashboardCardsUpdate(req.tenantDb);
-    }
 
-    return res.json({ success: true });
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("❌ On-Job Driver Error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
 });
 
 // app.post("/waiting-driver", (req, res) => {
@@ -2178,8 +2207,17 @@ app.post("/on-job-driver", async (req, res) => {
 app.post("/waiting-driver", async (req, res) => {
     try {
         const { clientId, driver_id } = req.body;
-        
+        console.log(`🕒 Waiting Driver Request: clientId=${clientId}, driver_id=${driver_id}`);
+
         if (!req.tenantDb) {
+            const dbHeader = req.headers['database'] || req.headers['x-database'];
+            if (dbHeader) {
+                req.tenantDb = `tenant${dbHeader}`;
+            }
+        }
+
+        if (!req.tenantDb) {
+            console.error("❌ Waiting Driver: Missing req.tenantDb and database header");
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
@@ -2195,10 +2233,13 @@ app.post("/waiting-driver", async (req, res) => {
         );
 
         if (!driverRows.length) {
+            console.error(`❌ Waiting Driver: Driver ${driver_id} not found in ${req.tenantDb}`);
             return res.status(404).json({ success: false, message: "Driver not found" });
         }
 
         const driver = driverRows[0];
+        console.log(`🕒 Driver data found: ${driver.name}, status: ${driver.driving_status}`);
+
         if (driver.driving_status === "idle") {
             const plotId = driver.plot_id;
             const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
@@ -2212,6 +2253,8 @@ app.post("/waiting-driver", async (req, res) => {
                 rank: driver.priority_plot ?? 1
             };
 
+            console.log("🔥 Emitting waiting-driver-event:", eventData);
+
             const socketId = clientSockets.get(clientId?.toString());
             if (socketId) {
                 io.to(socketId).emit("waiting-driver-event", eventData);
@@ -2219,8 +2262,10 @@ app.post("/waiting-driver", async (req, res) => {
 
             dispatcherSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
             adminSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
-            
+
             await broadcastDashboardCardsUpdate(req.tenantDb);
+        } else {
+            console.warn(`⚠️ Driver ${driver_id} is NOT idle (status: ${driver.driving_status}), skipping event emission.`);
         }
 
         return res.json({ success: true });
@@ -2229,7 +2274,7 @@ app.post("/waiting-driver", async (req, res) => {
         console.error("❌ Waiting Driver Error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
-})
+});
 
 app.post("/send-reminder", (req, res) => {
     const { clientId, title, description } = req.body;
