@@ -166,13 +166,13 @@ const autoDispatchRide = async ({
 
         let [drivers] = await db.query(driverQuery, queryParams);
 
-        // 2. Nearest Driver Fallback (within 5km) if no drivers found in current plot on first try
+        // 2. Nearest Driver Fallback (within 10km) if no drivers found in current plot on first try
         if (!drivers.length && driverIndex === 0) {
-            console.log(`🔍 [AutoDispatch] Plot ${currentPlotId} ma koi driver nathi. Nearest driver shodhi rahya chhie...`);
-
+            console.log(`📡 [AutoDispatch] Plot ma koi driver nathi. Nearest driver shodhi rahya chhie (10km)...`);
+            
             if (booking.pickup_point && booking.pickup_point.includes(',')) {
-                const [lat, lng] = booking.pickup_point.split(",").map(c => c.trim());
-
+                const [lat, lng] = booking.pickup_point.split(",").map(c => parseFloat(c.trim()));
+                
                 let nearestQuery = `
                     SELECT *, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance 
                     FROM drivers 
@@ -185,11 +185,11 @@ const autoDispatchRide = async ({
                     nearestParams.push(booking.vehicle);
                 }
 
-                nearestQuery += ` HAVING distance < 5 ORDER BY distance ASC LIMIT 5`;
+                nearestQuery += ` HAVING distance < 10 ORDER BY distance ASC LIMIT 5`;
 
                 const [nearestDrivers] = await db.query(nearestQuery, nearestParams);
                 if (nearestDrivers.length > 0) {
-                    console.log(`✅ [AutoDispatch] ${nearestDrivers.length} nearest drivers found within 5km.`);
+                    console.log(`✅ [AutoDispatch] ${nearestDrivers.length} nearest drivers found within 10km.`);
                     drivers = nearestDrivers;
                 }
             }
@@ -425,7 +425,6 @@ io.on("connection", (socket) => {
                 dataArray = data;
             }
 
-            // Store location data in the database if database and driver ID are present
             const dbName = dataArray.database || socket.handshake.query.database;
             const driverId = dataArray.id || dataArray.driver_id || socket.driverId;
 
