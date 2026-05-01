@@ -231,6 +231,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/get-app-content', [SettingController::class, 'getAppContent']);
     Route::post('/company/set-dispatch-system', [SettingController::class, 'setDispatchSystem']);
     Route::get('/company/get-dispatch-system', [SettingController::class, 'getDispatchSystem']);
+    Route::get('/company/get-api-keys', [SettingController::class, 'getApiKeys']);
     Route::post('/company/match-password', [SettingController::class, 'matchPassword']);
     Route::get('/company/system-alert', [SettingController::class, 'systemAlert']);
 

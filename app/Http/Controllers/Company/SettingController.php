@@ -54,6 +54,38 @@ class SettingController extends Controller
         }
     }
 
+    public function getApiKeys(Request $request)
+    {
+        try {
+            $tenant = (new Tenant)
+                ->setConnection('central')
+                ->where("id", $request->header('database'))
+                ->first();
+
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Tenant not found'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => 1,
+                'data' => [
+                    'barikoi_api_key' => $tenant->barikoi_api_key,
+                    'google_api_key' => $tenant->google_api_key,
+                    'maps_api' => $tenant->maps_api,
+                    'search_api' => $tenant->search_api,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function saveCompanyProfile(Request $request)
     {
         try {
