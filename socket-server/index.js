@@ -241,6 +241,22 @@ const autoDispatchRide = async ({
             });
         }
 
+        // Send Push Notification and Store it
+        try {
+            await sendNotificationToDriver(db, driver.id, "New Ride Available", "You have a new ride request", {
+                booking_id: String(booking.id),
+                type: "new_ride"
+            });
+            await storeNotification(db, {
+                user_type: "driver",
+                user_id: driver.id,
+                title: "New Ride Available",
+                message: "You have a new ride request"
+            });
+        } catch (notifErr) {
+            console.error("❌ Notification error in autoDispatchRide:", notifErr.message);
+        }
+
         setTimeout(async () => {
             const [updatedRows] = await db.query(
                 "SELECT booking_status FROM bookings WHERE id = ?",
@@ -414,10 +430,18 @@ io.on("connection", (socket) => {
             if (dbName && driverId) {
                 try {
                     const db = getConnection(`tenant${dbName}`);
-                    await db.query(
-                        `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
-                        [dataArray.latitude, dataArray.longitude, driverId]
-                    );
+                    const status = dataArray.driving_status || dataArray.status;
+                    if (status) {
+                        await db.query(
+                            `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
+                            [dataArray.latitude, dataArray.longitude, status, driverId]
+                        );
+                    } else {
+                        await db.query(
+                            `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
+                            [dataArray.latitude, dataArray.longitude, driverId]
+                        );
+                    }
                 } catch (dbErr) {
                     console.error("❌ Database update error in driver-location:", dbErr.message);
                 }
@@ -1789,25 +1813,41 @@ app.put("/bookings/:id/status", async (req, res) => {
                 const notifTitle = "Ride Cancelled";
                 const notifMessage = `Ride #${booking.booking_id} has been cancelled by ${cancelledByText}`;
 
-                await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, { booking_id: String(id) });
-                console.log("✅ Cancel notification sent to driver:", driverInfo[0]?.name);
-
-                await storeNotification(db, {
-                    user_type: 'driver', user_id: booking.driver,
-                    title: notifTitle, message: notifMessage
-                });
+                try {
+                    await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
+                        booking_id: String(id),
+                        type: "ride_cancelled"
+                    });
+                    await storeNotification(db, {
+                        user_type: 'driver',
+                        user_id: booking.driver,
+                        title: notifTitle,
+                        message: notifMessage
+                    });
+                    console.log("✅ Cancel notification sent to driver:", driverInfo[0]?.name);
+                } catch (notifErr) {
+                    console.error("❌ Notification error in ride cancellation:", notifErr.message);
+                }
 
             } else if (booking_status === 'completed') {
                 const notifTitle = "Ride Completed";
                 const notifMessage = `Ride #${booking.booking_id} has been marked as completed`;
 
-                await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, { booking_id: String(id) });
-                console.log("✅ Complete notification sent to driver:", driverInfo[0]?.name);
-
-                await storeNotification(db, {
-                    user_type: 'driver', user_id: booking.driver,
-                    title: notifTitle, message: notifMessage
-                });
+                try {
+                    await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
+                        booking_id: String(id),
+                        type: "ride_completed"
+                    });
+                    await storeNotification(db, {
+                        user_type: 'driver',
+                        user_id: booking.driver,
+                        title: notifTitle,
+                        message: notifMessage
+                    });
+                    console.log("✅ Complete notification sent to driver:", driverInfo[0]?.name);
+                } catch (notifErr) {
+                    console.error("❌ Notification error in ride completion:", notifErr.message);
+                }
 
                 // ─────────────────────────────────────────────────────────
                 // FOLLOW-ON JOB: When Job 1 completes, send Job 2 to driver
@@ -1850,11 +1890,20 @@ app.put("/bookings/:id/status", async (req, res) => {
                             // FCM push to driver
                             const foNotifTitle = "New Follow-On Job";
                             const foNotifMsg = `Your next job #${followOnBooking.booking_id} is ready. Please accept or reject.`;
-                            await sendNotificationToDriver(db, driverId, foNotifTitle, foNotifMsg, { booking_id: String(followOnId) });
-                            await storeNotification(db, {
-                                user_type: 'driver', user_id: driverId,
-                                title: foNotifTitle, message: foNotifMsg
-                            });
+                            try {
+                                await sendNotificationToDriver(db, driverId, foNotifTitle, foNotifMsg, {
+                                    booking_id: String(followOnId),
+                                    type: "new_ride"
+                                });
+                                await storeNotification(db, {
+                                    user_type: 'driver',
+                                    user_id: driverId,
+                                    title: foNotifTitle,
+                                    message: foNotifMsg
+                                });
+                            } catch (notifErr) {
+                                console.error("❌ Notification error in follow-on dispatch:", notifErr.message);
+                            }
 
                             // Notify dispatchers/admins that follow-on was sent to driver
                             const foEventData = {
