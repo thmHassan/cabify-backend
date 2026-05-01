@@ -121,15 +121,16 @@ const autoDispatchRide = async ({
     visitedPlots = []
 }) => {
     try {
-        console.log(`🚀 [AutoDispatch] Starting for Booking #${bookingId} in ${tenantDb}`);
         const db = getConnection(tenantDb);
+        console.log(`\n--- 🚀 [AutoDispatch] Start: Booking #${bookingId} [${tenantDb}] ---`);
 
         const [bookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
         if (!bookingRows.length) {
-            console.log(`❌ [AutoDispatch] Booking #${bookingId} not found.`);
+            console.log(`❌ [AutoDispatch] Booking #${bookingId} not found in DB.`);
             return;
         }
         const booking = bookingRows[0];
+        console.log(`📋 [AutoDispatch] Booking Details: Status=${booking.booking_status}, Vehicle=${booking.vehicle}, PickupPlot=${booking.pickup_plot_id}`);
 
         // Status checks
         if (booking.booking_status === "cancelled" || booking.booking_status === "completed") {
@@ -168,7 +169,7 @@ const autoDispatchRide = async ({
 
         // 2. Nearest Driver Fallback (within 10km) if no drivers found in current plot on first try
         if (!drivers.length && driverIndex === 0) {
-            console.log(`📡 [AutoDispatch] Plot ma koi driver nathi. Nearest driver shodhi rahya chhie (10km)...`);
+            console.log(`📡 [AutoDispatch] Plot ma koi driver nathi. Nearest driver shodhi rahya chhie (10km)... Location: ${booking.pickup_point}`);
             
             if (booking.pickup_point && booking.pickup_point.includes(',')) {
                 const [lat, lng] = booking.pickup_point.split(",").map(c => parseFloat(c.trim()));
@@ -234,6 +235,7 @@ const autoDispatchRide = async ({
         );
 
         const driverSocketId = driverSockets.get(driver.id.toString());
+        console.log(`📱 [AutoDispatch] Driver Socket ID: ${driverSocketId || 'N/A (Not Connected)'}`);
 
         // Emit Socket Event
         if (driverSocketId) {
@@ -243,12 +245,11 @@ const autoDispatchRide = async ({
                 booking: { ...booking, driver: driver.id }
             });
             console.log(`📲 [AutoDispatch] Socket event sent to Driver #${driver.id}`);
-        } else {
-            console.log(`⚠️ [AutoDispatch] Driver #${driver.id} socket not connected.`);
         }
 
         // Send Push Notification
         try {
+            console.log(`📩 [AutoDispatch] Sending Push Notification to Driver #${driver.id}...`);
             await sendNotificationToDriver(db, driver.id, "New Ride Available", "You have a new ride request", {
                 booking_id: String(booking.id),
                 type: "new_ride"
@@ -256,6 +257,8 @@ const autoDispatchRide = async ({
         } catch (notifErr) {
             console.error("❌ [AutoDispatch] Notification error:", notifErr.message);
         }
+
+        console.log(`--- 🏁 [AutoDispatch] Processing Timeout ---`);
 
         // 30-second timeout for driver response
         setTimeout(async () => {
