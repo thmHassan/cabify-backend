@@ -2,7 +2,7 @@ const axios = require("axios");
 const { GoogleAuth } = require("google-auth-library");
 const path = require("path");
 
-const FIREBASE_PROJECT_ID = "cabifyit"; 
+const FIREBASE_PROJECT_ID = "cabifyit";
 
 const getAccessToken = async () => {
   const auth = new GoogleAuth({
@@ -52,10 +52,25 @@ const sendToDevice = async (deviceToken, title, body, data = {}) => {
 
 const sendNotificationToDriver = async (db, driverId, title, body, data = {}) => {
   try {
-    const [tokens] = await db.query(
+    let [tokens] = await db.query(
       "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'driver'",
       [driverId]
     );
+
+    // Fallback: Check drivers table if no token found in tokens table
+    if (tokens.length === 0) {
+      console.log(`🔍 tokens table ma token nathi, drivers table check kariye chhie for ID: ${driverId}`);
+      const [driverRows] = await db.query(
+        "SELECT fcm_token, device_token FROM drivers WHERE id = ?",
+        [driverId]
+      );
+      if (driverRows.length > 0) {
+        const dToken = driverRows[0].fcm_token || driverRows[0].device_token;
+        if (dToken) {
+          tokens = [{ fcm_token: dToken }];
+        }
+      }
+    }
 
     console.log(`🔍 Driver ${driverId} na tokens found:`, tokens.length);
 
