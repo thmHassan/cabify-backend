@@ -400,27 +400,71 @@ io.on("connection", (socket) => {
 
     socket.on("driver-location", async (data) => {
         try {
-            var dataArray;
-            console.log("dataArray")
-            console.log(dataArray)
+            let dataArray;
             if (typeof data === "string") {
                 dataArray = JSON.parse(data);
             } else {
                 dataArray = data;
             }
+
+            // Store location data in the database if database and driver ID are present
+            const dbName = dataArray.database || socket.handshake.query.database;
+            const driverId = dataArray.id || socket.driverId;
+
+            if (dbName && driverId) {
+                try {
+                    const db = getConnection(`tenant${dbName}`);
+                    await db.query(
+                        `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
+                        [dataArray.latitude, dataArray.longitude, driverId]
+                    );
+                } catch (dbErr) {
+                    console.error("❌ Database update error in driver-location:", dbErr.message);
+                }
+            }
+
             const response = await axios.post(
                 "https://backend.cabifyit.com/api/driver/location",
                 dataArray,
                 {
                     headers: {
                         Authorization: `Bearer ${socket.token}`,
-                        database: `${dataArray.database}`,
+                        database: `${dbName}`,
                     }
                 }
             );
-            socket.broadcast.emit("driver-location-update", response.data.driver);
+
+            const driver = response.data.driver;
+            if (driver) {
+                // Broadcast the updated driver location to all clients
+                socket.broadcast.emit("driver-location-update", driver);
+
+                // Prepare event data for Dashboard lists (Waiting/On Jobs)
+                const eventData = {
+                    driver_id: driver.id,
+                    driverName: driver.name,
+                    driver_name: driver.name,
+                    plot: driver.plot_id,
+                    plot_name: driver.plot_name || (driver.plot_id ? `Plot #${driver.plot_id}` : "N/A"),
+                    rank: driver.priority_plot ?? "-",
+                    status: driver.driving_status,
+                    latitude: driver.latitude,
+                    longitude: driver.longitude
+                };
+
+                // Emit status-specific events to Dispatchers, Admins and Clients
+                if (driver.driving_status === "idle") {
+                    dispatcherSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", eventData));
+                    adminSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", eventData));
+                    clientSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", eventData));
+                } else if (driver.driving_status === "busy") {
+                    dispatcherSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+                    adminSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+                    clientSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+                }
+            }
         } catch (err) {
-            console.error("Laravel Socket error", err);
+            console.error("❌ Laravel Socket error:", err.message);
         }
     });
 
