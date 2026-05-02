@@ -230,9 +230,10 @@ const autoDispatchRide = async ({
 
         // Update booking with the assigned driver and lock in the offered amount
         await db.query(
-            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = 'pending_acceptance', booking_amount = ? WHERE id = ?`,
+            `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
             [driver.id, booking.offered_amount, bookingId]
         );
+
 
         // Fetch updated booking to send to driver
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
@@ -1835,7 +1836,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         await db.query(updateQuery, params);
 
-        // Notify Driver via Socket
+        // Notify Driver via Socket (Only if assigned)
         if (booking.driver) {
             const driverSocketId = driverSockets.get(booking.driver.toString());
             if (driverSocketId) {
@@ -1844,10 +1845,18 @@ app.put("/bookings/:id/status", async (req, res) => {
                     status: booking_status,
                     message: `Ride status updated to ${booking_status}`
                 });
+
+                if (booking_status === 'cancelled') {
+                    io.to(driverSocketId).emit("booking-cancelled-event", {
+                        booking_id: id,
+                        booking: booking,
+                        message: `Ride #${booking.booking_id} has been cancelled by dispatcher.`
+                    });
+                }
             }
         }
 
-        // Notify User via Socket
+        // Notify User/Customer via Socket
         if (booking.user_id) {
             const userSocketId = userSockets.get(booking.user_id.toString());
             if (userSocketId) {
@@ -1856,6 +1865,14 @@ app.put("/bookings/:id/status", async (req, res) => {
                     status: booking_status,
                     message: `Your ride status has been updated to ${booking_status}`
                 });
+
+                if (booking_status === 'cancelled') {
+                    io.to(userSocketId).emit("booking-cancelled-event", {
+                        booking_id: id,
+                        booking: booking,
+                        message: `Your ride #${booking.booking_id} has been cancelled.`
+                    });
+                }
             }
         }
 
