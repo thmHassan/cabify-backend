@@ -344,7 +344,7 @@ io.on("connection", (socket) => {
     const role = socket.handshake.query.role;
     const driverId = socket.handshake.query.driver_id;
     const dispatcherId = socket.handshake.query.dispatcher_id;
-    const userId = socket.handshake.query.user_id;
+    const userId = socket.handshake.query.user_id || socket.handshake.query.customer_id;
     const clientId = socket.handshake.query.client_id;
     const adminId = socket.handshake.query.admin_id;
 
@@ -352,8 +352,9 @@ io.on("connection", (socket) => {
         dispatcherSockets.set(dispatcherId.toString(), socket.id);
         console.log(`✅ Dispatcher ${dispatcherId} connected`);
     }
-    if (role === "user" && userId) {
+    if ((role === "user" || role === "customer") && userId) {
         userSockets.set(userId.toString(), socket.id);
+        console.log(`✅ Customer/User ${userId} connected`);
     }
     if (role === "client" && clientId) {
         clientSockets.set(clientId.toString(), socket.id);
