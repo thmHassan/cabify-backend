@@ -239,12 +239,23 @@ const autoDispatchRide = async ({
 
         // Emit Socket Event
         if (driverSocketId) {
+            const socketPayload = {
+                ...booking,
+                driver: driver.id,
+                auto_dispatch: true
+            };
+
+            // Emit both events for backward/forward compatibility
+            io.to(driverSocketId).emit("new-ride", socketPayload);
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: booking.id,
                 message: "You have a new ride request",
-                booking: { ...booking, driver: driver.id }
+                booking: socketPayload
             });
-            console.log(`📲 [AutoDispatch] Socket event sent to Driver #${driver.id}`);
+
+            console.log(`📲 [AutoDispatch] Socket event ('new-ride' & 'new-ride-request') sent to Driver #${driver.id}`);
+        } else {
+            console.log(`⚠️ [AutoDispatch] Driver #${driver.id} found but NOT connected via socket. Event not sent.`);
         }
 
         // Send Push Notification
@@ -1310,7 +1321,7 @@ app.get("/bookings/:id", async (req, res) => {
 app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
-        const { driver_id, assignment_type } = req.body;
+        const { driver_id, assignment_type, } = req.body;
 
         if (!driver_id) {
             return res.status(400).json({ success: false, message: "Driver ID is required" });
@@ -1319,7 +1330,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookingRows] = await db.query(
-            "SELECT id, booking_status, booking_id FROM bookings WHERE id = ?",
+            "SELECT id, booking_status, booking_id, offered_amount FROM bookings WHERE id = ?",
             [id]
         );
         if (bookingRows.length === 0) {
@@ -1335,8 +1346,8 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         }
 
         await db.query(
-            `UPDATE bookings SET driver = ? WHERE id = ?`,
-            [driver_id, id]
+            `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
+            [driver_id, bookingRows.offered_amount, id]
         );
 
         const isPreJob = assignment_type === "pre_job";
@@ -1795,13 +1806,53 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         await db.query(updateQuery, params);
 
-        // Update driver status
+        // Fetch updated booking for socket payload
+        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
+        const updatedBooking = updatedBookingRows[0];
+        const socketPayload = { status: booking_status, booking: updatedBooking };
+
+        // 1. Notify User/Customer via Socket
+        if (updatedBooking.user_id) {
+            const userSocketId = userSockets.get(updatedBooking.user_id.toString());
+            if (userSocketId) {
+                io.to(userSocketId).emit("user-ride-status-event", socketPayload);
+                console.log(`📲 Status update sent to User #${updatedBooking.user_id} via socket`);
+            }
+        }
+
+        // 2. Notify Driver via Socket
+        if (updatedBooking.driver) {
+            const driverSocketId = driverSockets.get(updatedBooking.driver.toString());
+            if (driverSocketId) {
+                io.to(driverSocketId).emit("driver-ride-status-event", socketPayload);
+                console.log(`📲 Status update sent to Driver #${updatedBooking.driver} via socket`);
+            }
+        }
+
+        // 3. Notify Dispatchers/Admins of cancellation
+        if (booking_status === 'cancelled') {
+            const cancelNotif = {
+                booking_id: id,
+                booking_reference: updatedBooking.booking_id,
+                message: `Booking #${updatedBooking.booking_id} has been cancelled`,
+                cancelled_by: cancelled_by
+            };
+            dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+            adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+        }
+
+        // Update driver status in DB
         if (booking.driver) {
             let driverStatus = null;
             if (['cancelled', 'completed', 'no_show'].includes(booking_status)) driverStatus = 'idle';
             else if (['ongoing', 'started', 'arrived'].includes(booking_status)) driverStatus = 'busy';
             if (driverStatus) {
                 await db.query("UPDATE drivers SET driving_status = ? WHERE id = ?", [driverStatus, booking.driver]);
+
+                // Also notify about driver status change
+                const statusEvent = { driver_id: booking.driver, status: driverStatus };
+                dispatcherSockets.forEach((sid) => io.to(sid).emit("driver-status-changed", statusEvent));
+                adminSockets.forEach((sid) => io.to(sid).emit("driver-status-changed", statusEvent));
             }
         }
 
@@ -1883,12 +1934,18 @@ app.put("/bookings/:id/status", async (req, res) => {
                             // Send ride request via socket (same event as normal dispatch)
                             const driverSocketId = driverSockets.get(driverId.toString());
                             if (driverSocketId) {
+                                const socketPayload = { ...followOnBooking, driver: driverId, is_follow_on: true };
+
+                                // Emit both events for compatibility
+                                io.to(driverSocketId).emit("new-ride", socketPayload);
                                 io.to(driverSocketId).emit("new-ride-request", {
                                     booking_id: followOnBooking.id,
                                     message: "You have a follow-on ride request",
-                                    booking: { ...followOnBooking, driver: driverId }
+                                    booking: socketPayload
                                 });
-                                console.log(`📲 Follow-on ride request sent to driver socket: ${driverId}`);
+                                console.log(`📲 Follow-on ride request ('new-ride' & 'new-ride-request') sent to driver socket: ${driverId}`);
+                            } else {
+                                console.log(`⚠️ Follow-on driver #${driverId} not connected via socket.`);
                             }
 
                             // FCM push to driver
