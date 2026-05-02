@@ -241,14 +241,17 @@ const autoDispatchRide = async ({
         const driverSocketId = driverSockets.get(driver.id.toString());
         console.log(`📱 [AutoDispatch] Driver Socket ID: ${driverSocketId || 'N/A (Not Connected)'}`);
 
-        // Emit Socket Event
+        const rideRequestPayload = {
+            booking_id: updatedBooking.id,
+            message: "You have a new ride request",
+            booking: updatedBooking
+        };
+
+        // Emit Socket Events to Driver (both for compatibility)
         if (driverSocketId) {
-            io.to(driverSocketId).emit("new-ride-request", {
-                booking_id: booking.id,
-                message: "You have a new ride request",
-                booking: { ...booking, driver: driver.id }
-            });
-            console.log(`📲 [AutoDispatch] Socket event sent to Driver #${driver.id}`);
+            io.to(driverSocketId).emit("new-ride", updatedBooking);
+            io.to(driverSocketId).emit("new-ride-request", rideRequestPayload);
+            console.log(`📲 [AutoDispatch] Socket events ('new-ride' & 'new-ride-request') sent to Driver #${driver.id}`);
         }
 
         // Notify all dispatchers/admins about the dispatch
@@ -1327,7 +1330,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookingRows] = await db.query(
-            "SELECT id, booking_status, booking_id FROM bookings WHERE id = ?",
+            "SELECT id, booking_status, booking_id, offered_amount FROM bookings WHERE id = ?",
             [id]
         );
         if (bookingRows.length === 0) {
@@ -1335,8 +1338,8 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         }
 
         const [driverRows] = await db.query(
-            "SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?",
-            [driver_id]
+            "SELECT id, name, phone_no, driving_status, offered_amount FROM drivers WHERE id = ?",
+            [driver_id, bookingRows[0].offered_amount, id]
         );
         if (driverRows.length === 0) {
             return res.status(404).json({ success: false, message: "Driver not found" });
@@ -1346,8 +1349,8 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
 
         await db.query(
-            `UPDATE bookings SET driver = ? WHERE id = ?`,
-            [driver_id, id]
+            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = ? WHERE id = ?`,
+            [driver_id, newStatus, id]
         );
 
         // Fetch updated booking for socket payload
@@ -1361,13 +1364,15 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
+            // Emit both for compatibility
+            io.to(driverSocketId).emit("new-ride", updatedBooking);
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
                 assignment_type: isPreJob ? "pre_job" : "allocate_driver",
                 message: notifMessage,
                 booking: updatedBooking
             });
-            console.log(`📲 [AssignDriver] Socket event sent to Driver #${driver_id}`);
+            console.log(`📲 [AssignDriver] Socket events ('new-ride' & 'new-ride-request') sent to Driver #${driver_id}`);
         }
 
         // Notify dispatchers about the assignment so it shows up in their notifications
@@ -2204,7 +2209,13 @@ app.post("/send-new-ride", (req, res) => {
     drivers.forEach(driverId => {
         const socketId = driverSockets.get(driverId.toString());
         if (socketId) {
+            // Emit both for compatibility
             io.to(socketId).emit("new-ride", booking);
+            io.to(socketId).emit("new-ride-request", {
+                booking_id: booking.id,
+                message: "New ride available",
+                booking: booking
+            });
             sentCount++;
         }
     });
