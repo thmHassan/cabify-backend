@@ -431,14 +431,8 @@ class BookingController extends Controller
             $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                $checkImmediate = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")
-                    ->where("steps", "immediately_show_on_dispatcher_panel")
-                    ->where("status", "enable")
-                    ->first();
-                
-                if($checkImmediate){
-                    AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                }
+                AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
+                // AutoDispatchPlotSocketService::dispatch($newBooking, 0);
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));

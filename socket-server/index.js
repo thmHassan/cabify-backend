@@ -2204,23 +2204,40 @@ app.post("/bookings/broadcast", async (req, res) => {
     }
 });
 
-app.post("/send-new-ride", (req, res) => {
-    const { drivers, booking } = req.body;
-    let sentCount = 0;
-    drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
-        if (socketId) {
-            // Emit both for compatibility
-            io.to(socketId).emit("new-ride", booking);
-            io.to(socketId).emit("new-ride-request", {
-                booking_id: booking.id,
-                message: "New ride available",
-                booking: booking
-            });
-            sentCount++;
+app.post("/send-new-ride", async (req, res) => {
+    try {
+        const { drivers, booking, tenantDb } = req.body;
+        const db = getConnection(tenantDb || req.tenantDb);
+        let sentCount = 0;
+
+        for (const driverId of drivers) {
+            const socketId = driverSockets.get(driverId.toString());
+            if (socketId) {
+                // Emit both for compatibility
+                io.to(socketId).emit("new-ride", booking);
+                io.to(socketId).emit("new-ride-request", {
+                    booking_id: booking.id,
+                    message: "New ride available",
+                    booking: booking
+                });
+                sentCount++;
+            }
+
+            // Send Push Notification
+            try {
+                await sendNotificationToDriver(db, driverId, "New Ride Available", "You have a new ride request", {
+                    booking_id: String(booking.id),
+                    type: "new_ride"
+                });
+            } catch (notifErr) {
+                console.error("❌ Notification error in /send-new-ride:", notifErr.message);
+            }
         }
-    });
-    return res.json({ success: true, sent_to: sentCount });
+        return res.json({ success: true, sent_to: sentCount });
+    } catch (error) {
+        console.error("/send-new-ride error:", error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 app.post("/send-notification-dispatcher", (req, res) => {
