@@ -248,11 +248,10 @@ const autoDispatchRide = async ({
             booking: updatedBooking
         };
 
-        // Emit Socket Events to Driver (both for compatibility)
+        // Emit Socket Event to Driver (ONLY new-ride-request for popup)
         if (driverSocketId) {
-            io.to(driverSocketId).emit("new-ride", updatedBooking);
             io.to(driverSocketId).emit("new-ride-request", rideRequestPayload);
-            console.log(`📲 [AutoDispatch] Socket events ('new-ride' & 'new-ride-request') sent to Driver #${driver.id}`);
+            console.log(`📲 [AutoDispatch] Socket event 'new-ride-request' sent to Driver #${driver.id}`);
         }
 
         // Notify all dispatchers/admins about the dispatch
@@ -1366,15 +1365,14 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
-            // Emit both for compatibility
-            io.to(driverSocketId).emit("new-ride", updatedBooking);
+            // Emit ONLY new-ride-request for assignment popup
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
                 assignment_type: isPreJob ? "pre_job" : "allocate_driver",
                 message: notifMessage,
                 booking: updatedBooking
             });
-            console.log(`📲 [AssignDriver] Socket events ('new-ride' & 'new-ride-request') sent to Driver #${driver_id}`);
+            console.log(`📲 [AssignDriver] Socket event 'new-ride-request' sent to Driver #${driver_id}`);
         }
 
         // Notify dispatchers about the assignment so it shows up in their notifications
@@ -1838,7 +1836,8 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         // Notify Driver via Socket (Only if assigned)
         if (booking.driver) {
-            const driverSocketId = driverSockets.get(booking.driver.toString());
+            const driverId = booking.driver.toString();
+            const driverSocketId = driverSockets.get(driverId);
             if (driverSocketId) {
                 io.to(driverSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -1846,7 +1845,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                     message: `Ride status updated to ${booking_status}`
                 });
 
-                if (booking_status === 'cancelled') {
+                if (booking_status === 'cancelled' || booking_status === 'cancel') {
                     io.to(driverSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
@@ -1858,7 +1857,8 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         // Notify User/Customer via Socket
         if (booking.user_id) {
-            const userSocketId = userSockets.get(booking.user_id.toString());
+            const userId = booking.user_id.toString();
+            const userSocketId = userSockets.get(userId);
             if (userSocketId) {
                 io.to(userSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -1866,7 +1866,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                     message: `Your ride status has been updated to ${booking_status}`
                 });
 
-                if (booking_status === 'cancelled') {
+                if (booking_status === 'cancelled' || booking_status === 'cancel') {
                     io.to(userSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
@@ -2204,6 +2204,12 @@ app.post("/bookings/broadcast", async (req, res) => {
 
         clientSockets.forEach((socketId) => {
             io.to(socketId).emit("new-booking-event", booking);
+            sentCount++;
+        });
+
+        // BROADCAST: Notify all connected drivers about the new available ride
+        driverSockets.forEach((socketId) => {
+            io.to(socketId).emit("new-ride", booking);
             sentCount++;
         });
 
