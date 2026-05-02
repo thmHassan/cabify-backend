@@ -228,10 +228,10 @@ const autoDispatchRide = async ({
         const driver = drivers[driverIndex];
         console.log(`🎯 [AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
 
-        // Update booking with the assigned driver
+        // Update booking with the assigned driver and lock in the offered amount
         await db.query(
-            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = 'pending_acceptance' WHERE id = ?`,
-            [driver.id, bookingId]
+            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = 'pending_acceptance', booking_amount = ? WHERE id = ?`,
+            [driver.id, booking.offered_amount, bookingId]
         );
 
         // Fetch updated booking to send to driver
@@ -1338,8 +1338,8 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         }
 
         const [driverRows] = await db.query(
-            "SELECT id, name, phone_no, driving_status, offered_amount FROM drivers WHERE id = ?",
-            [driver_id, bookingRows[0].offered_amount, id]
+            "SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?",
+            [driver_id]
         );
         if (driverRows.length === 0) {
             return res.status(404).json({ success: false, message: "Driver not found" });
@@ -1349,8 +1349,8 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
 
         await db.query(
-            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = ? WHERE id = ?`,
-            [driver_id, newStatus, id]
+            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = ?, booking_amount = ? WHERE id = ?`,
+            [driver_id, newStatus, bookingRows[0].offered_amount, id]
         );
 
         // Fetch updated booking for socket payload
