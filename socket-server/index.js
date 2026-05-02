@@ -1348,9 +1348,10 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const isPreJob = assignment_type === "pre_job";
         const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
 
+
         await db.query(
-            `UPDATE bookings SET driver = ?, driver_response = 'pending', booking_status = ?, booking_amount = ? WHERE id = ?`,
-            [driver_id, newStatus, bookingRows[0].offered_amount, id]
+            `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
+            [driver_id, bookingRows[0].offered_amount, id]
         );
 
         // Fetch updated booking for socket payload
