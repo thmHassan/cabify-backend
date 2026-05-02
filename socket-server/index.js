@@ -158,10 +158,10 @@ const autoDispatchRide = async ({
         let driverQuery = `SELECT * FROM drivers WHERE driving_status = 'idle' AND plot_id = ?`;
         let queryParams = [currentPlotId];
 
-        if (booking.vehicle) {
-            driverQuery += ` AND vehicle_type = ?`;
-            queryParams.push(booking.vehicle);
-        }
+        // if (booking.vehicle) {
+        //     driverQuery += ` AND vehicle_type = ?`;
+        //     queryParams.push(booking.vehicle);
+        // }
 
         driverQuery += ` ORDER BY priority_plot ASC`;
 
@@ -170,10 +170,10 @@ const autoDispatchRide = async ({
         // 2. Nearest Driver Fallback (within 10km) if no drivers found in current plot on first try
         if (!drivers.length && driverIndex === 0) {
             console.log(`📡 [AutoDispatch] Plot ma koi driver nathi. Nearest driver shodhi rahya chhie (10km)... Location: ${booking.pickup_point}`);
-            
+
             if (booking.pickup_point && booking.pickup_point.includes(',')) {
                 const [lat, lng] = booking.pickup_point.split(",").map(c => parseFloat(c.trim()));
-                
+
                 let nearestQuery = `
                     SELECT *, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance 
                     FROM drivers 
@@ -181,10 +181,10 @@ const autoDispatchRide = async ({
                 `;
                 let nearestParams = [lat, lng, lat];
 
-                if (booking.vehicle) {
-                    nearestQuery += ` AND vehicle_type = ?`;
-                    nearestParams.push(booking.vehicle);
-                }
+                // if (booking.vehicle) {
+                //     nearestQuery += ` AND vehicle_type = ?`;
+                //     nearestParams.push(booking.vehicle);
+                // }
 
                 nearestQuery += ` HAVING distance < 10 ORDER BY distance ASC LIMIT 5`;
 
