@@ -234,35 +234,32 @@ const autoDispatchRide = async ({
             [driver.id, bookingId]
         );
 
+        // Fetch updated booking to send to driver
+        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
+        const updatedBooking = updatedBookingRows[0];
+
         const driverSocketId = driverSockets.get(driver.id.toString());
         console.log(`📱 [AutoDispatch] Driver Socket ID: ${driverSocketId || 'N/A (Not Connected)'}`);
 
         // Emit Socket Event
         if (driverSocketId) {
-            const socketPayload = {
-                ...booking,
-                driver: driver.id,
-                auto_dispatch: true
-            };
-
-            // Emit both events for backward/forward compatibility
-            io.to(driverSocketId).emit("new-ride", socketPayload);
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: booking.id,
                 message: "You have a new ride request",
-                booking: socketPayload
+                booking: { ...booking, driver: driver.id }
             });
-
-            console.log(`📲 [AutoDispatch] Socket event ('new-ride' & 'new-ride-request') sent to Driver #${driver.id}`);
-        } else {
-            console.log(`⚠️ [AutoDispatch] Driver #${driver.id} found but NOT connected via socket. Event not sent.`);
+            console.log(`📲 [AutoDispatch] Socket event sent to Driver #${driver.id}`);
         }
+
+        // Notify all dispatchers/admins about the dispatch
+        dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
+        adminSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
 
         // Send Push Notification
         try {
             console.log(`📩 [AutoDispatch] Sending Push Notification to Driver #${driver.id}...`);
             await sendNotificationToDriver(db, driver.id, "New Ride Available", "You have a new ride request", {
-                booking_id: String(booking.id),
+                booking_id: String(updatedBooking.id),
                 type: "new_ride"
             });
         } catch (notifErr) {
@@ -1330,7 +1327,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookingRows] = await db.query(
-            "SELECT id, booking_status, booking_id, offered_amount FROM bookings WHERE id = ?",
+            "SELECT id, booking_status, booking_id FROM bookings WHERE id = ?",
             [id]
         );
         if (bookingRows.length === 0) {
@@ -1345,28 +1342,42 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             return res.status(404).json({ success: false, message: "Driver not found" });
         }
 
+        const isPreJob = assignment_type === "pre_job";
+        const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
+
         await db.query(
-            `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
-            [driver_id, bookingRows[0].offered_amount, id]
+            `UPDATE bookings SET driver = ? WHERE id = ?`,
+            [driver_id, id]
         );
 
-        const isPreJob = assignment_type === "pre_job";
+        // Fetch updated booking for socket payload
+        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
+        const updatedBooking = updatedBookingRows[0];
+
         const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
         const notifMessage = isPreJob
-            ? `You have a pre-job assigned for ride #${bookingRows[0].booking_id}. Please accept or reject.`
-            : `You have been assigned a new ride #${bookingRows[0].booking_id}. Please accept or reject.`;
+            ? `You have a pre-job assigned for ride #${updatedBooking.booking_id}. Please accept or reject.`
+            : `You have been assigned a new ride #${updatedBooking.booking_id}. Please accept or reject.`;
 
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
-            io.to(driverSocketId).emit("job-assignment-request", {
+            io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
                 assignment_type: isPreJob ? "pre_job" : "allocate_driver",
                 message: notifMessage,
+                booking: updatedBooking
             });
+            console.log(`📲 [AssignDriver] Socket event sent to Driver #${driver_id}`);
         }
 
+        // Notify dispatchers about the assignment so it shows up in their notifications
+        dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
+
         try {
-            await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, { booking_id: String(id) });
+            await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, {
+                booking_id: String(id),
+                type: "new_ride"
+            });
             console.log("✅ Notification sent to driver:", driverRows[0].name);
         } catch (fcmError) {
             console.error("⚠️ FCM failed (non-fatal):", fcmError.message);
@@ -1541,6 +1552,12 @@ app.post("/driver/accept-ride", async (req, res) => {
         const { ride_id } = req.body;
         const db = getConnection(req.tenantDb);
 
+        // UPDATE DB: Mark the ride as accepted by the driver
+        await db.query(
+            `UPDATE bookings SET driver_response = 'accepted', booking_status = 'ongoing' WHERE id = ?`,
+            [ride_id]
+        );
+
         const [updatedBookings] = await db.query(`
             SELECT 
                 b.*,
@@ -1630,6 +1647,12 @@ app.post("/driver/cancel-ride", async (req, res) => {
         const { ride_id, cancel_reason } = req.body;
 
         const db = getConnection(req.tenantDb);
+
+        // UPDATE DB: Reset the booking so it can be re-assigned or picked up by auto-dispatch
+        await db.query(
+            `UPDATE bookings SET driver = NULL, driver_response = NULL, booking_status = 'pending' WHERE id = ?`,
+            [ride_id]
+        );
 
         const [bookings] = await db.query(`
             SELECT 
@@ -1806,6 +1829,39 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         await db.query(updateQuery, params);
 
+        // Notify Driver via Socket
+        if (booking.driver) {
+            const driverSocketId = driverSockets.get(booking.driver.toString());
+            if (driverSocketId) {
+                io.to(driverSocketId).emit("booking-status-updated", {
+                    booking_id: id,
+                    status: booking_status,
+                    message: `Ride status updated to ${booking_status}`
+                });
+            }
+        }
+
+        // Notify User via Socket
+        if (booking.user_id) {
+            const userSocketId = userSockets.get(booking.user_id.toString());
+            if (userSocketId) {
+                io.to(userSocketId).emit("booking-status-updated", {
+                    booking_id: id,
+                    status: booking_status,
+                    message: `Your ride status has been updated to ${booking_status}`
+                });
+            }
+        }
+
+        // Notify Dispatchers via Socket
+        const statusUpdateData = {
+            booking_id: id,
+            status: booking_status,
+            message: `Booking #${booking.booking_id} status updated to ${booking_status}`
+        };
+        dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-status-updated", statusUpdateData));
+        adminSockets.forEach((sid) => io.to(sid).emit("booking-status-updated", statusUpdateData));
+
         // Fetch updated booking for socket payload
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         const updatedBooking = updatedBookingRows[0];
@@ -1848,11 +1904,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             else if (['ongoing', 'started', 'arrived'].includes(booking_status)) driverStatus = 'busy';
             if (driverStatus) {
                 await db.query("UPDATE drivers SET driving_status = ? WHERE id = ?", [driverStatus, booking.driver]);
-
-                // Also notify about driver status change
-                const statusEvent = { driver_id: booking.driver, status: driverStatus };
-                dispatcherSockets.forEach((sid) => io.to(sid).emit("driver-status-changed", statusEvent));
-                adminSockets.forEach((sid) => io.to(sid).emit("driver-status-changed", statusEvent));
             }
         }
 
