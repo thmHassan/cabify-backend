@@ -1859,6 +1859,8 @@ app.put("/bookings/:id/status", async (req, res) => {
         if (booking.user_id) {
             const userId = booking.user_id.toString();
             const userSocketId = userSockets.get(userId);
+            console.log(`👤 Notifying Customer ${userId} - Socket: ${userSocketId || 'N/A'}`);
+            
             if (userSocketId) {
                 io.to(userSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -1867,6 +1869,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                 });
 
                 if (booking_status === 'cancelled' || booking_status === 'cancel') {
+                    console.log(`📤 Sending booking-cancelled-event to Customer ${userId}`);
                     io.to(userSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
@@ -2236,8 +2239,7 @@ app.post("/send-new-ride", async (req, res) => {
         for (const driverId of drivers) {
             const socketId = driverSockets.get(driverId.toString());
             if (socketId) {
-                // Emit both for compatibility
-                io.to(socketId).emit("new-ride", booking);
+                // Emit ONLY new-ride-request for assignment popup
                 io.to(socketId).emit("new-ride-request", {
                     booking_id: booking.id,
                     message: "New ride available",
