@@ -1321,7 +1321,7 @@ app.get("/bookings/:id", async (req, res) => {
 app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
-        const { driver_id, assignment_type, } = req.body;
+        const { driver_id, assignment_type } = req.body;
 
         if (!driver_id) {
             return res.status(400).json({ success: false, message: "Driver ID is required" });
@@ -1347,7 +1347,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         await db.query(
             `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
-            [driver_id, bookingRows.offered_amount, id]
+            [driver_id, bookingRows[0].offered_amount, id]
         );
 
         const isPreJob = assignment_type === "pre_job";
