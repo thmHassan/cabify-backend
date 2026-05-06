@@ -1813,6 +1813,7 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
+        let { booking_status, cancel_reason, cancelled_by } = req.body;
         // Local variable for socket messages, separate from DB value
         let cancelled_by_actor = cancelled_by || 'admin';
 
