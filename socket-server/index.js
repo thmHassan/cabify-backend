@@ -1813,7 +1813,12 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
-        const { booking_status, cancel_reason, cancelled_by } = req.body;
+        let { booking_status, cancel_reason, cancelled_by } = req.body;
+
+        // If cancelled via this route (Admin/Dispatcher) and cancelled_by is not provided, default to admin
+        if (booking_status === 'cancelled' && !cancelled_by) {
+            cancelled_by = 'admin';
+        }
 
         if (!booking_status) return res.status(400).json({ success: false, message: "booking_status is required" });
 
@@ -1828,7 +1833,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         if (booking_status === 'cancelled') {
             if (cancel_reason) { updateQuery += ", cancel_reason = ?"; params.push(cancel_reason); }
-            if (cancelled_by) { updateQuery += ", cancelled_by = ?"; params.push(cancelled_by); }
+            updateQuery += ", cancelled_by = ?"; params.push(cancelled_by || 'admin');
         }
         updateQuery += " WHERE id = ?";
         params.push(id);
@@ -1874,7 +1879,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                     io.to(userSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
-                        message: `Your ride #${booking.booking_id} has been cancelled.`
+                        message: cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`
                     });
                 }
             }
