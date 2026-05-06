@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::table('bookings', function (Blueprint $table) {
             $table->text("cancel_reason")->nullable();
-            $table->enum("cancelled_by", ['user', 'driver'])->default('user');
+            $table->enum("cancelled_by", ['user', 'driver', 'admin', 'dispatcher'])->default('user');
         });
     }
 

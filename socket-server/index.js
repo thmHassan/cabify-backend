@@ -1813,12 +1813,8 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
-        let { booking_status, cancel_reason, cancelled_by } = req.body;
-
-        // If cancelled via this route (Admin/Dispatcher) and cancelled_by is not provided, default to admin
-        if (booking_status === 'cancelled' && !cancelled_by) {
-            cancelled_by = 'admin';
-        }
+        // Local variable for socket messages, separate from DB value
+        let cancelled_by_actor = cancelled_by || 'admin';
 
         if (!booking_status) return res.status(400).json({ success: false, message: "booking_status is required" });
 
@@ -1833,7 +1829,10 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         if (booking_status === 'cancelled') {
             if (cancel_reason) { updateQuery += ", cancel_reason = ?"; params.push(cancel_reason); }
-            updateQuery += ", cancelled_by = ?"; params.push(cancelled_by || 'admin');
+            // Only update DB if value is valid for the ENUM ('user', 'driver')
+            if (cancelled_by === 'user' || cancelled_by === 'driver') {
+                updateQuery += ", cancelled_by = ?"; params.push(cancelled_by);
+            }
         }
         updateQuery += " WHERE id = ?";
         params.push(id);
@@ -1855,7 +1854,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                     io.to(driverSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
-                        message: cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`
+                        message: cancelled_by_actor === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`
                     });
                 }
             }
@@ -1866,7 +1865,7 @@ app.put("/bookings/:id/status", async (req, res) => {
             const userId = booking.user_id.toString();
             const userSocketId = userSockets.get(userId);
             console.log(`👤 Notifying Customer ${userId} - Socket: ${userSocketId || 'N/A'}`);
-            
+
             if (userSocketId) {
                 io.to(userSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -1879,7 +1878,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                     io.to(userSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
-                        message: cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`
+                        message: cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`
                     });
                 }
             }
@@ -1897,7 +1896,15 @@ app.put("/bookings/:id/status", async (req, res) => {
         // Fetch updated booking for socket payload
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         const updatedBooking = updatedBookingRows[0];
-        const socketPayload = { status: booking_status, booking: updatedBooking };
+
+        // Ensure the payload reflects the correct actor even if DB couldn't store 'admin'
+        const socketPayload = {
+            status: booking_status,
+            booking: {
+                ...updatedBooking,
+                cancelled_by: cancelled_by_actor === 'admin' ? 'admin' : updatedBooking.cancelled_by
+            }
+        };
 
         // 1. Notify User/Customer via Socket
         if (updatedBooking.user_id) {
@@ -1923,7 +1930,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                 booking_id: id,
                 booking_reference: updatedBooking.booking_id,
                 message: `Booking #${updatedBooking.booking_id} has been cancelled`,
-                cancelled_by: cancelled_by
+                cancelled_by: cancelled_by_actor
             };
             dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
             adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
@@ -1947,9 +1954,9 @@ app.put("/bookings/:id/status", async (req, res) => {
             );
 
             if (booking_status === 'cancelled') {
-                const cancelledByText = cancelled_by === 'user' ? 'customer' : 'Admin or Dispatcher';
+                const cancelledByText = cancelled_by_actor === 'user' ? 'customer' : 'Admin or Dispatcher';
                 const notifTitle = "Ride Cancelled";
-                const notifMessage = cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
+                const notifMessage = cancelled_by_actor === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
 
                 try {
                     await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
