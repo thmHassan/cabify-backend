@@ -688,7 +688,8 @@ class BookingController extends Controller
                         'destination_point' => $booking->destination_point,
                         'offered_amount' => $booking->offered_amount,
                         'distance' => $booking->distance,
-                        'type' => 'auto_dispatch_plot'
+                        'type' => 'auto_dispatch_plot',
+                        'cancelled_by' => 'user'
                     ]
                 ]);
 

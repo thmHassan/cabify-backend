@@ -1850,7 +1850,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                     io.to(driverSocketId).emit("booking-cancelled-event", {
                         booking_id: id,
                         booking: booking,
-                        message: `Ride #${booking.booking_id} has been cancelled by dispatcher.`
+                        message: cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`
                     });
                 }
             }
@@ -1942,9 +1942,9 @@ app.put("/bookings/:id/status", async (req, res) => {
             );
 
             if (booking_status === 'cancelled') {
-                const cancelledByText = cancelled_by === 'user' ? 'Rider' : 'Admin';
+                const cancelledByText = cancelled_by === 'user' ? 'customer' : 'Admin or Dispatcher';
                 const notifTitle = "Ride Cancelled";
-                const notifMessage = `Ride #${booking.booking_id} has been cancelled by ${cancelledByText}`;
+                const notifMessage = cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
 
                 try {
                     await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
@@ -2355,7 +2355,7 @@ app.post("/change-ride-status", async (req, res) => {
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         const cancelNotif = {
             booking_id: booking.id,
-            message: `Booking #${booking.booking_id} has been cancelled`
+            message: status === "cancel_confirm_ride" ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} has been cancelled`
         };
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
@@ -2396,7 +2396,7 @@ app.post("/change-driver-ride-status", async (req, res) => {
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         const cancelNotif = {
             booking_id: booking.id,
-            message: `Booking #${booking.booking_id} has been cancelled`
+            message: status === "cancel_confirm_ride" ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} is cancelled by Admin or Dispatcher`
         };
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
