@@ -76,6 +76,7 @@ class SettingController extends Controller
                     'google_api_key' => $tenant->google_api_key,
                     'maps_api' => $tenant->maps_api,
                     'search_api' => $tenant->search_api,
+                    'country_of_use' => $tenant->country_of_use,
                 ]
             ]);
         } catch (\Exception $e) {
