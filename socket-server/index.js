@@ -92,23 +92,17 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
             cancelled: counts.cancelled
         };
 
-        console.log("Broadcasting dashboard cards update:", dashboardData);
+        const dbName = tenantDb.startsWith("tenant") ? tenantDb.replace("tenant", "") : tenantDb;
 
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("dashboard-cards-update", dashboardData);
-        });
+        console.log("Broadcasting dashboard cards update to company:", dbName);
 
-        adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("dashboard-cards-update", dashboardData);
-        });
-
-        clientSockets.forEach((socketId) => {
-            io.to(socketId).emit("dashboard-cards-update", dashboardData);
-        });
+        io.to(`dispatcher_${dbName}`).emit("dashboard-cards-update", dashboardData);
+        io.to(`admin_${dbName}`).emit("dashboard-cards-update", dashboardData);
+        io.to(`client_${dbName}`).emit("dashboard-cards-update", dashboardData);
 
         return dashboardData;
     } catch (error) {
-        console.error("❌ Error broadcasting dashboard cards:", error);
+        console.error("Error broadcasting dashboard cards:", error);
         return null;
     }
 };
@@ -122,37 +116,35 @@ const autoDispatchRide = async ({
 }) => {
     try {
         const db = getConnection(tenantDb);
-        console.log(`\n--- 🚀 [AutoDispatch] Start: Booking #${bookingId} [${tenantDb}] ---`);
+        console.log(`[AutoDispatch] Start: Booking #${bookingId} [${tenantDb}]`);
 
         const [bookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
         if (!bookingRows.length) {
-            console.log(`❌ [AutoDispatch] Booking #${bookingId} not found in DB.`);
+            console.log(`[AutoDispatch] Booking #${bookingId} not found in DB.`);
             return;
         }
         const booking = bookingRows[0];
-        console.log(`📋 [AutoDispatch] Booking Details: Status=${booking.booking_status}, Vehicle=${booking.vehicle}, PickupPlot=${booking.pickup_plot_id}`);
+        console.log(`[AutoDispatch] Booking Details: Status=${booking.booking_status}, Vehicle=${booking.vehicle}, PickupPlot=${booking.pickup_plot_id}`);
 
-        // Status checks
         if (booking.booking_status === "cancelled" || booking.booking_status === "completed") {
-            console.log(`⏹ [AutoDispatch] Ride is already ${booking.booking_status}. Stopping.`);
+            console.log(`[AutoDispatch] Ride is already ${booking.booking_status}. Stopping.`);
             return;
         }
         if (booking.driver && booking.driver_response === "accepted") {
-            console.log(`✅ [AutoDispatch] Ride already accepted by Driver #${booking.driver}. Stopping.`);
+            console.log(`[AutoDispatch] Ride already accepted by Driver #${booking.driver}. Stopping.`);
             return;
         }
 
-        // Determine current Plot ID
         if (!currentPlotId) {
             currentPlotId = booking.pickup_plot_id || booking.destination_plot_id;
         }
 
         if (!currentPlotId) {
-            console.log("❌ [AutoDispatch] No plot assigned to this booking.");
+            console.log("[AutoDispatch] No plot assigned to this booking.");
             return;
         }
 
-        console.log(`🔍 [AutoDispatch] Checking Plot ID: ${currentPlotId} (Driver Index: ${driverIndex})`);
+        console.log(`[AutoDispatch] Checking Plot ID: ${currentPlotId} (Driver Index: ${driverIndex})`);
 
         // 1. Plot-based driver search
         let driverQuery = `SELECT * FROM drivers WHERE driving_status = 'idle' AND plot_id = ?`;
@@ -190,14 +182,14 @@ const autoDispatchRide = async ({
 
                 const [nearestDrivers] = await db.query(nearestQuery, nearestParams);
                 if (nearestDrivers.length > 0) {
-                    console.log(`✅ [AutoDispatch] ${nearestDrivers.length} nearest drivers found within 10km.`);
+                    console.log(`[AutoDispatch] ${nearestDrivers.length} nearest drivers found within 10km.`);
                     drivers = nearestDrivers;
                 }
             }
         }
 
         if (!drivers.length || driverIndex >= drivers.length) {
-            console.log(`➡ [AutoDispatch] No (more) drivers in plot ${currentPlotId}. Checking backup plots...`);
+            console.log(`[AutoDispatch] No (more) drivers in plot ${currentPlotId}. Checking backup plots...`);
 
             if (!visitedPlots.includes(currentPlotId)) visitedPlots.push(currentPlotId);
 
@@ -207,7 +199,7 @@ const autoDispatchRide = async ({
             const nextPlot = backupPlots.find(p => !visitedPlots.includes(p));
 
             if (nextPlot) {
-                console.log(`🔃 [AutoDispatch] Moving to Backup Plot: ${nextPlot}`);
+                console.log(`[AutoDispatch] Moving to Backup Plot: ${nextPlot}`);
                 return autoDispatchRide({
                     bookingId,
                     tenantDb,
@@ -216,7 +208,7 @@ const autoDispatchRide = async ({
                     visitedPlots
                 });
             } else {
-                console.log("❌ [AutoDispatch] All plots exhausted. No drivers found.");
+                console.log("[AutoDispatch] All plots exhausted. No drivers found.");
                 io.emit("auto-dispatch-failed", {
                     booking_id: bookingId,
                     message: "No drivers available in assigned or backup plots."
@@ -226,7 +218,7 @@ const autoDispatchRide = async ({
         }
 
         const driver = drivers[driverIndex];
-        console.log(`🎯 [AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
+        console.log(`[AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
 
         // Update booking with the assigned driver and lock in the offered amount
         await db.query(
@@ -240,7 +232,7 @@ const autoDispatchRide = async ({
         const updatedBooking = updatedBookingRows[0];
 
         const driverSocketId = driverSockets.get(driver.id.toString());
-        console.log(`📱 [AutoDispatch] Driver Socket ID: ${driverSocketId || 'N/A (Not Connected)'}`);
+        console.log(`[AutoDispatch] Driver Socket ID: ${driverSocketId || 'N/A (Not Connected)'}`);
 
         const rideRequestPayload = {
             booking_id: updatedBooking.id,
@@ -251,7 +243,7 @@ const autoDispatchRide = async ({
         // Emit Socket Event to Driver (ONLY new-ride-request for popup)
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride-request", rideRequestPayload);
-            console.log(`📲 [AutoDispatch] Socket event 'new-ride-request' sent to Driver #${driver.id}`);
+            console.log(`[AutoDispatch] Socket event 'new-ride-request' sent to Driver #${driver.id}`);
         }
 
         // Notify all dispatchers/admins about the dispatch
@@ -260,18 +252,17 @@ const autoDispatchRide = async ({
 
         // Send Push Notification
         try {
-            console.log(`📩 [AutoDispatch] Sending Push Notification to Driver #${driver.id}...`);
+            console.log(`[AutoDispatch] Sending Push Notification to Driver #${driver.id}...`);
             await sendNotificationToDriver(db, driver.id, "New Ride Available", "You have a new ride request", {
                 booking_id: String(updatedBooking.id),
                 type: "new_ride"
             });
         } catch (notifErr) {
-            console.error("❌ [AutoDispatch] Notification error:", notifErr.message);
+            console.error("[AutoDispatch] Notification error:", notifErr.message);
         }
 
-        console.log(`--- 🏁 [AutoDispatch] Processing Timeout ---`);
+        console.log(`[AutoDispatch] Processing Timeout`);
 
-        // 30-second timeout for driver response
         setTimeout(async () => {
             try {
                 const [checkRows] = await db.query(
@@ -283,18 +274,17 @@ const autoDispatchRide = async ({
                 const { driver_response, booking_status } = checkRows[0];
 
                 if (driver_response === "accepted") {
-                    console.log(`🎉 [AutoDispatch] Ride #${bookingId} accepted by ${driver.name}`);
+                    console.log(`[AutoDispatch] Ride #${bookingId} accepted by ${driver.name}`);
                     return;
                 }
 
                 if (booking_status === "cancelled") {
-                    console.log(`🚫 [AutoDispatch] Ride #${bookingId} was cancelled during dispatch.`);
+                    console.log(`[AutoDispatch] Ride #${bookingId} was cancelled during dispatch.`);
                     return;
                 }
 
-                console.log(`⏰ [AutoDispatch] Timeout: Driver ${driver.name} did not respond. Trying next driver...`);
+                console.log(`[AutoDispatch] Timeout: Driver ${driver.name} did not respond. Trying next driver...`);
 
-                // Reset driver for this booking before moving to next
                 await db.query(`UPDATE bookings SET driver = NULL, driver_response = NULL WHERE id = ?`, [bookingId]);
 
                 autoDispatchRide({
@@ -306,12 +296,12 @@ const autoDispatchRide = async ({
                 });
 
             } catch (timeoutErr) {
-                console.error("❌ [AutoDispatch] Timeout check error:", timeoutErr.message);
+                console.error("[AutoDispatch] Timeout check error:", timeoutErr.message);
             }
         }, 30000);
 
     } catch (error) {
-        console.error("❌ [AutoDispatch] Error:", error.message);
+        console.error("[AutoDispatch] Error:", error.message);
     }
 };
 
@@ -347,36 +337,32 @@ io.on("connection", (socket) => {
     const userId = socket.handshake.query.user_id || socket.handshake.query.customer_id;
     const clientId = socket.handshake.query.client_id;
     const adminId = socket.handshake.query.admin_id;
+    const database = socket.handshake.query.database;
+
+    if (database) {
+        socket.join(database);
+        if (role) {
+            socket.join(`${role}_${database}`);
+        }
+        socket.database = database;
+        console.log(`Socket connected: Role=${role}, ID=${driverId || dispatcherId || userId || adminId || clientId}, DB=${database}`);
+    }
 
     if (role === "dispatcher" && dispatcherId) {
         dispatcherSockets.set(dispatcherId.toString(), socket.id);
-        console.log(`✅ Dispatcher ${dispatcherId} connected`);
     }
     if ((role === "user" || role === "customer") && userId) {
         userSockets.set(userId.toString(), socket.id);
-        console.log(`✅ Customer/User ${userId} connected`);
     }
     if (role === "client" && clientId) {
         clientSockets.set(clientId.toString(), socket.id);
     }
     if (role === "admin" && adminId) {
         adminSockets.set(adminId.toString(), socket.id);
-        console.log(`✅ Admin ${adminId} connected`);
     }
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
-    }
 
-    if (driverId) {
-        driverSockets.set(driverId.toString(), socket.id);
-        console.log(`Driver ${driverId} connected`);
-
-        const database = socket.handshake.query.database;
-
-        if (!database) {
-            console.log("❌ No database provided in query");
-            return;
-        }
         (async () => {
             try {
                 const db = getConnection(`tenant${database}`);
@@ -410,19 +396,11 @@ io.on("connection", (socket) => {
                         rank: driver.priority_plot ?? "-"
                     };
 
-                    console.log("🔥 Emitting waiting-driver-event:", emitData);
+                    console.log(`Emitting waiting-driver-event to company ${database}:`, emitData);
 
-                    dispatcherSockets.forEach((sid) => {
-                        io.to(sid).emit("waiting-driver-event", emitData);
-                    });
-
-                    clientSockets.forEach((sid) => {
-                        io.to(sid).emit("waiting-driver-event", emitData);
-                    });
-
-                    adminSockets.forEach((sid) => {
-                        io.to(sid).emit("waiting-driver-event", emitData);
-                    });
+                    io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
+                    io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
+                    io.to(`client_${database}`).emit("waiting-driver-event", emitData);
                 }
 
             } catch (err) {
@@ -459,7 +437,7 @@ io.on("connection", (socket) => {
                         );
                     }
                 } catch (dbErr) {
-                    console.error("❌ Database update error in driver-location:", dbErr.message);
+                    console.error("Database update error in driver-location:", dbErr.message);
                 }
             }
 
@@ -476,8 +454,8 @@ io.on("connection", (socket) => {
 
             const driver = response.data.driver;
             if (driver) {
-                // Broadcast the updated driver location to all clients
-                socket.broadcast.emit("driver-location-update", driver);
+                // Broadcast the updated driver location ONLY to the specific company room
+                io.to(dbName).emit("driver-location-update", driver);
 
                 // Prepare event data for Dashboard lists (Waiting/On Jobs)
                 const eventData = {
@@ -492,19 +470,19 @@ io.on("connection", (socket) => {
                     longitude: driver.longitude
                 };
 
-                // Emit status-specific events to Dispatchers, Admins and Clients
+                // Emit status-specific events ONLY to the relevant company's dispatchers/admins
                 if (driver.driving_status === "idle") {
-                    dispatcherSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", eventData));
-                    adminSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", eventData));
-                    clientSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", eventData));
+                    io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
+                    io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
+                    io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
                 } else if (driver.driving_status === "busy") {
-                    dispatcherSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
-                    adminSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
-                    clientSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+                    io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
+                    io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
+                    io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
                 }
             }
         } catch (err) {
-            console.error("❌ Laravel Socket error:", err.message);
+            console.error("Laravel Socket error:", err.message);
         }
     });
 
@@ -543,7 +521,7 @@ io.on("connection", (socket) => {
         }
         if (role === "dispatcher" && dispatcherId) {
             dispatcherSockets.delete(dispatcherId.toString());
-            console.log(`❌ Dispatcher ${dispatcherId} disconnected`);
+            console.log(`Dispatcher ${dispatcherId} disconnected`);
         }
         if (role === "user" && userId) {
             userSockets.delete(userId.toString());
@@ -553,7 +531,7 @@ io.on("connection", (socket) => {
         }
         if (role === "admin" && adminId) {
             adminSockets.delete(adminId.toString());
-            console.log(`❌ Admin ${adminId} disconnected`);
+            console.log(`Admin ${adminId} disconnected`);
         }
     });
 });
@@ -562,7 +540,7 @@ app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
         req.tenantDb = `tenant${databaseHeader}`;
-        console.log(`📂 Using database: ${req.tenantDb}`);
+        console.log(`Using database: ${req.tenantDb}`);
     }
     next();
 });
@@ -2449,13 +2427,18 @@ app.post("/on-job-driver", async (req, res) => {
 
         console.log("🚕 Emitting on-job-driver-event:", eventData);
 
+        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+
         const socketId = clientSockets.get(clientId?.toString());
         if (socketId) {
             io.to(socketId).emit("on-job-driver-event", eventData);
         }
 
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
-        adminSockets.forEach((sid) => io.to(sid).emit("on-job-driver-event", eventData));
+        if (dbName) {
+            io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
+            io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
+            io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
+        }
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
 
@@ -2527,13 +2510,18 @@ app.post("/waiting-driver", async (req, res) => {
 
         console.log("🔥 Emitting waiting-driver-event:", eventData);
 
+        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+
         const socketId = clientSockets.get(clientId?.toString());
         if (socketId) {
             io.to(socketId).emit("waiting-driver-event", eventData);
         }
 
-        dispatcherSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
-        adminSockets.forEach(sid => io.to(sid).emit("waiting-driver-event", eventData));
+        if (dbName) {
+            io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
+            io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
+            io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+        }
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
 
