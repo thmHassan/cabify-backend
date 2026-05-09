@@ -117,11 +117,14 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
       console.warn(`User ${userId}`);
     }
 
+    const results = [];
     for (const token of tokens) {
       if (token.fcm_token) {
-        await sendToDevice(token.fcm_token, title, body, data);
+        const res = await sendToDevice(token.fcm_token, title, body, data);
+        results.push(res);
       }
     }
+    return results;
 
   } catch (err) {
     console.error("sendNotificationToUser Error:", err.message);

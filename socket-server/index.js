@@ -2350,7 +2350,7 @@ app.post("/change-cancel-ride", async (req, res) => {
         try {
             const userNotifTitle = "Ride Cancelled";
             const userNotifMessage = req.body.cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
-            await sendNotificationToUser(db, targetUserId, userNotifTitle, userNotifMessage, {
+            const res_user = await sendNotificationToUser(db, targetUserId, userNotifTitle, userNotifMessage, {
                 booking_id: String(booking.id),
                 type: "ride_cancelled"
             });
@@ -2387,8 +2387,7 @@ app.post("/change-cancel-ride", async (req, res) => {
             }
         }
     }
-
-    return res.json({ success: true, sent_to: sentCount });
+    return res.json({ success: true, sent_to: sentCount, res_user });
 });
 
 app.post("/send-new-booking", (req, res) => {
