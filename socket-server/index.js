@@ -11,7 +11,7 @@ const PDFDocument = require('pdfkit');
 const axios = require("axios");
 const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
-const { sendNotificationToDriver } = require("./utils/FCMService");
+const { sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
 
 console.log("Loaded VIP Token:", process.env.VIP_WEBHOOK_TOKEN);
 
@@ -1953,6 +1953,21 @@ app.put("/bookings/:id/status", async (req, res) => {
                     console.error("❌ Notification error in ride cancellation:", notifErr.message);
                 }
 
+                // Notify User/Customer via Push Notification
+                if (booking.user_id) {
+                    const userNotifTitle = "Ride Cancelled";
+                    const userNotifMessage = cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
+                    try {
+                        await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                            booking_id: String(id),
+                            type: "ride_cancelled"
+                        });
+                        console.log("✅ Cancel notification sent to user:", booking.user_id);
+                    } catch (userNotifErr) {
+                        console.error("❌ User Notification error in ride cancellation:", userNotifErr.message);
+                    }
+                }
+
             } else if (booking_status === 'completed') {
                 const notifTitle = "Ride Completed";
                 const notifMessage = `Ride #${booking.booking_id} has been marked as completed`;
@@ -2288,10 +2303,17 @@ app.post("/change-cancel-ride", async (req, res) => {
 
     const cancelNotif = {
         booking_id: booking.id,
-        message: `Booking #${booking.booking_id} has been cancelled`
+        booking: booking,
+        message: req.body.cancelled_by === 'user' ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} has been cancelled`
     };
     dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
     adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+    drivers.forEach(driverId => {
+        const socketId = driverSockets.get(driverId.toString());
+        if (socketId) {
+            io.to(socketId).emit("booking-cancelled-event", cancelNotif);
+        }
+    });
 
     return res.json({ success: true, sent_to: sentCount });
 });
@@ -2387,10 +2409,14 @@ app.post("/change-driver-ride-status", async (req, res) => {
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         const cancelNotif = {
             booking_id: booking.id,
+            booking: booking,
             message: status === "cancel_confirm_ride" ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} is cancelled by Admin or Dispatcher`
         };
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+        if (socketId) {
+            io.to(socketId).emit("booking-cancelled-event", cancelNotif);
+        }
     }
 
     return res.json({ success: true });

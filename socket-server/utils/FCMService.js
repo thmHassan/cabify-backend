@@ -97,4 +97,46 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
   }
 };
 
-module.exports = { sendToDevice, sendNotificationToDriver };
+const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
+  try {
+    let [tokens] = await db.query(
+      "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'rider'",
+      [userId]
+    );
+
+    // Fallback: Check users table if no token found in tokens table
+    if (tokens.length === 0) {
+      const [userRows] = await db.query(
+        "SELECT fcm_token, device_token FROM users WHERE id = ?",
+        [userId]
+      );
+      if (userRows.length > 0) {
+        const dToken = userRows[0].fcm_token || userRows[0].device_token;
+        if (dToken) {
+          tokens = [{ fcm_token: dToken }];
+        }
+      }
+    }
+
+    console.log(`🔍 User ${userId} na tokens found:`, tokens.length);
+
+    for (const token of tokens) {
+      if (token.fcm_token) {
+        await sendToDevice(token.fcm_token, title, body, data);
+      }
+    }
+
+    await db.query(
+      `INSERT INTO company_notifications (user_type, user_id, title, message, created_at, updated_at)
+       VALUES ('user', ?, ?, ?, NOW(), NOW())`,
+      [userId, title, body]
+    );
+
+    console.log(`💾 Notification DB ma save thai - User ${userId}`);
+
+  } catch (err) {
+    console.error("❌ sendNotificationToUser Error:", err.message);
+  }
+};
+
+module.exports = { sendToDevice, sendNotificationToDriver, sendNotificationToUser };
