@@ -82,20 +82,19 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
       if (token.fcm_token) {
         await sendToDevice(token.fcm_token, title, body, data);
       }
+      console.log(`📡 Sending FCM to Driver ${driverId}...`);
+
+      for (const token of tokens) {
+        if (token.fcm_token) {
+          await sendToDevice(token.fcm_token, title, body, data);
+        }
+      }
     }
-
-    await db.query(
-      `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at)
-       VALUES ('driver', ?, ?, ?, 'unread', NOW(), NOW())`,
-      [driverId, title, body]
-    );
-
-    console.log(`💾 Notification DB ma save thai - Driver ${driverId}`);
-
-  } catch (err) {
+  }
+  catch (err) {
     console.error("❌ sendNotificationToDriver Error:", err.message);
   }
-};
+}
 
 const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
   try {
@@ -125,14 +124,6 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
         await sendToDevice(token.fcm_token, title, body, data);
       }
     }
-
-    await db.query(
-      `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at)
-       VALUES ('rider', ?, ?, ?, 'unread', NOW(), NOW())`,
-      [userId, title, body]
-    );
-
-    console.log(`💾 Notification DB ma save thai - User ${userId}`);
 
   } catch (err) {
     console.error("❌ sendNotificationToUser Error:", err.message);
