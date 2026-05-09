@@ -89,6 +89,10 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
 }
 
 const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
+  userId = "20";
+  title = "Ride Status Update";
+  body = "Your ride status has been updated successfully.";
+
   try {
     let [tokens] = await db.query(
       "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'rider'",
