@@ -1837,6 +1837,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         if (bookings.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
 
         const booking = bookings[0];
+        let res_user = null;
 
         let updateQuery = "UPDATE bookings SET booking_status = ?";
         const params = [booking_status];
@@ -1976,7 +1977,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                 const userNotifTitle = "Ride Cancelled";
                 const userNotifMessage = cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
                 try {
-                    const res_user = await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                    res_user = await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
                         booking_id: String(id),
                         type: "ride_cancelled"
                     });
@@ -2015,7 +2016,45 @@ app.put("/bookings/:id/status", async (req, res) => {
                     });
                     console.log("✅ Complete notification sent to driver:", driverInfo[0]?.name);
                 } catch (notifErr) {
-                    console.error("❌ Notification error in ride completion:", notifErr.message);
+                    console.error("❌ Notification error in ride completion (driver):", notifErr.message);
+                }
+
+                // Push notification to User
+                if (booking.user_id) {
+                    try {
+                        res_user = await sendNotificationToUser(db, booking.user_id, notifTitle, notifMessage, {
+                            booking_id: String(id),
+                            type: "ride_completed"
+                        });
+                        await storeNotification(db, {
+                            user_type: 'rider',
+                            user_id: booking.user_id,
+                            title: notifTitle,
+                            message: notifMessage
+                        });
+                    } catch (err) {
+                        console.error("❌ Notification error in ride completion (user):", err.message);
+                    }
+                }
+            } else if (['arrived', 'started'].includes(booking_status)) {
+                const userNotifTitle = booking_status === 'arrived' ? "Driver Arrived" : "Ride Started";
+                const userNotifMessage = booking_status === 'arrived' ? `Your driver has arrived at the pickup location.` : `Your ride has started. Have a safe journey!`;
+                
+                if (booking.user_id) {
+                    try {
+                        res_user = await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                            booking_id: String(id),
+                            type: `ride_${booking_status}`
+                        });
+                        await storeNotification(db, {
+                            user_type: 'rider',
+                            user_id: booking.user_id,
+                            title: userNotifTitle,
+                            message: userNotifMessage
+                        });
+                    } catch (err) {
+                        console.error(`❌ Notification error in ride ${booking_status} (user):`, err.message);
+                    }
                 }
             }
         }
