@@ -1933,7 +1933,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             );
 
             if (booking_status === 'cancelled') {
-                const cancelledByText = cancelled_by_actor === 'user' ? 'customer' : 'Admin or Dispatcher';
                 const notifTitle = "Ride Cancelled";
                 const notifMessage = cancelled_by_actor === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
 
@@ -1961,6 +1960,12 @@ app.put("/bookings/:id/status", async (req, res) => {
                         await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
                             booking_id: String(id),
                             type: "ride_cancelled"
+                        });
+                        await storeNotification(db, {
+                            user_type: 'rider',
+                            user_id: booking.user_id,
+                            title: userNotifTitle,
+                            message: userNotifMessage
                         });
                         console.log("✅ Cancel notification sent to user:", booking.user_id);
                     } catch (userNotifErr) {
@@ -2325,6 +2330,12 @@ app.post("/change-cancel-ride", async (req, res) => {
                 booking_id: String(booking.id),
                 type: "ride_cancelled"
             });
+            await storeNotification(db, {
+                user_type: 'rider',
+                user_id: booking.user_id,
+                title: userNotifTitle,
+                message: userNotifMessage
+            });
             console.log("✅ Cancel notification sent to user:", booking.user_id);
         } catch (userNotifErr) {
             console.error("❌ User Notification error in /change-cancel-ride:", userNotifErr.message);
@@ -2443,6 +2454,12 @@ app.post("/change-driver-ride-status", async (req, res) => {
                 await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
                     booking_id: String(booking.id),
                     type: "ride_cancelled"
+                });
+                await storeNotification(db, {
+                    user_type: 'rider',
+                    user_id: booking.user_id,
+                    title: userNotifTitle,
+                    message: userNotifMessage
                 });
                 console.log("✅ Cancel notification sent to user:", booking.user_id);
             } catch (userNotifErr) {

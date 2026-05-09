@@ -82,13 +82,6 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
       if (token.fcm_token) {
         await sendToDevice(token.fcm_token, title, body, data);
       }
-      console.log(`📡 Sending FCM to Driver ${driverId}...`);
-
-      for (const token of tokens) {
-        if (token.fcm_token) {
-          await sendToDevice(token.fcm_token, title, body, data);
-        }
-      }
     }
   }
   catch (err) {
