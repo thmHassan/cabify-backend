@@ -546,6 +546,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
 app.post("/send-to-device", async (req, res) => {
     try {
         const { deviceToken, title, body, data } = req.body;

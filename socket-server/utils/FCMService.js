@@ -47,6 +47,7 @@ const sendToDevice = async (deviceToken, title, body, data = {}) => {
 
   } catch (err) {
     console.error("❌ FCM Error:", err.response?.data || err.message);
+    throw err.response?.data || new Error(err.message);
   }
 };
 
