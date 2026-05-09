@@ -2039,7 +2039,7 @@ app.put("/bookings/:id/status", async (req, res) => {
             } else if (['arrived', 'started'].includes(booking_status)) {
                 const userNotifTitle = booking_status === 'arrived' ? "Driver Arrived" : "Ride Started";
                 const userNotifMessage = booking_status === 'arrived' ? `Your driver has arrived at the pickup location.` : `Your ride has started. Have a safe journey!`;
-                
+
                 if (booking.user_id) {
                     try {
                         res_user = await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
