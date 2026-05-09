@@ -1976,7 +1976,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                 const userNotifTitle = "Ride Cancelled";
                 const userNotifMessage = cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
                 try {
-                    await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                    const res_user = await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
                         booking_id: String(id),
                         type: "ride_cancelled"
                     });
@@ -2129,7 +2129,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
 
-        return res.json({ success: true, message: "Booking status updated successfully" });
+        return res.json({ success: true, message: "Booking status updated successfully", res_user });
 
     } catch (error) {
         console.error("❌ Error updating booking status:", error);
