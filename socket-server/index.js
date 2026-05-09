@@ -401,6 +401,7 @@ io.on("connection", (socket) => {
                     io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
                     io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
                     io.to(`client_${database}`).emit("waiting-driver-event", emitData);
+                    socket.emit("waiting-driver-event", emitData);
                 }
 
             } catch (err) {
@@ -475,6 +476,7 @@ io.on("connection", (socket) => {
                     io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
                     io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
                     io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+                    socket.emit("waiting-driver-event", eventData);
                 } else if (driver.driving_status === "busy") {
                     io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
                     io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
@@ -2712,6 +2714,12 @@ app.post("/waiting-driver", async (req, res) => {
             io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
             io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
             io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+
+            // Also emit to the driver themselves
+            const driverSocketId = driverSockets.get(driver_id.toString());
+            if (driverSocketId) {
+                io.to(driverSocketId).emit("waiting-driver-event", eventData);
+            }
         }
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
