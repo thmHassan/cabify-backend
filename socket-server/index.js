@@ -1792,7 +1792,6 @@ app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
         let { booking_status, cancel_reason, cancelled_by } = req.body;
-        // Local variable for socket messages, separate from DB value
         let cancelled_by_actor = cancelled_by || 'admin';
 
         if (!booking_status) return res.status(400).json({ success: false, message: "booking_status is required" });
@@ -1808,7 +1807,6 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         if (booking_status === 'cancelled') {
             if (cancel_reason) { updateQuery += ", cancel_reason = ?"; params.push(cancel_reason); }
-            // Only update DB if value is valid for the ENUM ('user', 'driver')
             if (cancelled_by === 'user' || cancelled_by === 'driver') {
                 updateQuery += ", cancelled_by = ?"; params.push(cancelled_by);
             }
@@ -1818,7 +1816,6 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         await db.query(updateQuery, params);
 
-        // Notify Driver via Socket (Only if assigned)
         if (booking.driver) {
             const driverId = booking.driver.toString();
             const driverSocketId = driverSockets.get(driverId);
@@ -1839,7 +1836,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // Notify User/Customer via Socket
         if (booking.user_id) {
             const userId = booking.user_id.toString();
             const userSocketId = userSockets.get(userId);
@@ -1863,7 +1859,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // Notify Dispatchers via Socket
         const statusUpdateData = {
             booking_id: id,
             status: booking_status,
@@ -1872,11 +1867,9 @@ app.put("/bookings/:id/status", async (req, res) => {
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-status-updated", statusUpdateData));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-status-updated", statusUpdateData));
 
-        // Fetch updated booking for socket payload
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         const updatedBooking = updatedBookingRows[0];
 
-        // Ensure the payload reflects the correct actor even if DB couldn't store 'admin'
         const socketPayload = {
             status: booking_status,
             booking: {
@@ -1885,7 +1878,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         };
 
-        // 1. Notify User/Customer via Socket
         if (updatedBooking.user_id) {
             const userSocketId = userSockets.get(updatedBooking.user_id.toString());
             if (userSocketId) {
@@ -1894,7 +1886,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // 2. Notify Driver via Socket
         if (updatedBooking.driver) {
             const driverSocketId = driverSockets.get(updatedBooking.driver.toString());
             if (driverSocketId) {
@@ -1903,7 +1894,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // 3. Notify Dispatchers/Admins of cancellation
         if (booking_status === 'cancelled') {
             const cancelNotif = {
                 booking_id: id,
@@ -1915,7 +1905,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         }
 
-        // Update driver status in DB
         if (booking.driver) {
             let driverStatus = null;
             if (['cancelled', 'completed', 'no_show'].includes(booking_status)) driverStatus = 'idle';
@@ -1925,17 +1914,11 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // Send FCM notification + store in notifications table
-        if (booking.driver) {
-            const [driverInfo] = await db.query(
-                "SELECT id, name, phone_no FROM drivers WHERE id = ?",
-                [booking.driver]
-            );
+        if (booking_status === 'cancelled') {
+            const notifTitle = "Ride Cancelled";
+            const notifMessage = cancelled_by_actor === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
 
-            if (booking_status === 'cancelled') {
-                const notifTitle = "Ride Cancelled";
-                const notifMessage = cancelled_by_actor === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
-
+            if (booking.driver) {
                 try {
                     await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
                         booking_id: String(id),
@@ -1947,33 +1930,39 @@ app.put("/bookings/:id/status", async (req, res) => {
                         title: notifTitle,
                         message: notifMessage
                     });
-                    console.log("✅ Cancel notification sent to driver:", driverInfo[0]?.name);
+                    console.log("✅ Cancel notification sent to driver:", booking.driver);
                 } catch (notifErr) {
-                    console.error("❌ Notification error in ride cancellation:", notifErr.message);
+                    console.error("❌ Notification error in ride cancellation (driver):", notifErr.message);
                 }
+            }
 
-                // Notify User/Customer via Push Notification
-                if (booking.user_id) {
-                    const userNotifTitle = "Ride Cancelled";
-                    const userNotifMessage = cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
-                    try {
-                        await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
-                            booking_id: String(id),
-                            type: "ride_cancelled"
-                        });
-                        await storeNotification(db, {
-                            user_type: 'rider',
-                            user_id: booking.user_id,
-                            title: userNotifTitle,
-                            message: userNotifMessage
-                        });
-                        console.log("✅ Cancel notification sent to user:", booking.user_id);
-                    } catch (userNotifErr) {
-                        console.error("❌ User Notification error in ride cancellation:", userNotifErr.message);
-                    }
+            if (booking.user_id) {
+                const userNotifTitle = "Ride Cancelled";
+                const userNotifMessage = cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
+                try {
+                    await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                        booking_id: String(id),
+                        type: "ride_cancelled"
+                    });
+                    await storeNotification(db, {
+                        user_type: 'rider',
+                        user_id: booking.user_id,
+                        title: userNotifTitle,
+                        message: userNotifMessage
+                    });
+                    console.log("✅ Cancel notification sent to user:", booking.user_id);
+                } catch (userNotifErr) {
+                    console.error("❌ User Notification error in ride cancellation:", userNotifErr.message);
                 }
+            }
 
-            } else if (booking_status === 'completed') {
+        } else if (booking.driver) {
+            const [driverInfo] = await db.query(
+                "SELECT id, name, phone_no FROM drivers WHERE id = ?",
+                [booking.driver]
+            );
+
+            if (booking_status === 'completed') {
                 const notifTitle = "Ride Completed";
                 const notifMessage = `Ride #${booking.booking_id} has been marked as completed`;
 
@@ -1992,126 +1981,113 @@ app.put("/bookings/:id/status", async (req, res) => {
                 } catch (notifErr) {
                     console.error("❌ Notification error in ride completion:", notifErr.message);
                 }
+            }
+        }
 
-                // ─────────────────────────────────────────────────────────
-                // FOLLOW-ON JOB: When Job 1 completes, send Job 2 to driver
-                // as a normal ride request — driver must accept or reject
-                // ─────────────────────────────────────────────────────────
-                if (booking.follow_on_job_id) {
-                    const followOnId = booking.follow_on_job_id;
-                    console.log(`🔁 Follow-on job detected: #${followOnId} — sending to driver #${booking.driver}`);
+        if (booking.follow_on_job_id) {
+            const followOnId = booking.follow_on_job_id;
+            console.log(`🔁 Follow-on job detected: #${followOnId} — sending to driver #${booking.driver}`);
 
-                    try {
-                        const [followOnRows] = await db.query(
-                            "SELECT * FROM bookings WHERE id = ?",
-                            [followOnId]
-                        );
+            try {
+                const [followOnRows] = await db.query(
+                    "SELECT * FROM bookings WHERE id = ?",
+                    [followOnId]
+                );
 
-                        if (followOnRows.length && ['pending', 'pending_acceptance'].includes(followOnRows[0].booking_status)) {
-                            const followOnBooking = followOnRows[0];
-                            const driverId = booking.driver;
-
-                            // Pre-assign driver but keep status as pending_acceptance
-                            // so driver must still accept/reject
-                            await db.query(
-                                `UPDATE bookings 
+                if (followOnRows.length && ['pending', 'pending_acceptance'].includes(followOnRows[0].booking_status)) {
+                    const followOnBooking = followOnRows[0];
+                    const driverId = booking.driver;
+                    await db.query(
+                        `UPDATE bookings 
                                  SET driver = ?, booking_status = 'pending_acceptance', driver_response = 'pending'
                                  WHERE id = ?`,
-                                [driverId, followOnId]
+                        [driverId, followOnId]
+                    );
+
+                    const driverSocketId = driverSockets.get(driverId.toString());
+                    if (driverSocketId) {
+                        const socketPayload = { ...followOnBooking, driver: driverId, is_follow_on: true };
+
+                        io.to(driverSocketId).emit("new-ride", socketPayload);
+                        io.to(driverSocketId).emit("new-ride-request", {
+                            booking_id: followOnBooking.id,
+                            message: "You have a follow-on ride request",
+                            booking: socketPayload
+                        });
+                    } else {
+                        console.log(`⚠️ Follow-on driver #${driverId} not connected via socket.`);
+                    }
+
+                    const foNotifTitle = "New Follow-On Job";
+                    const foNotifMsg = `Your next job #${followOnBooking.booking_id} is ready. Please accept or reject.`;
+                    try {
+                        await sendNotificationToDriver(db, driverId, foNotifTitle, foNotifMsg, {
+                            booking_id: String(followOnId),
+                            type: "new_ride"
+                        });
+                        await storeNotification(db, {
+                            user_type: 'driver',
+                            user_id: driverId,
+                            title: foNotifTitle,
+                            message: foNotifMsg
+                        });
+                    } catch (notifErr) {
+                        console.error("❌ Notification error in follow-on dispatch:", notifErr.message);
+                    }
+
+                    const foEventData = {
+                        booking_id: followOnId,
+                        driver_id: driverId,
+                        driver_name: driverInfo[0]?.name,
+                        booking: { ...followOnBooking, driver: driverId, booking_status: 'pending_acceptance' },
+                        message: `Follow-on job #${followOnBooking.booking_id} sent to ${driverInfo[0]?.name} — waiting for acceptance`
+                    };
+                    dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
+                    adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
+                    clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
+
+                    setTimeout(async () => {
+                        try {
+                            const [checkRows] = await db.query(
+                                "SELECT booking_status, driver_response FROM bookings WHERE id = ?",
+                                [followOnId]
                             );
+                            if (!checkRows.length) return;
 
-                            // Send ride request via socket (same event as normal dispatch)
-                            const driverSocketId = driverSockets.get(driverId.toString());
-                            if (driverSocketId) {
-                                const socketPayload = { ...followOnBooking, driver: driverId, is_follow_on: true };
+                            const { booking_status: currentStatus, driver_response } = checkRows[0];
 
-                                // Emit both events for compatibility
-                                io.to(driverSocketId).emit("new-ride", socketPayload);
-                                io.to(driverSocketId).emit("new-ride-request", {
-                                    booking_id: followOnBooking.id,
-                                    message: "You have a follow-on ride request",
-                                    booking: socketPayload
-                                });
-                                console.log(`📲 Follow-on ride request ('new-ride' & 'new-ride-request') sent to driver socket: ${driverId}`);
-                            } else {
-                                console.log(`⚠️ Follow-on driver #${driverId} not connected via socket.`);
-                            }
-
-                            // FCM push to driver
-                            const foNotifTitle = "New Follow-On Job";
-                            const foNotifMsg = `Your next job #${followOnBooking.booking_id} is ready. Please accept or reject.`;
-                            try {
-                                await sendNotificationToDriver(db, driverId, foNotifTitle, foNotifMsg, {
-                                    booking_id: String(followOnId),
-                                    type: "new_ride"
-                                });
-                                await storeNotification(db, {
-                                    user_type: 'driver',
-                                    user_id: driverId,
-                                    title: foNotifTitle,
-                                    message: foNotifMsg
-                                });
-                            } catch (notifErr) {
-                                console.error("❌ Notification error in follow-on dispatch:", notifErr.message);
-                            }
-
-                            // Notify dispatchers/admins that follow-on was sent to driver
-                            const foEventData = {
-                                booking_id: followOnId,
-                                driver_id: driverId,
-                                driver_name: driverInfo[0]?.name,
-                                booking: { ...followOnBooking, driver: driverId, booking_status: 'pending_acceptance' },
-                                message: `Follow-on job #${followOnBooking.booking_id} sent to ${driverInfo[0]?.name} — waiting for acceptance`
-                            };
-                            dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
-                            adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
-                            clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", foEventData));
-
-                            // 30-second timeout — if driver doesn't respond, reset to pending
-                            setTimeout(async () => {
-                                try {
-                                    const [checkRows] = await db.query(
-                                        "SELECT booking_status, driver_response FROM bookings WHERE id = ?",
-                                        [followOnId]
-                                    );
-                                    if (!checkRows.length) return;
-
-                                    const { booking_status: currentStatus, driver_response } = checkRows[0];
-
-                                    if (currentStatus === 'pending_acceptance' && driver_response !== 'accepted') {
-                                        await db.query(
-                                            `UPDATE bookings 
+                            if (currentStatus === 'pending_acceptance' && driver_response !== 'accepted') {
+                                await db.query(
+                                    `UPDATE bookings 
                                              SET driver = NULL, booking_status = 'pending', driver_response = NULL 
                                              WHERE id = ?`,
-                                            [followOnId]
-                                        );
+                                    [followOnId]
+                                );
 
-                                        const timeoutEvent = {
-                                            booking_id: followOnId,
-                                            driver_id: driverId,
-                                            driver_name: driverInfo[0]?.name,
-                                            message: `Driver ${driverInfo[0]?.name} did not respond to follow-on job #${followOnBooking.booking_id} — reset to pending`
-                                        };
-                                        dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
-                                        adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
-                                        clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+                                const timeoutEvent = {
+                                    booking_id: followOnId,
+                                    driver_id: driverId,
+                                    driver_name: driverInfo[0]?.name,
+                                    message: `Driver ${driverInfo[0]?.name} did not respond to follow-on job #${followOnBooking.booking_id} — reset to pending`
+                                };
+                                dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+                                adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+                                clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
 
-                                        console.log(`⏱ Follow-on job #${followOnId} timed out — reset to pending`);
-                                    }
-                                } catch (timeoutErr) {
-                                    console.error("Follow-on timeout check error:", timeoutErr.message);
-                                }
-                            }, 30000);
-
-                            console.log(`✅ Follow-on job #${followOnId} sent to driver #${driverId}`);
-                        } else {
-                            console.log(`⚠️ Follow-on job #${followOnId} is not in pending state — skipping`);
+                                console.log(`⏱ Follow-on job #${followOnId} timed out — reset to pending`);
+                            }
+                        } catch (timeoutErr) {
+                            console.error("Follow-on timeout check error:", timeoutErr.message);
                         }
-                    } catch (foError) {
-                        // Don't fail the main completion — follow-on is best-effort
-                        console.error(`❌ Error dispatching follow-on job #${followOnId}:`, foError.message);
-                    }
+                    }, 30000);
+
+                    console.log(`✅ Follow-on job #${followOnId} sent to driver #${driverId}`);
+                } else {
+                    console.log(`⚠️ Follow-on job #${followOnId} is not in pending state — skipping`);
                 }
+            } catch (foError) {
+                // Don't fail the main completion — follow-on is best-effort
+                console.error(`❌ Error dispatching follow-on job #${followOnId}:`, foError.message);
             }
         }
 
@@ -2321,22 +2297,36 @@ app.post("/change-cancel-ride", async (req, res) => {
     });
 
     // Notify User/Customer via Push Notification
-    if (booking.user_id) {
+    let targetUserId = booking.user_id;
+    const db = getConnection(req.tenantDb);
+
+    // If user_id is missing from request, fetch it from DB
+    if (!targetUserId) {
         try {
-            const db = getConnection(req.tenantDb);
+            const [rows] = await db.query("SELECT user_id FROM bookings WHERE id = ?", [booking.id]);
+            if (rows.length > 0) {
+                targetUserId = rows[0].user_id;
+            }
+        } catch (dbErr) {
+            console.error("❌ Error fetching user_id for notification:", dbErr.message);
+        }
+    }
+
+    if (targetUserId) {
+        try {
             const userNotifTitle = "Ride Cancelled";
             const userNotifMessage = req.body.cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled.`;
-            await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+            await sendNotificationToUser(db, targetUserId, userNotifTitle, userNotifMessage, {
                 booking_id: String(booking.id),
                 type: "ride_cancelled"
             });
             await storeNotification(db, {
                 user_type: 'rider',
-                user_id: booking.user_id,
+                user_id: targetUserId,
                 title: userNotifTitle,
                 message: userNotifMessage
             });
-            console.log("✅ Cancel notification sent to user:", booking.user_id);
+            console.log("✅ Cancel notification sent to user:", targetUserId);
         } catch (userNotifErr) {
             console.error("❌ User Notification error in /change-cancel-ride:", userNotifErr.message);
         }
@@ -2446,22 +2436,36 @@ app.post("/change-driver-ride-status", async (req, res) => {
         }
 
         // Notify User/Customer via Push Notification
-        if (booking.user_id) {
+        let targetUserId = booking.user_id;
+        const db = getConnection(req.tenantDb);
+
+        // If user_id is missing from request, fetch it from DB
+        if (!targetUserId) {
             try {
-                const db = getConnection(req.tenantDb);
+                const [rows] = await db.query("SELECT user_id FROM bookings WHERE id = ?", [booking.id]);
+                if (rows.length > 0) {
+                    targetUserId = rows[0].user_id;
+                }
+            } catch (dbErr) {
+                console.error("❌ Error fetching user_id for /change-driver-ride-status:", dbErr.message);
+            }
+        }
+
+        if (targetUserId) {
+            try {
                 const userNotifTitle = "Ride Cancelled";
                 const userNotifMessage = status === "cancel_confirm_ride" ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled.`;
-                await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                await sendNotificationToUser(db, targetUserId, userNotifTitle, userNotifMessage, {
                     booking_id: String(booking.id),
                     type: "ride_cancelled"
                 });
                 await storeNotification(db, {
                     user_type: 'rider',
-                    user_id: booking.user_id,
+                    user_id: targetUserId,
                     title: userNotifTitle,
                     message: userNotifMessage
                 });
-                console.log("✅ Cancel notification sent to user:", booking.user_id);
+                console.log("✅ Cancel notification sent to user:", targetUserId);
             } catch (userNotifErr) {
                 console.error("❌ User Notification error in /change-driver-ride-status:", userNotifErr.message);
             }
