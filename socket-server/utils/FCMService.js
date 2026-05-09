@@ -2,11 +2,11 @@ const axios = require("axios");
 const { GoogleAuth } = require("google-auth-library");
 const path = require("path");
 
-const FIREBASE_PROJECT_ID = "cabifyit";
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "cabifyit";
 
 const getAccessToken = async () => {
   const auth = new GoogleAuth({
-    keyFile: path.join(__dirname, "../firebase/firebase.json"),
+    keyFile: path.join(__dirname, "../../storage/app/firebase/firebase.json"),
     scopes: ["https://www.googleapis.com/auth/firebase.messaging"],
   });
   const client = await auth.getClient();
