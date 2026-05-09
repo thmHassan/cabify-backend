@@ -1698,8 +1698,27 @@ app.post("/driver/cancel-ride", async (req, res) => {
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
 
-        await broadcastDashboardCardsUpdate(req.tenantDb);
+        const [bookingForUser] = await db.query("SELECT user_id, booking_id FROM bookings WHERE id = ?", [ride_id]);
+        if (bookingForUser && bookingForUser[0].user_id) {
+            try {
+                const userNotifTitle = "Ride Cancelled";
+                const userNotifMessage = `Your ride #${bookingForUser[0].booking_id} has been cancelled by the driver and is being re-dispatched.`;
+                await sendNotificationToUser(db, bookingForUser[0].user_id, userNotifTitle, userNotifMessage, {
+                    booking_id: String(ride_id),
+                    type: "ride_cancelled"
+                });
+                await storeNotification(db, {
+                    user_type: 'rider',
+                    user_id: bookingForUser[0].user_id,
+                    title: userNotifTitle,
+                    message: userNotifMessage
+                });
+            } catch (userNotifErr) {
+                console.error("User Notification error in /driver/cancel-ride:", userNotifErr.message);
+            }
+        }
 
+        await broadcastDashboardCardsUpdate(req.tenantDb);
         return res.json({ success: 1, message: "Cancel event broadcasted" });
 
     } catch (error) {
@@ -2313,11 +2332,9 @@ app.post("/change-cancel-ride", async (req, res) => {
         }
     });
 
-    // Notify User/Customer via Push Notification
     let targetUserId = booking.user_id;
     const db = getConnection(req.tenantDb);
 
-    // If user_id is missing from request, fetch it from DB
     if (!targetUserId) {
         try {
             const [rows] = await db.query("SELECT user_id FROM bookings WHERE id = ?", [booking.id]);
@@ -2325,14 +2342,14 @@ app.post("/change-cancel-ride", async (req, res) => {
                 targetUserId = rows[0].user_id;
             }
         } catch (dbErr) {
-            console.error("❌ Error fetching user_id for notification:", dbErr.message);
+            console.error("Error fetching user_id for notification:", dbErr.message);
         }
     }
 
     if (targetUserId) {
         try {
             const userNotifTitle = "Ride Cancelled";
-            const userNotifMessage = req.body.cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled.`;
+            const userNotifMessage = req.body.cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
             await sendNotificationToUser(db, targetUserId, userNotifTitle, userNotifMessage, {
                 booking_id: String(booking.id),
                 type: "ride_cancelled"
@@ -2343,9 +2360,31 @@ app.post("/change-cancel-ride", async (req, res) => {
                 title: userNotifTitle,
                 message: userNotifMessage
             });
-            console.log("✅ Cancel notification sent to user:", targetUserId);
+            console.log("Cancel notification sent to user:", targetUserId);
         } catch (userNotifErr) {
-            console.error("❌ User Notification error in /change-cancel-ride:", userNotifErr.message);
+            console.error("User Notification error in /change-cancel-ride:", userNotifErr.message);
+        }
+    }
+
+    if (drivers && drivers.length > 0) {
+        const driverNotifTitle = "Ride Cancelled";
+        const driverNotifMessage = req.body.cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} has been cancelled`;
+
+        for (const driverId of drivers) {
+            try {
+                await sendNotificationToDriver(db, driverId, driverNotifTitle, driverNotifMessage, {
+                    booking_id: String(booking.id),
+                    type: "ride_cancelled"
+                });
+                await storeNotification(db, {
+                    user_type: 'driver',
+                    user_id: driverId,
+                    title: driverNotifTitle,
+                    message: driverNotifMessage
+                });
+            } catch (driverNotifErr) {
+                console.error("❌ Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
+            }
         }
     }
 
@@ -2406,6 +2445,45 @@ app.post("/change-ride-status", async (req, res) => {
         };
         dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+
+        const db = getConnection(req.tenantDb);
+        const targetUserId = userId || booking.user_id;
+
+        if (targetUserId) {
+            try {
+                const userNotifTitle = "Ride Cancelled";
+                const userNotifMessage = status === "cancel_confirm_ride" ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled.`;
+                await sendNotificationToUser(db, targetUserId, userNotifTitle, userNotifMessage, {
+                    booking_id: String(booking.id),
+                    type: "ride_cancelled"
+                });
+                await storeNotification(db, {
+                    user_type: 'rider',
+                    user_id: targetUserId,
+                    title: userNotifTitle,
+                    message: userNotifMessage
+                });
+            } catch (err) {
+                console.error("Notification error in /change-ride-status (user):", err.message);
+            }
+        }
+
+        if (booking.driver) {
+            try {
+                await sendNotificationToDriver(db, booking.driver, "Ride Cancelled", `Ride #${booking.booking_id} has been cancelled`, {
+                    booking_id: String(booking.id),
+                    type: "ride_cancelled"
+                });
+                await storeNotification(db, {
+                    user_type: 'driver',
+                    user_id: booking.driver,
+                    title: "Ride Cancelled",
+                    message: `Ride #${booking.booking_id} has been cancelled`
+                });
+            } catch (err) {
+                console.error("Notification error in /change-ride-status (driver):", err.message);
+            }
+        }
     }
 
     return res.json({ success: true });
@@ -2452,11 +2530,9 @@ app.post("/change-driver-ride-status", async (req, res) => {
             io.to(socketId).emit("booking-cancelled-event", cancelNotif);
         }
 
-        // Notify User/Customer via Push Notification
         let targetUserId = booking.user_id;
         const db = getConnection(req.tenantDb);
 
-        // If user_id is missing from request, fetch it from DB
         if (!targetUserId) {
             try {
                 const [rows] = await db.query("SELECT user_id FROM bookings WHERE id = ?", [booking.id]);
@@ -2464,7 +2540,7 @@ app.post("/change-driver-ride-status", async (req, res) => {
                     targetUserId = rows[0].user_id;
                 }
             } catch (dbErr) {
-                console.error("❌ Error fetching user_id for /change-driver-ride-status:", dbErr.message);
+                console.error("Error fetching user_id for /change-driver-ride-status:", dbErr.message);
             }
         }
 
@@ -2482,9 +2558,9 @@ app.post("/change-driver-ride-status", async (req, res) => {
                     title: userNotifTitle,
                     message: userNotifMessage
                 });
-                console.log("✅ Cancel notification sent to user:", targetUserId);
+                console.log("Cancel notification sent to user:", targetUserId);
             } catch (userNotifErr) {
-                console.error("❌ User Notification error in /change-driver-ride-status:", userNotifErr.message);
+                console.error("User Notification error in /change-driver-ride-status:", userNotifErr.message);
             }
         }
     }
@@ -2505,7 +2581,6 @@ app.post("/on-job-driver", async (req, res) => {
         let finalDriverName = driverName;
         let finalDriverId = driver_id;
 
-        // If driver_id is provided, fetch latest data
         if (driver_id) {
             const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [driver_id]);
             if (driverRows.length > 0) {
@@ -2520,9 +2595,6 @@ app.post("/on-job-driver", async (req, res) => {
             driver_name: finalDriverName,
             status: 'busy'
         };
-
-        console.log("🚕 Emitting on-job-driver-event:", eventData);
-
         const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
 
         const socketId = clientSockets.get(clientId?.toString());
@@ -2540,26 +2612,14 @@ app.post("/on-job-driver", async (req, res) => {
 
         return res.json({ success: true });
     } catch (error) {
-        console.error("❌ On-Job Driver Error:", error);
+        console.error("On-Job Driver Error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
 
-// app.post("/waiting-driver", (req, res) => {
-//     const { clientId, driverName, plot } = req.body;
-//     const socketId = clientSockets.get(clientId.toString());
-//     if (socketId) {
-//         io.to(socketId).emit("waiting-driver-event", { driverName, driver_name: driverName, plot_name: plot });
-//     }
-//     dispatcherSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", { driverName, driver_name: driverName, plot_name: plot }));
-//     adminSockets.forEach((sid) => io.to(sid).emit("waiting-driver-event", { driverName, driver_name: driverName, plot_name: plot }));
-//     return res.json({ success: true });
-// });
-
 app.post("/waiting-driver", async (req, res) => {
     try {
         const { clientId, driver_id } = req.body;
-        console.log(`🕒 Waiting Driver Request: clientId=${clientId}, driver_id=${driver_id}`);
 
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
@@ -2569,7 +2629,7 @@ app.post("/waiting-driver", async (req, res) => {
         }
 
         if (!req.tenantDb) {
-            console.error("❌ Waiting Driver: Missing req.tenantDb and database header");
+            console.error("Waiting Driver: Missing req.tenantDb and database header");
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
@@ -2585,12 +2645,11 @@ app.post("/waiting-driver", async (req, res) => {
         );
 
         if (!driverRows.length) {
-            console.error(`❌ Waiting Driver: Driver ${driver_id} not found in ${req.tenantDb}`);
+            console.error(`Waiting Driver: Driver ${driver_id} not found in ${req.tenantDb}`);
             return res.status(404).json({ success: false, message: "Driver not found" });
         }
 
         const driver = driverRows[0];
-        console.log(`🕒 Driver data found: ${driver.name}, status: ${driver.driving_status}`);
 
         const plotId = driver.plot_id;
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
@@ -2603,8 +2662,6 @@ app.post("/waiting-driver", async (req, res) => {
             plot_name: plotName,
             rank: driver.priority_plot ?? 1
         };
-
-        console.log("🔥 Emitting waiting-driver-event:", eventData);
 
         const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
 
@@ -2624,7 +2681,7 @@ app.post("/waiting-driver", async (req, res) => {
         return res.json({ success: true });
     }
     catch (error) {
-        console.error("❌ Waiting Driver Error:", error);
+        console.error("Waiting Driver Error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
@@ -2643,7 +2700,7 @@ app.post("/voip-webhook", async (req, res) => {
         const { token, events } = req.body;
 
         if (token !== process.env.VIP_WEBHOOK_TOKEN) {
-            console.log("❌ Invalid VOIP token");
+            console.log("Invalid VOIP token");
             return res.status(403).json({ success: false });
         }
 
@@ -2652,7 +2709,6 @@ app.post("/voip-webhook", async (req, res) => {
         }
 
         for (const event of events) {
-            console.log("📞 VOIP EVENT RECEIVED:", event);
 
             const { callId, dialledNumber, extension, callerId, status, time } = event;
 
@@ -2676,7 +2732,7 @@ app.post("/voip-webhook", async (req, res) => {
 
         return res.status(200).json({ success: true });
     } catch (error) {
-        console.error("❌ Webhook Error:", error);
+        console.error("Webhook Error:", error);
         return res.status(500).json({ success: false });
     }
 });
@@ -2760,7 +2816,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
         const tenantDb = `tenant${databaseHeader}`;
         const db = getConnection(tenantDb);
 
-        // ── 1. Fetch driver details ─────────────────────────────────────────
         const [driverRows] = await db.query(
             `SELECT id, name, email, phone_no, profile_image, driving_status,
                     plot_id, priority_plot, wallet_balance, last_settlement_date,
@@ -2778,7 +2833,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
 
         const driver = driverRows[0];
 
-        // 2. Revenue summary (all time)
         const [revenueSummary] = await db.query(
             `SELECT
                 COUNT(*) AS total_rides,
@@ -2828,7 +2882,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
 
         const revenue = revenueSummary[0];
 
-        // 3. Today's stats 
         const [todayStats] = await db.query(
             `SELECT
                 COUNT(*) AS today_total_rides,
@@ -2848,7 +2901,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
             [id]
         );
 
-        // 4. This week's stats
         const [weekStats] = await db.query(
             `SELECT
                 COUNT(*) AS week_total_rides,
@@ -2868,7 +2920,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
             [id]
         );
 
-        // 5. This month's stats 
         const [monthStats] = await db.query(
             `SELECT
                 COUNT(*) AS month_total_rides,
@@ -2890,7 +2941,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
             [id]
         );
 
-        // 6. Paginated ride history with filters
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
         const offset = (pageNum - 1) * limitNum;
@@ -2954,7 +3004,6 @@ app.get("/driver/:id/riding-details", async (req, res) => {
 
         const totalPages = Math.ceil(total / limitNum);
 
-        // 7. Build response
         return res.json({
             success: true,
             data: {
@@ -3064,7 +3113,6 @@ app.post("/account/collect-and-email", async (req, res) => {
         const totalAmount = bookings.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
         const dateOfCollection = new Date().toLocaleDateString();
 
-        // Generate responsive email HTML
         const ridesTableRows = bookings.map(b => `
             <tr>
                 <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: left;">#${b.booking_id}</td>
@@ -3137,10 +3185,8 @@ app.post("/account/collect-and-email", async (req, res) => {
             html: htmlContent
         };
 
-        // Send Email
         await transporter.sendMail(mailOptions);
 
-        // Mark rides as collected
         await db.query(`
             UPDATE bookings 
             SET account_payment = 'yes' 

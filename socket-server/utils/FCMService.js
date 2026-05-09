@@ -29,7 +29,7 @@ const sendToDevice = async (deviceToken, title, body, data = {}) => {
       );
     }
 
-    console.log("📤 FCM Sending to token:", deviceToken.substring(0, 30) + "...");
+    console.log("FCM Sending to token:", deviceToken.substring(0, 30) + "...");
 
     const response = await axios.post(
       `https://fcm.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/messages:send`,
@@ -42,11 +42,11 @@ const sendToDevice = async (deviceToken, title, body, data = {}) => {
       }
     );
 
-    console.log("✅ FCM Success:", response.data);
+    console.log("FCM Success:", response.data);
     return response.data;
 
   } catch (err) {
-    console.error("❌ FCM Error:", err.response?.data || err.message);
+    console.error("FCM Error:", err.response?.data || err.message);
     throw err.response?.data || new Error(err.message);
   }
 };
@@ -58,9 +58,7 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
       [driverId]
     );
 
-    // Fallback: Check drivers table if no token found in tokens table
     if (tokens.length === 0) {
-      console.log(`🔍 tokens table ma token nathi, drivers table check kariye chhie for ID: ${driverId}`);
       const [driverRows] = await db.query(
         "SELECT fcm_token, device_token FROM drivers WHERE id = ?",
         [driverId]
@@ -73,10 +71,10 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
       }
     }
 
-    console.log(`🔍 Driver ${driverId} na tokens found:`, tokens.length);
+    console.log(`Driver ${driverId} na tokens found:`, tokens.length);
 
     if (tokens.length === 0) {
-      console.warn(`⚠️ Driver ${driverId} paas koi FCM token nathi`);
+      console.warn(`Driver ${driverId}`);
     }
 
     for (const token of tokens) {
@@ -86,7 +84,7 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
     }
   }
   catch (err) {
-    console.error("❌ sendNotificationToDriver Error:", err.message);
+    console.error("sendNotificationToDriver Error:", err.message);
   }
 }
 
@@ -97,7 +95,6 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
       [userId]
     );
 
-    // Fallback: Check users table if no token found in tokens table
     if (tokens.length === 0) {
       const [userRows] = await db.query(
         "SELECT fcm_token, device_token FROM users WHERE id = ?",
@@ -106,12 +103,19 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
       if (userRows.length > 0) {
         const dToken = userRows[0].fcm_token || userRows[0].device_token;
         if (dToken) {
+          console.log(`${dToken.substring(0, 20)}...`)
           tokens = [{ fcm_token: dToken }];
+        } else {
+          console.warn(`${userId}`);
         }
+      } else {
+        console.warn(`${userId}`);
       }
     }
 
-    console.log(`🔍 User ${userId} na tokens found:`, tokens.length);
+    if (tokens.length === 0) {
+      console.warn(`User ${userId}`);
+    }
 
     for (const token of tokens) {
       if (token.fcm_token) {
@@ -120,7 +124,7 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
     }
 
   } catch (err) {
-    console.error("❌ sendNotificationToUser Error:", err.message);
+    console.error("sendNotificationToUser Error:", err.message);
   }
 };
 
