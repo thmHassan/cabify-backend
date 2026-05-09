@@ -252,7 +252,23 @@ class SettingController extends Controller
 
     public function vehicleList(Request $request){
         try{
-            $vehicleList = CompanyVehicleType::orderBy("id", "DESC")->get();
+            $vehicleList = CompanyVehicleType::orderBy("id", "DESC")->get()->map(function ($vehicle) {
+
+                $formattedAttributes = [];
+
+                if (!empty($vehicle->attributes)) {
+                    foreach ($vehicle->attributes as $key => $value) {
+                        $formattedAttributes[] = [
+                            'name' => $key,
+                            'allowed' => $value === 'yes' ? true : false,
+                        ];
+                    }
+                }
+
+                $vehicle->attributes = $formattedAttributes;
+
+                return $vehicle;
+            });
 
             return response()->json([
                 'success' => 1,
