@@ -2,11 +2,11 @@ const axios = require("axios");
 const { GoogleAuth } = require("google-auth-library");
 const path = require("path");
 
-const FIREBASE_PROJECT_ID = "cabifyit";
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "cabifyit";
 
 const getAccessToken = async () => {
   const auth = new GoogleAuth({
-    keyFile: path.join(__dirname, "../firebase/firebase.json"),
+    keyFile: path.join(__dirname, "../../storage/app/firebase/firebase.json"),
     scopes: ["https://www.googleapis.com/auth/firebase.messaging"],
   });
   const client = await auth.getClient();
@@ -47,6 +47,7 @@ const sendToDevice = async (deviceToken, title, body, data = {}) => {
 
   } catch (err) {
     console.error("❌ FCM Error:", err.response?.data || err.message);
+    throw err.response?.data || new Error(err.message);
   }
 };
 
@@ -83,18 +84,44 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
         await sendToDevice(token.fcm_token, title, body, data);
       }
     }
+  }
+  catch (err) {
+    console.error("❌ sendNotificationToDriver Error:", err.message);
+  }
+}
 
-    await db.query(
-      `INSERT INTO company_notifications (user_type, user_id, title, message, created_at, updated_at)
-       VALUES ('driver', ?, ?, ?, NOW(), NOW())`,
-      [driverId, title, body]
+const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
+  try {
+    let [tokens] = await db.query(
+      "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'rider'",
+      [userId]
     );
 
-    console.log(`💾 Notification DB ma save thai - Driver ${driverId}`);
+    // Fallback: Check users table if no token found in tokens table
+    if (tokens.length === 0) {
+      const [userRows] = await db.query(
+        "SELECT fcm_token, device_token FROM users WHERE id = ?",
+        [userId]
+      );
+      if (userRows.length > 0) {
+        const dToken = userRows[0].fcm_token || userRows[0].device_token;
+        if (dToken) {
+          tokens = [{ fcm_token: dToken }];
+        }
+      }
+    }
+
+    console.log(`🔍 User ${userId} na tokens found:`, tokens.length);
+
+    for (const token of tokens) {
+      if (token.fcm_token) {
+        await sendToDevice(token.fcm_token, title, body, data);
+      }
+    }
 
   } catch (err) {
-    console.error("❌ sendNotificationToDriver Error:", err.message);
+    console.error("❌ sendNotificationToUser Error:", err.message);
   }
 };
 
-module.exports = { sendToDevice, sendNotificationToDriver };
+module.exports = { sendToDevice, sendNotificationToDriver, sendNotificationToUser };

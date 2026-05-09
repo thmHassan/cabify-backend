@@ -632,6 +632,7 @@ class BookingController extends Controller
             ])->post(env('NODE_SOCKET_URL') . '/change-cancel-ride', [
                 'drivers' => $driversList,
                 'status' => "cancel_ride",
+                'cancelled_by' => 'user',
                 'booking' => [
                     'id' => $booking->id,
                     'booking_id' => $booking->booking_id,
@@ -703,7 +704,7 @@ class BookingController extends Controller
                     $notification->user_type = "driver";
                     $notification->user_id = $booking->driver;
                     $notification->title = 'Cancel Ride';
-                    $notification->message = 'Your ride has been cancelled by Rider';
+                    $notification->message = 'Your ride has been cancelled by customer';
                     $notification->save();
 
                     $tokens = CompanyToken::where("user_id", $booking->driver)->where("user_type", "driver")->get();
@@ -713,7 +714,7 @@ class BookingController extends Controller
                             FCMService::sendToDevice(
                                 $token->fcm_token,
                                 'Cancel Ride',
-                                'Your ride has been cancelled by Rider',
+                                'Your ride has been cancelled by customer',
                                 [
                                     'booking_id' => $booking->id,
                                 ]

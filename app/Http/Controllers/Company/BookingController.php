@@ -652,4 +652,28 @@ class BookingController extends Controller
             ]);
         }
     }
+
+    public function deleteBooking(Request $request)
+    {
+        try {
+            $booking = CompanyBooking::find($request->id);
+            if ($booking) {
+                $booking->delete();
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Booking deleted successfully'
+                ]);
+            } else {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found'
+                ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
