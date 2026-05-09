@@ -1955,24 +1955,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             const notifTitle = "Ride Cancelled";
             const notifMessage = cancelled_by_actor === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} is cancelled by Admin or Dispatcher`;
 
-            if (booking.driver) {
-                try {
-                    await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
-                        booking_id: String(id),
-                        type: "ride_cancelled"
-                    });
-                    await storeNotification(db, {
-                        user_type: 'driver',
-                        user_id: booking.driver,
-                        title: notifTitle,
-                        message: notifMessage
-                    });
-                    console.log("✅ Cancel notification sent to driver:", booking.driver);
-                } catch (notifErr) {
-                    console.error("❌ Notification error in ride cancellation (driver):", notifErr.message);
-                }
-            }
-
             if (booking.user_id) {
                 const userNotifTitle = "Ride Cancelled";
                 const userNotifMessage = cancelled_by_actor === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled by Admin or Dispatcher.`;
@@ -1990,6 +1972,24 @@ app.put("/bookings/:id/status", async (req, res) => {
                     console.log("✅ Cancel notification sent to user:", booking.user_id);
                 } catch (userNotifErr) {
                     console.error("❌ User Notification error in ride cancellation:", userNotifErr.message);
+                }
+            }
+
+            if (booking.driver) {
+                try {
+                    await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
+                        booking_id: String(id),
+                        type: "ride_cancelled"
+                    });
+                    await storeNotification(db, {
+                        user_type: 'driver',
+                        user_id: booking.driver,
+                        title: notifTitle,
+                        message: notifMessage
+                    });
+                    console.log("✅ Cancel notification sent to driver:", booking.driver);
+                } catch (notifErr) {
+                    console.error("❌ Notification error in ride cancellation (driver):", notifErr.message);
                 }
             }
 
