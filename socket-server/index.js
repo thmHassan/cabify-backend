@@ -2315,6 +2315,22 @@ app.post("/change-cancel-ride", async (req, res) => {
         }
     });
 
+    // Notify User/Customer via Push Notification
+    if (booking.user_id) {
+        try {
+            const db = getConnection(req.tenantDb);
+            const userNotifTitle = "Ride Cancelled";
+            const userNotifMessage = req.body.cancelled_by === 'user' ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled.`;
+            await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                booking_id: String(booking.id),
+                type: "ride_cancelled"
+            });
+            console.log("✅ Cancel notification sent to user:", booking.user_id);
+        } catch (userNotifErr) {
+            console.error("❌ User Notification error in /change-cancel-ride:", userNotifErr.message);
+        }
+    }
+
     return res.json({ success: true, sent_to: sentCount });
 });
 
@@ -2416,6 +2432,22 @@ app.post("/change-driver-ride-status", async (req, res) => {
         adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
         if (socketId) {
             io.to(socketId).emit("booking-cancelled-event", cancelNotif);
+        }
+
+        // Notify User/Customer via Push Notification
+        if (booking.user_id) {
+            try {
+                const db = getConnection(req.tenantDb);
+                const userNotifTitle = "Ride Cancelled";
+                const userNotifMessage = status === "cancel_confirm_ride" ? `Your ride #${booking.booking_id} has been successfully cancelled.` : `Your ride #${booking.booking_id} has been cancelled.`;
+                await sendNotificationToUser(db, booking.user_id, userNotifTitle, userNotifMessage, {
+                    booking_id: String(booking.id),
+                    type: "ride_cancelled"
+                });
+                console.log("✅ Cancel notification sent to user:", booking.user_id);
+            } catch (userNotifErr) {
+                console.error("❌ User Notification error in /change-driver-ride-status:", userNotifErr.message);
+            }
         }
     }
 

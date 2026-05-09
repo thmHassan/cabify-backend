@@ -85,8 +85,8 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
     }
 
     await db.query(
-      `INSERT INTO company_notifications (user_type, user_id, title, message, created_at, updated_at)
-       VALUES ('driver', ?, ?, ?, NOW(), NOW())`,
+      `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at)
+       VALUES ('driver', ?, ?, ?, 'unread', NOW(), NOW())`,
       [driverId, title, body]
     );
 
@@ -127,8 +127,8 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
     }
 
     await db.query(
-      `INSERT INTO company_notifications (user_type, user_id, title, message, created_at, updated_at)
-       VALUES ('user', ?, ?, ?, NOW(), NOW())`,
+      `INSERT INTO notifications (user_type, user_id, title, message, status, created_at, updated_at)
+       VALUES ('rider', ?, ?, ?, 'unread', NOW(), NOW())`,
       [userId, title, body]
     );
 
