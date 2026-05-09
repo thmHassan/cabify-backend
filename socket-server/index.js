@@ -11,7 +11,7 @@ const PDFDocument = require('pdfkit');
 const axios = require("axios");
 const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
-const { sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
+const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
 
 console.log("Loaded VIP Token:", process.env.VIP_WEBHOOK_TOKEN);
 
@@ -546,6 +546,22 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+app.post("/send-to-device", async (req, res) => {
+    try {
+        const { deviceToken, title, body, data } = req.body;
+        if (!deviceToken || !title || !body) {
+            return res.status(400).json({
+                success: false,
+                message: "deviceToken, title, and body are required"
+            });
+        }
+        const result = await sendToDevice(deviceToken, title, body, data || {});
+        return res.json({ success: true, result });
+    } catch (error) {
+        console.error("Error in /send-to-device:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
 
 app.use(cors({
     origin: [
