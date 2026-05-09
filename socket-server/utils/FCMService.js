@@ -89,10 +89,6 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
 }
 
 const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
-  userId = "20";
-  title = "Ride Status Update";
-  body = "Your ride status has been updated successfully.";
-
   try {
     let [tokens] = await db.query(
       "SELECT fcm_token FROM tokens WHERE user_id = ? AND user_type = 'rider'",
@@ -121,14 +117,11 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
       console.warn(`User ${userId}`);
     }
 
-    const results = [];
     for (const token of tokens) {
       if (token.fcm_token) {
-        const res = await sendToDevice(token.fcm_token, title, body, data);
-        results.push(res);
+        await sendToDevice(token.fcm_token, title, body, data);
       }
     }
-    return results;
 
   } catch (err) {
     console.error("sendNotificationToUser Error:", err.message);
