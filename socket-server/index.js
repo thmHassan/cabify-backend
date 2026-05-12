@@ -220,10 +220,13 @@ const autoDispatchRide = async ({
         const driver = drivers[driverIndex];
         console.log(`[AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
 
-        // Amount fallback chain: offered_amount > recommended_amount > existing booking_amount
-        const dispatchAmount = booking.offered_amount ?? booking.recommended_amount ?? booking.booking_amount ?? null;
+        // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
+        const existingDispatchAmt = booking.booking_amount;
+        const dispatchAmount = (existingDispatchAmt === null || existingDispatchAmt === undefined || existingDispatchAmt == 0)
+            ? (booking.offered_amount ?? null)
+            : existingDispatchAmt;
 
-        // Update booking with the assigned driver and lock in the offered amount
+        // Update booking with the assigned driver
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ? WHERE id = ?`,
             [driver.id, dispatchAmount, bookingId]
@@ -1349,11 +1352,12 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const isPreJob = assignment_type === "pre_job";
         const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
 
-        // Amount fallback chain: offered_amount > recommended_amount > existing booking_amount
+        // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
         const existingAmount = bookingRows[0].booking_amount;
         const offeredAmount = bookingRows[0].offered_amount;
-        const recommendedAmount = bookingRows[0].recommended_amount;
-        const amountToSet = offeredAmount ?? recommendedAmount ?? existingAmount ?? null;
+        const amountToSet = (existingAmount === null || existingAmount === undefined || existingAmount == 0)
+            ? (offeredAmount ?? null)
+            : existingAmount;
 
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ? WHERE id = ?`,
