@@ -220,10 +220,13 @@ const autoDispatchRide = async ({
         const driver = drivers[driverIndex];
         console.log(`[AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
 
+        // Amount fallback chain: offered_amount > recommended_amount > existing booking_amount
+        const dispatchAmount = booking.offered_amount ?? booking.recommended_amount ?? booking.booking_amount ?? null;
+
         // Update booking with the assigned driver and lock in the offered amount
         await db.query(
-            `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
-            [driver.id, booking.offered_amount, bookingId]
+            `UPDATE bookings SET driver = ?, booking_amount = ? WHERE id = ?`,
+            [driver.id, dispatchAmount, bookingId]
         );
 
 
@@ -1328,7 +1331,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookingRows] = await db.query(
-            "SELECT id, booking_status, booking_id, offered_amount, booking_amount FROM bookings WHERE id = ?",
+            "SELECT id, booking_status, booking_id, offered_amount, booking_amount, recommended_amount FROM bookings WHERE id = ?",
             [id]
         );
         if (bookingRows.length === 0) {
@@ -1346,12 +1349,11 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const isPreJob = assignment_type === "pre_job";
         const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
 
-        // offered_amount હોય → priority offered_amount; offered_amount null હોય → fallback to booking_amount
+        // Amount fallback chain: offered_amount > recommended_amount > existing booking_amount
         const existingAmount = bookingRows[0].booking_amount;
         const offeredAmount = bookingRows[0].offered_amount;
-        const amountToSet = (offeredAmount !== null && offeredAmount !== undefined)
-            ? offeredAmount
-            : existingAmount;
+        const recommendedAmount = bookingRows[0].recommended_amount;
+        const amountToSet = offeredAmount ?? recommendedAmount ?? existingAmount ?? null;
 
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ? WHERE id = ?`,
