@@ -402,7 +402,10 @@ class BookingController extends Controller
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
 
             $booking->booking_status = "ongoing";
-            $booking->booking_amount = $booking->offered_amount;
+            // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
+            if (is_null($booking->booking_amount) || $booking->booking_amount == 0) {
+                $booking->booking_amount = $booking->offered_amount;
+            }
             $booking->driver = $driver->id;
             $booking->save();
 
