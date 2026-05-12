@@ -1328,7 +1328,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookingRows] = await db.query(
-            "SELECT id, booking_status, booking_id, offered_amount FROM bookings WHERE id = ?",
+            "SELECT id, booking_status, booking_id, offered_amount, booking_amount FROM bookings WHERE id = ?",
             [id]
         );
         if (bookingRows.length === 0) {
@@ -1346,10 +1346,16 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const isPreJob = assignment_type === "pre_job";
         const newStatus = isPreJob ? bookingRows[0].booking_status : 'pending_acceptance';
 
+        // offered_amount હોય → priority offered_amount; offered_amount null હોય → fallback to booking_amount
+        const existingAmount = bookingRows[0].booking_amount;
+        const offeredAmount = bookingRows[0].offered_amount;
+        const amountToSet = (offeredAmount !== null && offeredAmount !== undefined)
+            ? offeredAmount
+            : existingAmount;
 
         await db.query(
-            `UPDATE bookings SET driver = ? , booking_amount = ? WHERE id = ?`,
-            [driver_id, bookingRows[0].offered_amount, id]
+            `UPDATE bookings SET driver = ?, booking_amount = ? WHERE id = ?`,
+            [driver_id, amountToSet, id]
         );
 
         // Fetch updated booking for socket payload
