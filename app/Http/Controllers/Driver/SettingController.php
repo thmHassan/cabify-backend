@@ -433,6 +433,7 @@ class SettingController extends Controller
             if(isset($request->package_type) &&  $request->package_type == "ride_count_price"){
                 $companySetting = CompanySetting::orderBy("id", "DESC")->first();
                 $user->ride_count_price = $companySetting->package_days;
+                $user->wallet_balance -= $companySetting->package_amount;
                 $user->save();
             }
             else{
