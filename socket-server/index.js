@@ -2688,7 +2688,7 @@ app.post("/waiting-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [driverRows] = await db.query(
-            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot
+            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot, d.updated_at
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              WHERE d.id = ? 
@@ -2702,9 +2702,19 @@ app.post("/waiting-driver", async (req, res) => {
         }
 
         const driver = driverRows[0];
-
         const plotId = driver.plot_id;
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+        let rank = 1;
+        if (plotId) {
+            const [rankRows] = await db.query(
+                `SELECT COUNT(*) as count 
+                 FROM drivers 
+                 WHERE plot_id = ? AND driving_status = ? AND (updated_at < ? OR (updated_at = ? AND id < ?))`,
+                [plotId, driver.driving_status, driver.updated_at, driver.updated_at, driver.id]
+            );
+            rank = rankRows[0].count + 1;
+        }
 
         const eventData = {
             driver_id: driver.id,
@@ -2712,7 +2722,7 @@ app.post("/waiting-driver", async (req, res) => {
             driver_name: driver.name,
             plot: plotId,
             plot_name: plotName,
-            rank: driver.priority_plot ?? 1
+            rank: rank
         };
 
         const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
