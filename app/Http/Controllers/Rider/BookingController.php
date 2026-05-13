@@ -734,7 +734,7 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyBooking::where("id", $booking->driver)->first();
+            $driver = CompanyDriver::where("id", $booking->driver)->first();
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
             if ($companySetting->package_type == "ride_count_price") {
                 $driver->ride_count_price += 1;
