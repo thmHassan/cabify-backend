@@ -1355,9 +1355,9 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         const driverName = driverRows[0].name || "Driver";
 
-        const actionText = isPreJob
-            ? `${dispatcherName} send pre job  to ${driverName}`
-            : `${dispatcherName} allocet driver to ${driverName}`;
+        const actionText = isPreJob 
+            ? `${dispatcherName} sent a pre-job request to ${driverName}`
+            : `${dispatcherName} allocated driver ${driverName} to this booking`;
 
         // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
         const existingAmount = bookingRows[0].booking_amount;
@@ -1438,7 +1438,7 @@ app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
         const db = getConnection(req.tenantDb);
         await db.query(
             "UPDATE bookings SET dispatcher_action = ? WHERE id = ?",
-            [`${dispatcherName} started auto dispatch`, id]
+            [`${dispatcherName} started the auto-dispatch process for this ride`, id]
         );
 
         autoDispatchRide({
@@ -1551,7 +1551,7 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         await db.query(
             "UPDATE bookings SET follow_on_job_id = ?, dispatcher_action = ? WHERE id = ?",
-            [follow_on_booking_id, `${dispatcherName} set follow on job`, id]
+            [follow_on_booking_id, `${dispatcherName} linked booking #${job2.booking_id} as a follow-on job to this ride`, id]
         );
 
         const responseData = {
@@ -1791,7 +1791,7 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
         // Update dispatcher action
         await db.query(
             "UPDATE bookings SET dispatcher_action = ? WHERE id = ?",
-            [`${dispatcherName} send confirmation email`, id]
+            [`${dispatcherName} sent a booking confirmation email to the customer`, id]
         );
 
         const [bookings] = await db.query(`
@@ -1906,10 +1906,10 @@ app.put("/bookings/:id/status", async (req, res) => {
         const params = [booking_status];
 
         // Record dispatcher action for any status update initiated via this endpoint
-        let actionLabel = booking_status;
-        if (booking_status === 'cancelled') actionLabel = "cancel ride";
-        else if (booking_status === 'completed') actionLabel = "complete ride";
-
+        let actionLabel = `updated the status to ${booking_status}`;
+        if (booking_status === 'cancelled') actionLabel = "cancelled this ride";
+        else if (booking_status === 'completed') actionLabel = "marked the ride as completed";
+        
         updateQuery += ", dispatcher_action = ?";
         params.push(`${dispatcherName} ${actionLabel}`);
 
