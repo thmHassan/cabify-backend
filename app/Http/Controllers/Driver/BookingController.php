@@ -177,7 +177,12 @@ class BookingController extends Controller
                 }
             }
             if ($companySetting->package_type == "ride_count_price") {
-                
+                if(auth("driver")->user()->ride_count_price <= 0){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your ride count is not sufficient'
+                    ], 400);
+                }
             }
             if ($companySetting->package_type == "packages_topup") {
                 $package = DriverPackage::where("driver_id", auth("driver")->user()->id)->where("package_type", "packages_topup")->orderBy("id", "DESC")->first();
@@ -340,6 +345,9 @@ class BookingController extends Controller
             $driver->cancel_rides_per_day += 1;
             
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+            if ($companySetting->package_type == "ride_count_price") {
+                $driver->ride_count_price += 1;
+            }
             if ($companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = $companySetting->package_amount;
                 $driver->wallet_balance += $checkAmount;
@@ -388,6 +396,14 @@ class BookingController extends Controller
                     ], 400);
                 }
             }
+            if ($companySetting->package_type == "ride_count_price") {
+                if(auth("driver")->user()->ride_count_price <= 0){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your ride count is not sufficient'
+                    ], 400);
+                }
+            }
             if ($companySetting->package_type == "packages_topup") {
                 $package = DriverPackage::where("driver_id", auth("driver")->user()->id)
                     ->where("package_type", "packages_postpaid")
@@ -403,7 +419,9 @@ class BookingController extends Controller
             }
 
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
-
+            $driver->ride_count_price -= 1;
+            $driver->save();
+            
             $booking->booking_status = "ongoing";
             // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
             if (is_null($booking->booking_amount) || $booking->booking_amount == 0) {

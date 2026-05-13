@@ -498,6 +498,16 @@ class BookingController extends Controller
 
                 $driver = CompanyDriver::where("id", $bid->driver_id)->first();
                 $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+                if ($companySetting->package_type == "ride_count_price") {
+                    if($driver->ride_count_price <= 0){
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver does not have sufficient ride count to accept this ride'
+                        ], 400);
+                    }
+                    $driver->ride_count_price -= 1;
+                    $driver->save();
+                }
                 if($companySetting->package_type == "per_ride_commission_topup"){
                     $checkAmount = $companySetting->package_amount;
                     if($driver->wallet_balance < $checkAmount){
@@ -726,6 +736,10 @@ class BookingController extends Controller
 
             $driver = CompanyBooking::where("id", $booking->driver)->first();
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+            if ($companySetting->package_type == "ride_count_price") {
+                $driver->ride_count_price += 1;
+                $driver->save();
+            }
             if ($companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = $companySetting->package_amount;
                 $driver->wallet_balance += $checkAmount;

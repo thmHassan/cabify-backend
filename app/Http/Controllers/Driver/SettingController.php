@@ -409,11 +409,12 @@ class SettingController extends Controller
     {
         try {
             $request->validate([
-                'days' => 'required|integer|min:1',
-                'post_paid_amount' => 'required|numeric|min:0',
-                'package_duration' => 'required|in:day,week,month',
-                'package_top_up_id' => 'required',
-                'package_top_up_name' => 'required',
+                'package_type' => 'nullable',
+                'days' => 'required_without:package_type|integer|min:1',
+                'post_paid_amount' => 'required_without:package_type|numeric|min:0',
+                'package_duration' => 'required_without:package_type|in:day,week,month',
+                'package_top_up_id' => 'required_without:package_type',
+                'package_top_up_name' => 'required_without:package_type',
             ]);
 
             $driverId = auth('driver')->user()->id;
@@ -430,7 +431,8 @@ class SettingController extends Controller
             $user->save();
 
             if(isset($request->package_type) &&  $request->package_type == "ride_count_price"){
-                $user->ride_count_price = $request->ride_count_price;
+                $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+                $user->ride_count_price = $companySetting->package_days;
                 $user->save();
             }
             else{
