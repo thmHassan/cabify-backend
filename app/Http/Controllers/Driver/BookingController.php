@@ -176,6 +176,9 @@ class BookingController extends Controller
                     ], 400);
                 }
             }
+            if ($companySetting->package_type == "ride_count_price") {
+                
+            }
             if ($companySetting->package_type == "packages_topup") {
                 $package = DriverPackage::where("driver_id", auth("driver")->user()->id)->where("package_type", "packages_topup")->orderBy("id", "DESC")->first();
 

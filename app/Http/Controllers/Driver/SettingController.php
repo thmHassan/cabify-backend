@@ -419,6 +419,7 @@ class SettingController extends Controller
             $driverId = auth('driver')->user()->id;
 
             $user = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+
             if($user->wallet_balance < $request->post_paid_amount){
                 return response()->json([
                     'error' => 1,
@@ -428,26 +429,32 @@ class SettingController extends Controller
             $user->wallet_balance -= $request->post_paid_amount;
             $user->save();
 
-            $add = $request->days;
-            if($request->package_duration == "day"){
+            if(isset($request->package_type) &&  $request->package_type == "ride_count_price"){
+                $user->ride_count_price = $request->ride_count_price;
+                $user->save();
+            }
+            else{
                 $add = $request->days;
+                if($request->package_duration == "day"){
+                    $add = $request->days;
+                }
+                elseif($request->package_duration == "week"){
+                    $add = $request->days * 7;
+                }
+                elseif($request->package_duration == "month"){
+                    $add = $request->days * 30;
+                }
+    
+                DriverPackage::create([
+                    'driver_id' => $driverId,
+                    'package_type' => 'packages_postpaid',
+                    'start_date' => now()->toDateString(),
+                    'expire_date' => now()->addDays($add)->toDateString(),
+                    'post_paid_amount' => $request->post_paid_amount,
+                    'package_top_up_id' => $request->package_top_up_id,
+                    'package_top_up_name' => $request->package_top_up_name,
+                ]);
             }
-            elseif($request->package_duration == "week"){
-                $add = $request->days * 7;
-            }
-            elseif($request->package_duration == "month"){
-                $add = $request->days * 30;
-            }
-
-            DriverPackage::create([
-                'driver_id' => $driverId,
-                'package_type' => 'packages_postpaid',
-                'start_date' => now()->toDateString(),
-                'expire_date' => now()->addDays($add)->toDateString(),
-                'post_paid_amount' => $request->post_paid_amount,
-                'package_top_up_id' => $request->package_top_up_id,
-                'package_top_up_name' => $request->package_top_up_name,
-            ]);
 
             $wallet = new WalletTransaction;
             $wallet->user_type = "driver";
