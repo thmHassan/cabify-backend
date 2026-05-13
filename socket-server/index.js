@@ -1355,9 +1355,9 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         const driverName = driverRows[0].name || "Driver";
 
-        const actionText = isPreJob 
-            ? `${dispatcherName} _send pre job  to ${driverName}`
-            : `${dispatcherName} _allocet driver to ${driverName}`;
+        const actionText = isPreJob
+            ? `${dispatcherName} send pre job  to ${driverName}`
+            : `${dispatcherName} allocet driver to ${driverName}`;
 
         // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
         const existingAmount = bookingRows[0].booking_amount;
@@ -1909,7 +1909,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         let actionLabel = booking_status;
         if (booking_status === 'cancelled') actionLabel = "cancel ride";
         else if (booking_status === 'completed') actionLabel = "complete ride";
-        
+
         updateQuery += ", dispatcher_action = ?";
         params.push(`${dispatcherName} ${actionLabel}`);
 
