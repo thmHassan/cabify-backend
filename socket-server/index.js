@@ -1355,11 +1355,10 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         const driverName = driverRows[0].name || "Driver";
 
-        const actionText = isPreJob 
+        const actionText = isPreJob
             ? `${dispatcherName} sent a pre-job request to ${driverName}`
             : `${dispatcherName} allocated driver ${driverName} to this booking`;
 
-        // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
         const existingAmount = bookingRows[0].booking_amount;
         const offeredAmount = bookingRows[0].offered_amount;
         const amountToSet = (existingAmount === null || existingAmount === undefined || existingAmount == 0)
@@ -1371,7 +1370,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             [driver_id, amountToSet, actionText, id]
         );
 
-        // Fetch updated booking for socket payload
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         const updatedBooking = updatedBookingRows[0];
 
@@ -1385,9 +1383,9 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
                 booking_id: String(id),
                 type: "new_ride"
             });
-            console.log("✅ Notification sent to driver:", driverRows[0].name);
+            console.log("Notification sent to driver:", driverRows[0].name);
         } catch (fcmError) {
-            console.error("⚠️ FCM failed (non-fatal):", fcmError.message);
+            console.error("FCM failed (non-fatal):", fcmError.message);
         }
 
         try {
@@ -1398,22 +1396,19 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
                 message: notifMessage
             });
         } catch (storeError) {
-            console.error("⚠️ Store notification failed (non-fatal):", storeError.message);
+            console.error("Store notification failed (non-fatal):", storeError.message);
         }
 
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
-            // Emit ONLY new-ride-request for assignment popup
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
                 assignment_type: isPreJob ? "pre_job" : "allocate_driver",
                 message: notifMessage,
                 booking: updatedBooking
             });
-            console.log(`📲 [AssignDriver] Socket event 'new-ride-request' sent to Driver #${driver_id}`);
         }
 
-        // Notify dispatchers about the assignment so it shows up in their notifications
         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
 
         return res.json({
@@ -1424,7 +1419,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("❌ Assign driver error:", error);
+        console.error("Assign driver error:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -1475,7 +1470,7 @@ app.post("/bookings/:id/record-action", async (req, res) => {
 
         return res.json({ success: true, message: "Action recorded" });
     } catch (error) {
-        console.error("❌ Record action error:", error);
+        console.error("Record action error:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -1495,7 +1490,6 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        // Validate Job 1 (must be active with a driver)
         const [job1Rows] = await db.query(
             "SELECT id, booking_id, booking_status, driver, follow_on_job_id FROM bookings WHERE id = ?",
             [id]
@@ -1515,7 +1509,6 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             });
         }
 
-        // Validate Job 2 (must be pending)
         const [job2Rows] = await db.query(
             "SELECT id, booking_id, booking_status FROM bookings WHERE id = ?",
             [follow_on_booking_id]
@@ -1531,7 +1524,6 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             });
         }
 
-        // Check Job 2 is not already linked to another booking
         const [alreadyLinked] = await db.query(
             "SELECT id FROM bookings WHERE follow_on_job_id = ?",
             [follow_on_booking_id]
@@ -1543,11 +1535,9 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             });
         }
 
-        // Get driver name
         const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
         const driverName = driverRows[0]?.name || "Driver";
 
-        // Link: store follow_on_job_id on Job 1
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         await db.query(
             "UPDATE bookings SET follow_on_job_id = ?, dispatcher_action = ? WHERE id = ?",
@@ -1564,17 +1554,16 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
         };
 
-        // Notify all dispatchers/admins
         dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
 
-        console.log(`🔗 Follow-on linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
+        console.log(`Follow-on linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
 
         return res.json({ success: true, message: responseData.message, data: responseData });
 
     } catch (error) {
-        console.error("❌ Set follow-on job error:", error);
+        console.error("Set follow-on job error:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -1597,7 +1586,7 @@ app.delete("/bookings/:id/remove-follow-on-job", async (req, res) => {
 
         return res.json({ success: true, message: "Follow-on job unlinked successfully" });
     } catch (error) {
-        console.error("❌ Remove follow-on job error:", error);
+        console.error("Remove follow-on job error:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -1607,7 +1596,6 @@ app.post("/driver/accept-ride", async (req, res) => {
         const { ride_id } = req.body;
         const db = getConnection(req.tenantDb);
 
-        // UPDATE DB: Mark the ride as accepted by the driver
         await db.query(
             `UPDATE bookings SET driver_response = 'accepted', booking_status = 'ongoing' WHERE id = ?`,
             [ride_id]
@@ -1703,7 +1691,6 @@ app.post("/driver/cancel-ride", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        // UPDATE DB: Reset the booking so it can be re-assigned or picked up by auto-dispatch
         await db.query(
             `UPDATE bookings SET driver = NULL, driver_response = NULL, booking_status = 'pending' WHERE id = ?`,
             [ride_id]
@@ -1788,7 +1775,6 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 
         const db = getConnection(req.tenantDb);
 
-        // Update dispatcher action
         await db.query(
             "UPDATE bookings SET dispatcher_action = ? WHERE id = ?",
             [`${dispatcherName} sent a booking confirmation email to the customer`, id]
@@ -1905,11 +1891,10 @@ app.put("/bookings/:id/status", async (req, res) => {
         let updateQuery = "UPDATE bookings SET booking_status = ?";
         const params = [booking_status];
 
-        // Record dispatcher action for any status update initiated via this endpoint
         let actionLabel = `updated the status to ${booking_status}`;
         if (booking_status === 'cancelled') actionLabel = "cancelled this ride";
         else if (booking_status === 'completed') actionLabel = "marked the ride as completed";
-        
+
         updateQuery += ", dispatcher_action = ?";
         params.push(`${dispatcherName} ${actionLabel}`);
 
@@ -1951,9 +1936,9 @@ app.put("/bookings/:id/status", async (req, res) => {
                         title: userNotifTitle,
                         message: userNotifMessage
                     });
-                    console.log("✅ Cancel notification sent to user:", booking.user_id);
+                    console.log("Cancel notification sent to user:", booking.user_id);
                 } catch (userNotifErr) {
-                    console.error("❌ User Notification error in ride cancellation:", userNotifErr.message);
+                    console.error("User Notification error in ride cancellation:", userNotifErr.message);
                 }
             }
 
@@ -1969,9 +1954,9 @@ app.put("/bookings/:id/status", async (req, res) => {
                         title: notifTitle,
                         message: notifMessage
                     });
-                    console.log("✅ Cancel notification sent to driver:", booking.driver);
+                    console.log("Cancel notification sent to driver:", booking.driver);
                 } catch (notifErr) {
-                    console.error("❌ Notification error in ride cancellation (driver):", notifErr.message);
+                    console.error("Notification error in ride cancellation (driver):", notifErr.message);
                 }
             }
 
@@ -1997,9 +1982,9 @@ app.put("/bookings/:id/status", async (req, res) => {
                         title: notifTitle,
                         message: notifMessage
                     });
-                    console.log("✅ Complete notification sent to driver:", driverInfoForFo?.name);
+                    console.log("Complete notification sent to driver:", driverInfoForFo?.name);
                 } catch (notifErr) {
-                    console.error("❌ Notification error in ride completion (driver):", notifErr.message);
+                    console.error("Notification error in ride completion (driver):", notifErr.message);
                 }
 
                 // Push notification to User
@@ -2016,7 +2001,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                             message: notifMessage
                         });
                     } catch (err) {
-                        console.error("❌ Notification error in ride completion (user):", err.message);
+                        console.error("Notification error in ride completion (user):", err.message);
                     }
                 }
             } else if (['arrived', 'started'].includes(booking_status)) {
@@ -2036,7 +2021,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                             message: userNotifMessage
                         });
                     } catch (err) {
-                        console.error(`❌ Notification error in ride ${booking_status} (user):`, err.message);
+                        console.error(`Notification error in ride ${booking_status} (user):`, err.message);
                     }
                 }
             }
@@ -2046,7 +2031,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         let followOnEventData = null;
         if (booking.follow_on_job_id) {
             const followOnId = booking.follow_on_job_id;
-            console.log(`🔁 Follow-on job detected: #${followOnId} — sending to driver #${booking.driver}`);
+            console.log(`Follow-on job detected: #${followOnId} — sending to driver #${booking.driver}`);
 
             try {
                 const [followOnRows] = await db.query(
@@ -2080,7 +2065,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                             message: foNotifMsg
                         });
                     } catch (notifErr) {
-                        console.error("❌ Notification error in follow-on dispatch:", notifErr.message);
+                        console.error("Notification error in follow-on dispatch:", notifErr.message);
                     }
 
                     const [driverInfoRows] = await db.query("SELECT name FROM drivers WHERE id = ?", [driverId]);
@@ -2129,14 +2114,13 @@ app.put("/bookings/:id/status", async (req, res) => {
                         }
                     }, 30000);
 
-                    console.log(`✅ Follow-on job #${followOnId} sent to driver #${driverId}`);
+                    console.log(`Follow-on job #${followOnId} sent to driver #${driverId}`);
                 }
             } catch (foError) {
-                console.error(`❌ Error dispatching follow-on job:`, foError.message);
+                console.error(`Error dispatching follow-on job:`, foError.message);
             }
         }
 
-        // --- ALL SOCKET EMITS AT THE END ---
         if (booking.driver) {
             const driverSocketId = driverSockets.get(booking.driver.toString());
             if (driverSocketId) {
@@ -2223,7 +2207,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         return res.json({ success: true, message: "Booking status updated successfully", res_user });
 
     } catch (error) {
-        console.error("❌ Error updating booking status:", error);
+        console.error("Error updating booking status:", error);
         return res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -2325,7 +2309,6 @@ app.post("/bookings/broadcast", async (req, res) => {
             sentCount++;
         });
 
-        // BROADCAST: Notify all connected drivers about the new available ride
         driverSockets.forEach((socketId) => {
             io.to(socketId).emit("new-ride", booking);
             sentCount++;
@@ -2359,12 +2342,11 @@ app.post("/send-new-ride", async (req, res) => {
                     type: "new_ride"
                 });
             } catch (notifErr) {
-                console.error("❌ Notification error in /send-new-ride:", notifErr.message);
+                console.error("Notification error in /send-new-ride:", notifErr.message);
             }
 
             const socketId = driverSockets.get(driverId.toString());
             if (socketId) {
-                // Emit ONLY new-ride-request for assignment popup
                 io.to(socketId).emit("new-ride-request", {
                     booking_id: booking.id,
                     message: "New ride available",
@@ -2444,7 +2426,7 @@ app.post("/change-cancel-ride", async (req, res) => {
                     message: driverNotifMessage
                 });
             } catch (driverNotifErr) {
-                console.error("❌ Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
+                console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
             }
         }
     }
