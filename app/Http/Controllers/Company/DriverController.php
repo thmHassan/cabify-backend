@@ -115,8 +115,6 @@ class DriverController extends Controller
                 'joined_date' => 'required',
             ]);
             
-            $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
-
             $driver = CompanyDriver::where("id", $request->id)->first();
             $driver->name = isset($request->name) ? $request->name : $driver->name;
             $driver->email = isset($request->email) ? $request->email : $driver->email;
@@ -125,9 +123,24 @@ class DriverController extends Controller
             $driver->address = isset($request->address) ? $request->address : $driver->address;
             $driver->driver_license = isset($request->driver_license) ? $request->driver_license : $driver->driver_license;
             $driver->assigned_vehicle = isset($request->assigned_vehicle) ? $request->assigned_vehicle : $driver->assigned_vehicle;
-            $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
-            $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
-            $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
+
+            if (isset($request->assigned_vehicle) && !empty($request->assigned_vehicle)) {
+                $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
+                if ($vehicleDetail) {
+                    $driver->vehicle_name = $vehicleDetail->vehicle_type_name;
+                    $driver->vehicle_type = $vehicleDetail->vehicle_type_service;
+                    $driver->vehicle_service = $vehicleDetail->vehicle_type_service;
+                }
+            }
+
+            $driver->vehicle_name = isset($request->vehicle_name) ? $request->vehicle_name : $driver->vehicle_name;
+            $driver->vehicle_type = isset($request->vehicle_type) ? $request->vehicle_type : $driver->vehicle_type;
+            $driver->vehicle_service = isset($request->vehicle_service) ? $request->vehicle_service : $driver->vehicle_service;
+            $driver->seats = isset($request->seats) ? $request->seats : $driver->seats;
+            $driver->color = isset($request->color) ? $request->color : $driver->color;
+            $driver->plate_no = isset($request->plate_no) ? $request->plate_no : $driver->plate_no;
+            $driver->vehicle_registration_date = isset($request->vehicle_registration_date) ? $request->vehicle_registration_date : $driver->vehicle_registration_date;
+
             $driver->joined_date = isset($request->joined_date) ? $request->joined_date : $driver->joined_date;
             $driver->sub_company = isset($request->sub_company) ? $request->sub_company : $driver->sub_company;
             $driver->package_id = $request->package_id;
