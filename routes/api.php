@@ -220,6 +220,9 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::post('/company/save-package-topup', [SettingController::class, 'savePackageTopup']);
     Route::post('/company/edit-package-topup', [SettingController::class, 'editPackageTopup']);
     Route::get('/company/delete-package-topup', [SettingController::class, 'deletePackageTopup']);
+    Route::post('/company/save-ride-count', [SettingController::class, 'saveRideCount']);
+    Route::post('/company/edit-ride-count', [SettingController::class, 'editRideCount']);
+    Route::get('/company/delete-ride-count', [SettingController::class, 'deleteRideCount']);
     Route::get('/company/plan-detail', [SettingController::class, 'planDetail']);
     Route::get('/company/payment-history', [SettingController::class, 'paymentHistory']);
     Route::get('/company/stripe-information', [SettingController::class, 'stripeInformation']);
@@ -282,6 +285,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
     Route::post('/driver/register', [DriverAuthController::class, 'register']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
+    Route::post('/driver/set-password', [DriverAuthController::class, 'setPassword']);
+    Route::post('/driver/change-password', [DriverAuthController::class, 'changePassword']);
     Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
 
     Route::group(['middleware' => ['auth.driver.jwt', 'check.app.availibility']], function () {
@@ -341,6 +346,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/login', [RiderAuthController::class, 'login']);
     Route::post('/rider/register', [RiderAuthController::class, 'register']);
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
+    Route::post('/rider/set-password', [RiderAuthController::class, 'setPassword']);
+    Route::post('/rider/change-password', [RiderAuthController::class, 'changePassword']);
     Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
 
     Route::group(['middleware' => ['auth.rider.jwt', 'check.app.availibility']], function () {

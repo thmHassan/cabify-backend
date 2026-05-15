@@ -275,6 +275,32 @@ class SettingController extends Controller
         }
     }
 
+    public function saveRideCount(Request $request)
+    {
+        try {
+            $request->validate([
+                'package_type' => 'required',
+                'package_ride_count' => 'required',
+                'package_amount' => 'required',
+            ]);
+            $data = new PackageRideCountSetting;
+            $data->package_type = $request->package_type;
+            $data->package_duration = $request->package_ride_count;
+            $data->package_price = $request->package_amount;
+            $data->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package Ride Count saved successfully'
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function editPackageTopup(Request $request)
     {
         try {
@@ -295,6 +321,34 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Package Topup updated successfully'
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function editRideCount(Request $request)
+    {
+        try {
+            $request->validate([
+                'id' => 'required',
+                'package_type' => 'required',
+                'package_ride_count' => 'required',
+                'package_amount' => 'required',
+            ]);
+            
+            $data = PackageRideCountSetting::where("id", $request->id)->first();
+            $data->package_type = $request->package_type;
+            $data->package_duration = $request->package_ride_count;
+            $data->package_price = $request->package_amount;
+            $data->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package Ride Count updated successfully'
             ]);
         } catch (Exception $e) {
             return response()->json([
@@ -345,6 +399,27 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Package popup deleted successfully'
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteRideCount(Request $request)
+    {
+        try {
+            $packageTopup = PackageRideCountSetting::where("id", $request->id)->first();
+
+            if (isset($packageTopup) && $packageTopup != NULL) {
+                $packageTopup->delete();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package ride count deleted successfully'
             ]);
         } catch (Exception $e) {
             return response()->json([
