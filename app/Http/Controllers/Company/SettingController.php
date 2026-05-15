@@ -17,6 +17,7 @@ use App\Models\CompanyDriver;
 use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyBooking;
+use App\Models\PackageRideCountSetting;
 use Carbon\Carbon;
 
 class SettingController extends Controller
