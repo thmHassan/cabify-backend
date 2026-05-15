@@ -23,6 +23,7 @@ use App\Services\FCMService;
 use Illuminate\Support\Facades\DB;
 use App\Models\Setting;
 use App\Models\MobileAppSetting;
+use App\Models\PackageRideCountSetting;
 
 class SettingController extends Controller
 {
@@ -413,7 +414,7 @@ class SettingController extends Controller
                 'days' => 'required_without:package_type|integer|min:1',
                 'post_paid_amount' => 'required_without:package_type|numeric|min:0',
                 'package_duration' => 'required_without:package_type|in:day,week,month',
-                'package_top_up_id' => 'required_without:package_type',
+                'package_top_up_id' => 'required',
                 'package_top_up_name' => 'required_without:package_type',
             ]);
 
@@ -421,22 +422,37 @@ class SettingController extends Controller
 
             $user = CompanyDriver::where("id", auth("driver")->user()->id)->first();
 
-            if($user->wallet_balance < $request->post_paid_amount){
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Your wallet balance is not sufficient' 
-                ], 400);
-            }
-            $user->wallet_balance -= $request->post_paid_amount;
-            $user->save();
-
             if(isset($request->package_type) &&  $request->package_type == "ride_count_price"){
-                $companySetting = CompanySetting::orderBy("id", "DESC")->first();
-                $user->ride_count_price = $companySetting->package_days;
-                $user->wallet_balance -= $companySetting->package_amount;
+                $packageData = PackageRideCountSetting::where("id", $request->package_top_up_id)->first();
+                
+                if($user->wallet_balance < $packageData->package_amount){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your wallet balance is not sufficient' 
+                    ], 400);
+                }
+
+                $user->ride_count_price = $packageData->package_ride_count;
+                $user->wallet_balance -= $packageData->package_amount;
                 $user->save();
+
+                DriverPackage::create([
+                    'driver_id' => $driverId,
+                    'package_type' => 'ride_count_price',
+                    'post_paid_amount' => $packageData->package_amount,
+                    'package_top_up_id' => $request->package_top_up_id,
+                ]);
             }
             else{
+                if($user->wallet_balance < $request->post_paid_amount){
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Your wallet balance is not sufficient' 
+                    ], 400);
+                }
+                $user->wallet_balance -= $request->post_paid_amount;
+                $user->save();
+
                 $add = $request->days;
                 if($request->package_duration == "day"){
                     $add = $request->days;
@@ -463,7 +479,7 @@ class SettingController extends Controller
             $wallet->user_type = "driver";
             $wallet->user_id = $driverId;
             $wallet->type = 'deduct';
-            $wallet->amount = $request->post_paid_amount;
+            $wallet->amount = $request->package_type == "ride_count_price" ? $packageData->package_amount : $request->post_paid_amount;
             $wallet->comment = "Package purchase";
             $wallet->save();
             
@@ -485,11 +501,11 @@ class SettingController extends Controller
             $package = DriverPackage::where('driver_id', auth("driver")->user()->id)->orderBy("updated_at", "DESC")->whereDate('expire_date', '>=', now()->toDateString())->first();
 
             if((!isset($package) || $package == NULL) && auth("driver")->user()->ride_count_price > 0){
-                $package = [
-                    "package_type" => 'ride_count_price',
-                    "ride_count_price" => auth("driver")->user()->ride_count_price
-                ];
-                $package = (object) $package;
+
+                $package = DriverPackage::where('driver_id', auth("driver")->user()->id)->where('package_type', 'ride_count_price')->orderBy("id", "DESC")->first();
+                if ($package) {
+                    $package->ride_count_price = auth("driver")->user()->ride_count_price;
+                }
             }
 
             return response()->json([
