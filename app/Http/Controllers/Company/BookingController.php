@@ -185,6 +185,8 @@ class BookingController extends Controller
                         $newBooking->booking_status = 'pending';
                         $newBooking->distance = $distance;
                         $newBooking->booking_amount = $request->booking_amount;
+                        $newBooking->recommended_amount = $request->booking_amount;
+                        $newBooking->offered_amount = $request->booking_amount;
                         $newBooking->dispatcher_id = $request->dispatcher_id;
                         $newBooking->start_at = $request->start_at;
                         $newBooking->end_at = $request->end_at;
@@ -296,6 +298,8 @@ class BookingController extends Controller
                 $newBooking->booking_status = 'pending';
                 $newBooking->distance = $distance;
                 $newBooking->booking_amount = $request->booking_amount;
+                $newBooking->recommended_amount = $request->booking_amount;
+                $newBooking->offered_amount = $request->booking_amount;
                 $newBooking->dispatcher_id = $request->dispatcher_id;
                 $newBooking->week = $request->week;
                 $newBooking->start_at = $request->start_at;
