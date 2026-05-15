@@ -246,7 +246,7 @@ class SettingController extends Controller
                 $company_booking_system = "auto_dispatch";
             }
             elseif($company_booking_system == "both"){
-                $company_booking_system = "both";
+                $company_booking_system = $setting->company_booking_system;
             }
             else{
                 $company_booking_system = "bidding";
