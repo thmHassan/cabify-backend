@@ -285,7 +285,6 @@ class SettingController extends Controller
                 'package_amount' => 'required',
             ]);
             $data = new PackageRideCountSetting;
-            $data->package_type = $request->package_type;
             $data->package_duration = $request->package_ride_count;
             $data->package_price = $request->package_amount;
             $data->save();
@@ -342,7 +341,6 @@ class SettingController extends Controller
             ]);
             
             $data = PackageRideCountSetting::where("id", $request->id)->first();
-            $data->package_type = $request->package_type;
             $data->package_duration = $request->package_ride_count;
             $data->package_price = $request->package_amount;
             $data->save();
