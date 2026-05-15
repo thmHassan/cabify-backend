@@ -484,6 +484,14 @@ class SettingController extends Controller
         try{
             $package = DriverPackage::where('driver_id', auth("driver")->user()->id)->orderBy("updated_at", "DESC")->whereDate('expire_date', '>=', now()->toDateString())->first();
 
+            if((!isset($package) || $package == NULL) && auth("driver")->user()->ride_count_price > 0){
+                $package = [
+                    "package_type" => 'ride_count_price',
+                    "ride_count_price" => auth("driver")->user()->ride_count_price
+                ];
+                $package = (object) $package;
+            }
+
             return response()->json([
                 'success' => 1,
                 'message' => "package information fetched successfully",
