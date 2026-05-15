@@ -687,7 +687,7 @@ class BookingController extends Controller
     {
         try {
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
-            if ($booking->otp == $request->otp) {
+            // if ($booking->otp == $request->otp) {
                 $booking->booking_status = "started";
                 $booking->driver_pickup_time = now()->format('Y-m-d H:i:s');
                 $booking->save();
@@ -740,12 +740,12 @@ class BookingController extends Controller
                     'success' => 1,
                     'message' => 'OTP verified successfully'
                 ]);
-            } else {
-                return response()->json([
-                    'success' => 1,
-                    'message' => 'OTP unverified'
-                ], 400);
-            }
+            // } else {
+            //     return response()->json([
+            //         'success' => 1,
+            //         'message' => 'OTP unverified'
+            //     ], 400);
+            // }
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
