@@ -1354,26 +1354,32 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const bookingDate = bookingRows[0].booking_date;
         const pickupTime = bookingRows[0].pickup_time;
-        const today = new Date().toISOString().split('T')[0];
-
+        
         let isNow = false;
         if (pickupTime === 'asap') {
             isNow = true;
         } else if (bookingDate) {
-            const bDate = new Date(bookingDate).toISOString().split('T')[0];
-            if (bDate === today) {
-                const now = new Date();
-                const [pHours, pMinutes] = (pickupTime || "00:00").split(':').map(Number);
-                const pickupDateTime = new Date();
-                pickupDateTime.setHours(pHours, pMinutes, 0, 0);
+            const now = new Date();
+            const bDate = new Date(bookingDate);
+            
+            // Local date strings (YYYY-MM-DD)
+            const bDateStr = `${bDate.getFullYear()}-${String(bDate.getMonth() + 1).padStart(2, '0')}-${String(bDate.getDate()).padStart(2, '0')}`;
+            const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-                if (pickupDateTime <= new Date(now.getTime() + 30 * 60 * 1000)) {
+            if (bDateStr === todayStr) {
+                const [pHours, pMinutes] = (pickupTime || "00:00").split(':').map(Number);
+                const pickupTotalMinutes = pHours * 60 + pMinutes;
+                const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+                
+                // Check if pickup time is within 30 minutes before or after current time
+                if (pickupTotalMinutes >= currentTotalMinutes - 30 && pickupTotalMinutes <= currentTotalMinutes + 30) {
                     isNow = true;
                 }
             }
         }
 
         const newStatus = (isNow && !isPreJob) ? 'ongoing' : 'pending';
+
         const driverResponse = 'accepted';
 
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
