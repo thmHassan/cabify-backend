@@ -129,7 +129,7 @@ class AuthController extends Controller
             $request->validate([
                 'phone' => 'required',
                 'country_code' => 'required',
-                'password' => 'required'
+                // 'password' => 'required'
             ]);
 
             $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
@@ -141,12 +141,12 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            if(!Hash::check($request->password, $user->password)){
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Invalid credential for User'
-                ]);
-            }
+            // if(!Hash::check($request->password, $user->password)){
+            //     return response()->json([
+            //         'error' => 1,
+            //         'message' => 'Invalid credential for User'
+            //     ]);
+            // }
 
             // $otp = rand(1000, 9999);
             // $expiresAt = Carbon::now()->addMinutes(5);
@@ -195,7 +195,7 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => "User sign in successfully and OTP sent",
+                'message' => "User exist. Please enter your password",
             ], 200);
         }
         catch(\Exception $e){

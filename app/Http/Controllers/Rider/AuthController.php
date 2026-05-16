@@ -127,7 +127,7 @@ class AuthController extends Controller
             $request->validate([
                 'country_code' => 'required',
                 'phone' => 'required',
-                'password' => 'required'
+                // 'password' => 'required'
             ]);
 
             $existUser = CompanyRider::where('phone_no', $request->phone)->where("country_code", $request->country_code)->first();
@@ -139,12 +139,12 @@ class AuthController extends Controller
                 ]);
             }
 
-            if(!Hash::check($request->password, $existUser->password)){
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Invalid credential for User'
-                ]);
-            }
+            // if(!Hash::check($request->password, $existUser->password)){
+            //     return response()->json([
+            //         'error' => 1,
+            //         'message' => 'Invalid credential for User'
+            //     ]);
+            // }
 
             if($existUser->status == "deactive"){
                 return response()->json([
@@ -200,7 +200,7 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => "User sign in successfully",
+                'message' => "User exist. Please enter your password",
             ], 200);
         }
         catch(\Exception $e){
