@@ -24,6 +24,7 @@ class AuthController extends Controller
                 'phone' => 'required',
                 'name' => 'required',
                 'country_code' => 'required',
+                "password" => 'required'
             ]);
 
             $dataCheck = (new TenantUser)
@@ -62,6 +63,7 @@ class AuthController extends Controller
             $user->email = $request->email;
             $user->name = $request->name;
             $user->country_code = $request->country_code;
+            $user->password = Hash::make($request->password);
             $user->save();
 
             $otp = rand(1000, 9999);
