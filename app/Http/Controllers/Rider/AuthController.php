@@ -13,6 +13,7 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanySetting;
 use App\Models\Setting;
+use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
@@ -125,7 +126,8 @@ class AuthController extends Controller
         try{
             $request->validate([
                 'country_code' => 'required',
-                'phone' => 'required'
+                'phone' => 'required',
+                'password' => 'required'
             ]);
 
             $existUser = CompanyRider::where('phone_no', $request->phone)->where("country_code", $request->country_code)->first();
@@ -137,6 +139,13 @@ class AuthController extends Controller
                 ]);
             }
 
+            if(!Hash::check($request->password, $existUser->password)){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid credential for User'
+                ]);
+            }
+
             if($existUser->status == "deactive"){
                 return response()->json([
                     'error' => 1,
@@ -144,54 +153,54 @@ class AuthController extends Controller
                 ]);
             }
 
-            $otp = rand(1000, 9999);
-            $expiresAt = Carbon::now()->addMinutes(5);
-            $existUser->otp = $otp;
-            $existUser->otp_expires_at = $expiresAt;
-            $existUser->save();
+            // $otp = rand(1000, 9999);
+            // $expiresAt = Carbon::now()->addMinutes(5);
+            // $existUser->otp = $otp;
+            // $existUser->otp_expires_at = $expiresAt;
+            // $existUser->save();
 
-            $settingData = CompanySetting::orderBy("id", "DESC")->first();
-            if($settingData->map_settings == "default"){
+            // $settingData = CompanySetting::orderBy("id", "DESC")->first();
+            // if($settingData->map_settings == "default"){
             
-                $centralData = (new Setting)
-                    ->setConnection('central')
-                    ->orderBy("id", "DESC")
-                    ->first();
+            //     $centralData = (new Setting)
+            //         ->setConnection('central')
+            //         ->orderBy("id", "DESC")
+            //         ->first();
                     
-                $mail_server = $centralData->smtp_host;
-                $mail_from = $centralData->smtp_from_address;
-                $mail_user_name = $centralData->smtp_user_name;
-                $mail_password = $centralData->smtp_password;
-                $mail_port = 587;
-            }
-            else{
-                $mail_server = $settingData->mail_server;
-                $mail_from = $settingData->mail_from;
-                $mail_user_name = $settingData->mail_user_name;
-                $mail_password = $settingData->mail_password;
-                $mail_port = $settingData->mail_port;
-            }
+            //     $mail_server = $centralData->smtp_host;
+            //     $mail_from = $centralData->smtp_from_address;
+            //     $mail_user_name = $centralData->smtp_user_name;
+            //     $mail_password = $centralData->smtp_password;
+            //     $mail_port = 587;
+            // }
+            // else{
+            //     $mail_server = $settingData->mail_server;
+            //     $mail_from = $settingData->mail_from;
+            //     $mail_user_name = $settingData->mail_user_name;
+            //     $mail_password = $settingData->mail_password;
+            //     $mail_port = $settingData->mail_port;
+            // }
 
-            config([
-                'mail.mailers.smtp.host' => $mail_server,
-                'mail.mailers.smtp.port' => $mail_port,
-                'mail.mailers.smtp.username' => $mail_user_name,
-                'mail.mailers.smtp.password' => $mail_password,
-                'mail.from.address' => $mail_from,
-                'mail.from.name' => $mail_user_name,
-            ]);
+            // config([
+            //     'mail.mailers.smtp.host' => $mail_server,
+            //     'mail.mailers.smtp.port' => $mail_port,
+            //     'mail.mailers.smtp.username' => $mail_user_name,
+            //     'mail.mailers.smtp.password' => $mail_password,
+            //     'mail.from.address' => $mail_from,
+            //     'mail.from.name' => $mail_user_name,
+            // ]);
 
-            Mail::send('emails.send-otp', [
-                'name' => $existUser->name ?? 'User',
-                'otp' => $otp
-            ], function ($message) use ($existUser) {
-                $message->to($existUser->email)
-                        ->subject('Login OTP');
-            });
+            // Mail::send('emails.send-otp', [
+            //     'name' => $existUser->name ?? 'User',
+            //     'otp' => $otp
+            // ], function ($message) use ($existUser) {
+            //     $message->to($existUser->email)
+            //             ->subject('Login OTP');
+            // });
 
             return response()->json([
                 'success' => 1,
-                'message' => "User sign in successfully and OTP sent",
+                'message' => "User sign in successfully",
             ], 200);
         }
         catch(\Exception $e){
@@ -239,6 +248,80 @@ class AuthController extends Controller
                 'message' => 'Login successful',
                 'token' => $token,
                 'user' => $user
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function setPassword(Request $request){
+        try{
+            $request->validate([
+                'country_code' => 'required',
+                'phone' => 'required',
+                'password' => 'required|string|min:6'
+            ]);
+
+            $user = CompanyRider::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
+
+            if(!isset($user) || $user == NULL){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User does not exist'
+                ], 404);
+            }
+
+            $user->password = Hash::make($request->password);
+            $user->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Password set successfully'
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function changePassword(Request $request){
+        try{
+            $request->validate([
+                'country_code' => 'required',
+                'phone' => 'required',
+                'old_password' => 'required|string|min:6',
+                'new_password' => 'required|string|min:6|different:old_password'
+            ]);
+
+            $user = CompanyRider::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
+
+            if(!isset($user) || $user == NULL){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User does not exist'
+                ], 404);
+            }
+
+            if(!Hash::check($request->old_password, $user->password)){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Incorrect old password'
+                ]);
+            }
+
+            $user->password = Hash::make($request->new_password);
+            $user->save();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Password changed successfully'
             ]);
         }
         catch(\Exception $e){

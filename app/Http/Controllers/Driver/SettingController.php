@@ -193,12 +193,14 @@ class SettingController extends Controller
             $data['waiting_time_charge'] = $settings->waiting_time_charge;
 
             $packageTopups = PackageSetting::orderBy("id", "DESC")->get();
+            $packageRideCount = PackageRideCountSetting::orderBy("id", "DESC")->get();
             
             return response()->json([
                 'success' => 1,
                 'data' => [
                     'main_commission' => (object) $data,
-                    'packageTopups' => $packageTopups
+                    'packageTopups' => $packageTopups,
+                    'packageRideCount' => $packageRideCount
                 ]
                 ]);
         }
