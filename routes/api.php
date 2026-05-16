@@ -285,6 +285,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
     Route::post('/driver/register', [DriverAuthController::class, 'register']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
+    Route::post('/driver/verify-password', [DriverAuthController::class, 'verifyPassword']);
     Route::post('/driver/set-password', [DriverAuthController::class, 'setPassword']);
     Route::post('/driver/change-password', [DriverAuthController::class, 'changePassword']);
     Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
@@ -347,6 +348,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/register', [RiderAuthController::class, 'register']);
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
     Route::post('/rider/set-password', [RiderAuthController::class, 'setPassword']);
+    Route::post('/rider/verify-password', [RiderAuthController::class, 'verifyPassword']);
     Route::post('/rider/change-password', [RiderAuthController::class, 'changePassword']);
     Route::get('/rider/policies', [RiderSettingController::class, 'policies']);
 

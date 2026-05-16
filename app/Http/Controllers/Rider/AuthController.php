@@ -213,6 +213,47 @@ class AuthController extends Controller
         }
     }
 
+    public function verifyPassword(Request $request){
+        try{
+            $request->validate([
+                'country_code' => 'required',
+                'phone' => 'required',
+                'password' => 'required'
+            ]);   
+
+            $user = CompanyRider::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
+
+            if(!isset($user) || $user == NULL){
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User does not exist'
+                ]);
+            }
+
+             if (!Hash::check($request->password, $user->password)){
+                return response()->json(['error' => 1, 'message' => 'Invalid Password']);
+            }
+            
+            $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
+            $user->fcm_token = $request->fcm_token;
+            $user->save();
+
+            $token = JWTAuth::fromUser($user);
+
+            return response()->json([
+                'message' => 'Login successful',
+                'token' => $token,
+                'user' => $user
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
     public function verifyOTP(Request $request){
         try{
             $request->validate([
