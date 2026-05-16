@@ -1335,7 +1335,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [bookingRows] = await db.query(
-            "SELECT id, booking_status, booking_id, offered_amount, booking_amount, recommended_amount FROM bookings WHERE id = ?",
+            "SELECT id, booking_status, booking_id, offered_amount, booking_amount, recommended_amount, booking_date, pickup_time FROM bookings WHERE id = ?",
             [id]
         );
         if (bookingRows.length === 0) {
@@ -1351,15 +1351,36 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         }
 
         const isPreJob = assignment_type === "pre_job";
-        // Automatically accept the ride: set status to 'ongoing' and response to 'accepted'
-        const newStatus = 'ongoing';
+
+        const bookingDate = bookingRows[0].booking_date;
+        const pickupTime = bookingRows[0].pickup_time;
+        const today = new Date().toISOString().split('T')[0];
+
+        let isNow = false;
+        if (pickupTime === 'asap') {
+            isNow = true;
+        } else if (bookingDate) {
+            const bDate = new Date(bookingDate).toISOString().split('T')[0];
+            if (bDate === today) {
+                const now = new Date();
+                const [pHours, pMinutes] = (pickupTime || "00:00").split(':').map(Number);
+                const pickupDateTime = new Date();
+                pickupDateTime.setHours(pHours, pMinutes, 0, 0);
+
+                if (pickupDateTime <= new Date(now.getTime() + 30 * 60 * 1000)) {
+                    isNow = true;
+                }
+            }
+        }
+
+        const newStatus = (isNow && !isPreJob) ? 'ongoing' : 'pending';
         const driverResponse = 'accepted';
 
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         const driverName = driverRows[0].name || "Driver";
 
-        const actionText = isPreJob
-            ? `${dispatcherName} assigned pre-job and automatically accepted for ${driverName}`
+        const actionText = (isPreJob || !isNow)
+            ? `${dispatcherName} assigned and automatically accepted for ${driverName} (Scheduled)`
             : `${dispatcherName} assigned and automatically accepted for driver ${driverName}`;
 
         const existingAmount = bookingRows[0].booking_amount;
@@ -1368,16 +1389,15 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             ? (offeredAmount ?? null)
             : existingAmount;
 
-        // Update booking with assignment and acceptance
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ?, dispatcher_action = ?, booking_status = ?, driver_response = ? WHERE id = ?`,
             [driver_id, amountToSet, actionText, newStatus, driverResponse, id]
         );
 
-        // Also update driver status to busy
-        await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
+        if (newStatus === 'ongoing') {
+            await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
+        }
 
-        // Fetch fully populated booking for events (similar to accept-ride logic)
         const [updatedBookings] = await db.query(`
             SELECT 
                 b.*,
@@ -1401,7 +1421,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const updatedBooking = updatedBookings[0];
 
-        // Format for consistent event payload
         const formattedBooking = {
             ...updatedBooking,
             driverDetail: updatedBooking.driver_id ? {
@@ -1423,10 +1442,11 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             } : null
         };
 
-        const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
-        const notifMessage = `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`;
+        const notifTitle = isPreJob || newStatus !== 'ongoing' ? "Future Ride Assigned" : "New Ride Assigned";
+        const notifMessage = newStatus === 'ongoing'
+            ? `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`
+            : `You have been assigned a future ride #${updatedBooking.booking_id} for ${updatedBooking.booking_date} at ${updatedBooking.pickup_time}. It has been automatically accepted for you.`;
 
-        // Send Push Notifications
         try {
             await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, {
                 booking_id: String(id),
@@ -1447,7 +1467,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             console.error("Store notification failed (non-fatal):", storeError.message);
         }
 
-        // Notify driver via socket that a new ride is active
         const driverSocketId = driverSockets.get(driver_id.toString());
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride", formattedBooking);
@@ -1458,7 +1477,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
-        // Emit events to dispatchers/admins about the accepted job
         const eventData = {
             booking_id: id,
             driver_id: updatedBooking.driver_id,
@@ -1472,7 +1490,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         adminSockets.forEach((sid) => io.to(sid).emit("job-accepted-by-driver", eventData));
         clientSockets.forEach((sid) => io.to(sid).emit("job-accepted-by-driver", eventData));
 
-        // Also broadcast the booking update as it used to do
         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", formattedBooking));
 
         await broadcastDashboardCardsUpdate(req.tenantDb);
@@ -1489,6 +1506,173 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 });
+
+// app.put("/bookings/:id/assign-driver", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { driver_id, assignment_type } = req.body;
+
+//         if (!driver_id) {
+//             return res.status(400).json({ success: false, message: "Driver ID is required" });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [bookingRows] = await db.query(
+//             "SELECT id, booking_status, booking_id, offered_amount, booking_amount, recommended_amount FROM bookings WHERE id = ?",
+//             [id]
+//         );
+//         if (bookingRows.length === 0) {
+//             return res.status(404).json({ success: false, message: "Booking not found" });
+//         }
+
+//         const [driverRows] = await db.query(
+//             "SELECT id, name, phone_no, driving_status, profile_image FROM drivers WHERE id = ?",
+//             [driver_id]
+//         );
+//         if (driverRows.length === 0) {
+//             return res.status(404).json({ success: false, message: "Driver not found" });
+//         }
+
+//         const isPreJob = assignment_type === "pre_job";
+//         // Automatically accept the ride: set status to 'ongoing' and response to 'accepted'
+//         const newStatus = 'ongoing';
+//         const driverResponse = 'accepted';
+
+//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
+//         const driverName = driverRows[0].name || "Driver";
+
+//         const actionText = isPreJob
+//             ? `${dispatcherName} assigned pre-job and automatically accepted for ${driverName}`
+//             : `${dispatcherName} assigned and automatically accepted for driver ${driverName}`;
+
+//         const existingAmount = bookingRows[0].booking_amount;
+//         const offeredAmount = bookingRows[0].offered_amount;
+//         const amountToSet = (existingAmount === null || existingAmount === undefined || existingAmount == 0)
+//             ? (offeredAmount ?? null)
+//             : existingAmount;
+
+//         // Update booking with assignment and acceptance
+//         await db.query(
+//             `UPDATE bookings SET driver = ?, booking_amount = ?, dispatcher_action = ?, booking_status = ?, driver_response = ? WHERE id = ?`,
+//             [driver_id, amountToSet, actionText, newStatus, driverResponse, id]
+//         );
+
+//         // Also update driver status to busy
+//         await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
+
+//         // Fetch fully populated booking for events (similar to accept-ride logic)
+//         const [updatedBookings] = await db.query(`
+//             SELECT 
+//                 b.*,
+//                 d.id as driver_id,
+//                 d.name as driver_name,
+//                 d.email as driver_email,
+//                 d.phone_no as driver_phone,
+//                 d.profile_image as driver_profile_image,
+//                 vt.id as vehicle_type_id,
+//                 vt.vehicle_type_name,
+//                 vt.vehicle_type_service,
+//                 sc.id as sub_company_id,
+//                 sc.name as sub_company_name,
+//                 sc.email as sub_company_email
+//             FROM bookings b
+//             LEFT JOIN drivers d ON b.driver = d.id  
+//             LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+//             LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+//             WHERE b.id = ?
+//         `, [id]);
+
+//         const updatedBooking = updatedBookings[0];
+
+//         // Format for consistent event payload
+//         const formattedBooking = {
+//             ...updatedBooking,
+//             driverDetail: updatedBooking.driver_id ? {
+//                 id: updatedBooking.driver_id,
+//                 name: updatedBooking.driver_name,
+//                 email: updatedBooking.driver_email,
+//                 phone_no: updatedBooking.driver_phone,
+//                 profile_image: updatedBooking.driver_profile_image
+//             } : null,
+//             vehicleDetail: updatedBooking.vehicle_type_id ? {
+//                 id: updatedBooking.vehicle_type_id,
+//                 vehicle_type_name: updatedBooking.vehicle_type_name,
+//                 vehicle_type_service: updatedBooking.vehicle_type_service
+//             } : null,
+//             subCompanyDetail: updatedBooking.sub_company_id ? {
+//                 id: updatedBooking.sub_company_id,
+//                 name: updatedBooking.sub_company_name,
+//                 email: updatedBooking.sub_company_email
+//             } : null
+//         };
+
+//         const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
+//         const notifMessage = `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`;
+
+//         // Send Push Notifications
+//         try {
+//             await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, {
+//                 booking_id: String(id),
+//                 type: "new_ride"
+//             });
+//         } catch (fcmError) {
+//             console.error("FCM failed (non-fatal):", fcmError.message);
+//         }
+
+//         try {
+//             await storeNotification(db, {
+//                 user_type: 'driver',
+//                 user_id: driver_id,
+//                 title: notifTitle,
+//                 message: notifMessage
+//             });
+//         } catch (storeError) {
+//             console.error("Store notification failed (non-fatal):", storeError.message);
+//         }
+
+//         // Notify driver via socket that a new ride is active
+//         const driverSocketId = driverSockets.get(driver_id.toString());
+//         if (driverSocketId) {
+//             io.to(driverSocketId).emit("new-ride", formattedBooking);
+//             io.to(driverSocketId).emit("booking-status-updated", {
+//                 booking_id: id,
+//                 status: newStatus,
+//                 message: notifMessage
+//             });
+//         }
+
+//         // Emit events to dispatchers/admins about the accepted job
+//         const eventData = {
+//             booking_id: id,
+//             driver_id: updatedBooking.driver_id,
+//             driver_name: updatedBooking.driver_name,
+//             driver_profile_image: updatedBooking.driver_profile_image,
+//             booking: formattedBooking,
+//             message: `${updatedBooking.driver_name} was assigned and ride was automatically accepted`
+//         };
+
+//         dispatcherSockets.forEach((sid) => io.to(sid).emit("job-accepted-by-driver", eventData));
+//         adminSockets.forEach((sid) => io.to(sid).emit("job-accepted-by-driver", eventData));
+//         clientSockets.forEach((sid) => io.to(sid).emit("job-accepted-by-driver", eventData));
+
+//         // Also broadcast the booking update as it used to do
+//         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", formattedBooking));
+
+//         await broadcastDashboardCardsUpdate(req.tenantDb);
+
+//         return res.json({
+//             success: true,
+//             message: isPreJob
+//                 ? "Pre-job assigned and accepted successfully."
+//                 : "Driver assigned and ride accepted successfully."
+//         });
+
+//     } catch (error) {
+//         console.error("Assign driver error:", error);
+//         return res.status(500).json({ success: false, message: error.message });
+//     }
+// });
 
 // app.put("/bookings/:id/assign-driver", async (req, res) => {
 //     try {
