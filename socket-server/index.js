@@ -1360,24 +1360,34 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             isNow = true;
         } else if (bookingDate) {
             const now = new Date();
-            const bDate = new Date(bookingDate);
 
-            // Use UTC methods for bDate as it's an ISO string from DB (usually 00:00:00Z)
+            // Get current time in Asia/Kolkata (IST)
+            const istNowStr = now.toLocaleString('en-GB', {
+                timeZone: 'Asia/Kolkata',
+                hour12: false,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            // Format: DD/MM/YYYY, HH:MM
+            const [dPart, tPart] = istNowStr.split(', ');
+            const [tDay, tMonth, tYear] = dPart.split('/').map(Number);
+            const [cHours, cMinutes] = tPart.split(':').map(Number);
+
+            const bDate = new Date(bookingDate);
             const bYear = bDate.getUTCFullYear();
-            const bMonth = bDate.getUTCMonth();
+            const bMonth = bDate.getUTCMonth() + 1;
             const bDay = bDate.getUTCDate();
 
-            // Use local methods for 'now' to match the user's current day
-            const todayYear = now.getFullYear();
-            const todayMonth = now.getMonth();
-            const todayDay = now.getDate();
-
-            if (bYear === todayYear && bMonth === todayMonth && bDay === todayDay) {
+            if (bYear === tYear && bMonth === tMonth && bDay === tDay) {
                 const [pHours, pMinutes] = (pickupTime || "00:00").split(':').map(Number);
                 const pickupTotalMinutes = pHours * 60 + pMinutes;
-                const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+                const currentTotalMinutes = cHours * 60 + cMinutes;
 
-                // Check if pickup time is within 30 minutes before or after current time
+                // Check if pickup time is within 30 minutes before or after current IST time
                 if (pickupTotalMinutes >= currentTotalMinutes - 30 && pickupTotalMinutes <= currentTotalMinutes + 30) {
                     isNow = true;
                 }
