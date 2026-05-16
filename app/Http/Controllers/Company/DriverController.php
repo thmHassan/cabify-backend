@@ -283,42 +283,45 @@ class DriverController extends Controller
             $driver->save();
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
-            if ($settingData->map_settings == "default") {
-
-                $centralData = (new Setting)
-                    ->setConnection('central')
-                    ->orderBy("id", "DESC")
-                    ->first();
-
-                $mail_server = $centralData->smtp_host;
-                $mail_from = $centralData->smtp_from_address;
-                $mail_user_name = $centralData->smtp_user_name;
-                $mail_password = $centralData->smtp_password;
-                $mail_port = 587;
-            } else {
-                $mail_server = $settingData->mail_server;
-                $mail_from = $settingData->mail_from;
-                $mail_user_name = $settingData->mail_user_name;
-                $mail_password = $settingData->mail_password;
-                $mail_port = $settingData->mail_port;
+            
+            if(isset($driver->email) && $driver->email != NULL){
+                if ($settingData->map_settings == "default") {
+    
+                    $centralData = (new Setting)
+                        ->setConnection('central')
+                        ->orderBy("id", "DESC")
+                        ->first();
+    
+                    $mail_server = $centralData->smtp_host;
+                    $mail_from = $centralData->smtp_from_address;
+                    $mail_user_name = $centralData->smtp_user_name;
+                    $mail_password = $centralData->smtp_password;
+                    $mail_port = 587;
+                } else {
+                    $mail_server = $settingData->mail_server;
+                    $mail_from = $settingData->mail_from;
+                    $mail_user_name = $settingData->mail_user_name;
+                    $mail_password = $settingData->mail_password;
+                    $mail_port = $settingData->mail_port;
+                }
+    
+                config([
+                    'mail.mailers.smtp.host' => $mail_server,
+                    'mail.mailers.smtp.port' => $mail_port,
+                    'mail.mailers.smtp.username' => $mail_user_name,
+                    'mail.mailers.smtp.password' => $mail_password,
+                    'mail.from.address' => $mail_from,
+                    'mail.from.name' => $mail_user_name,
+                ]);
+    
+                Mail::send('emails.wallet-topup', [
+                    'name' => $driver->name ?? 'User',
+                    'amount' => $request->amount,
+                ], function ($message) use ($driver) {
+                    $message->to($driver->email)
+                        ->subject('Wallet Topup');
+                });
             }
-
-            config([
-                'mail.mailers.smtp.host' => $mail_server,
-                'mail.mailers.smtp.port' => $mail_port,
-                'mail.mailers.smtp.username' => $mail_user_name,
-                'mail.mailers.smtp.password' => $mail_password,
-                'mail.from.address' => $mail_from,
-                'mail.from.name' => $mail_user_name,
-            ]);
-
-            Mail::send('emails.wallet-topup', [
-                'name' => $driver->name ?? 'User',
-                'amount' => $request->amount,
-            ], function ($message) use ($driver) {
-                $message->to($driver->email)
-                    ->subject('Wallet Topup');
-            });
 
             return response()->json([
                 'success' => 1,
@@ -413,42 +416,45 @@ class DriverController extends Controller
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
-                if ($settingData->map_settings == "default") {
-
-                    $centralData = (new Setting)
-                        ->setConnection('central')
-                        ->orderBy("id", "DESC")
-                        ->first();
-
-                    $mail_server = $centralData->smtp_host;
-                    $mail_from = $centralData->smtp_from_address;
-                    $mail_user_name = $centralData->smtp_user_name;
-                    $mail_password = $centralData->smtp_password;
-                    $mail_port = 587;
-                } else {
-                    $mail_server = $settingData->mail_server;
-                    $mail_from = $settingData->mail_from;
-                    $mail_user_name = $settingData->mail_user_name;
-                    $mail_password = $settingData->mail_password;
-                    $mail_port = $settingData->mail_port;
+                
+                if(isset($user->email) && $user->email != NULL){
+                    if ($settingData->map_settings == "default") {
+    
+                        $centralData = (new Setting)
+                            ->setConnection('central')
+                            ->orderBy("id", "DESC")
+                            ->first();
+    
+                        $mail_server = $centralData->smtp_host;
+                        $mail_from = $centralData->smtp_from_address;
+                        $mail_user_name = $centralData->smtp_user_name;
+                        $mail_password = $centralData->smtp_password;
+                        $mail_port = 587;
+                    } else {
+                        $mail_server = $settingData->mail_server;
+                        $mail_from = $settingData->mail_from;
+                        $mail_user_name = $settingData->mail_user_name;
+                        $mail_password = $settingData->mail_password;
+                        $mail_port = $settingData->mail_port;
+                    }
+    
+                    config([
+                        'mail.mailers.smtp.host' => $mail_server,
+                        'mail.mailers.smtp.port' => $mail_port,
+                        'mail.mailers.smtp.username' => $mail_user_name,
+                        'mail.mailers.smtp.password' => $mail_password,
+                        'mail.from.address' => $mail_from,
+                        'mail.from.name' => $mail_user_name,
+                    ]);
+    
+                    Mail::send('emails.document-status', [
+                        'name' => $user->name ?? 'User',
+                        'status' => "approved",
+                    ], function ($message) use ($user) {
+                        $message->to($user->email)
+                            ->subject('Document Status Updated');
+                    });
                 }
-
-                config([
-                    'mail.mailers.smtp.host' => $mail_server,
-                    'mail.mailers.smtp.port' => $mail_port,
-                    'mail.mailers.smtp.username' => $mail_user_name,
-                    'mail.mailers.smtp.password' => $mail_password,
-                    'mail.from.address' => $mail_from,
-                    'mail.from.name' => $mail_user_name,
-                ]);
-
-                Mail::send('emails.document-status', [
-                    'name' => $user->name ?? 'User',
-                    'status' => "approved",
-                ], function ($message) use ($user) {
-                    $message->to($user->email)
-                        ->subject('Document Status Updated');
-                });
 
             } else if (isset($request->reject_all) && $request->reject_all == 1) {
                 $documentList = DriverDocument::where("driver_id", $request->driver_id)->where("status", "pending")->get();
@@ -460,42 +466,44 @@ class DriverController extends Controller
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
-                if ($settingData->map_settings == "default") {
-
-                    $centralData = (new Setting)
-                        ->setConnection('central')
-                        ->orderBy("id", "DESC")
-                        ->first();
-
-                    $mail_server = $centralData->smtp_host;
-                    $mail_from = $centralData->smtp_from_address;
-                    $mail_user_name = $centralData->smtp_user_name;
-                    $mail_password = $centralData->smtp_password;
-                    $mail_port = 587;
-                } else {
-                    $mail_server = $settingData->mail_server;
-                    $mail_from = $settingData->mail_from;
-                    $mail_user_name = $settingData->mail_user_name;
-                    $mail_password = $settingData->mail_password;
-                    $mail_port = $settingData->mail_port;
+                if(isset($user->email) && $user->email != NULL){
+                    if ($settingData->map_settings == "default") {
+    
+                        $centralData = (new Setting)
+                            ->setConnection('central')
+                            ->orderBy("id", "DESC")
+                            ->first();
+    
+                        $mail_server = $centralData->smtp_host;
+                        $mail_from = $centralData->smtp_from_address;
+                        $mail_user_name = $centralData->smtp_user_name;
+                        $mail_password = $centralData->smtp_password;
+                        $mail_port = 587;
+                    } else {
+                        $mail_server = $settingData->mail_server;
+                        $mail_from = $settingData->mail_from;
+                        $mail_user_name = $settingData->mail_user_name;
+                        $mail_password = $settingData->mail_password;
+                        $mail_port = $settingData->mail_port;
+                    }
+    
+                    config([
+                        'mail.mailers.smtp.host' => $mail_server,
+                        'mail.mailers.smtp.port' => $mail_port,
+                        'mail.mailers.smtp.username' => $mail_user_name,
+                        'mail.mailers.smtp.password' => $mail_password,
+                        'mail.from.address' => $mail_from,
+                        'mail.from.name' => $mail_user_name,
+                    ]);
+    
+                    Mail::send('emails.document-status', [
+                        'name' => $user->name ?? 'User',
+                        'status' => "rejected",
+                    ], function ($message) use ($user) {
+                        $message->to($user->email)
+                            ->subject('Document Status Updated');
+                    });
                 }
-
-                config([
-                    'mail.mailers.smtp.host' => $mail_server,
-                    'mail.mailers.smtp.port' => $mail_port,
-                    'mail.mailers.smtp.username' => $mail_user_name,
-                    'mail.mailers.smtp.password' => $mail_password,
-                    'mail.from.address' => $mail_from,
-                    'mail.from.name' => $mail_user_name,
-                ]);
-
-                Mail::send('emails.document-status', [
-                    'name' => $user->name ?? 'User',
-                    'status' => "rejected",
-                ], function ($message) use ($user) {
-                    $message->to($user->email)
-                        ->subject('Document Status Updated');
-                });
             } else if (isset($request->driver_document_id) && $request->driver_document_id != NULL) {
                 $document = DriverDocument::where("id", $request->driver_document_id)->first();
                 $document->status = $request->status;
@@ -504,84 +512,88 @@ class DriverController extends Controller
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
-                if ($settingData->map_settings == "default") {
-
-                    $centralData = (new Setting)
-                        ->setConnection('central')
-                        ->orderBy("id", "DESC")
-                        ->first();
-
-                    $mail_server = $centralData->smtp_host;
-                    $mail_from = $centralData->smtp_from_address;
-                    $mail_user_name = $centralData->smtp_user_name;
-                    $mail_password = $centralData->smtp_password;
-                    $mail_port = 587;
-                } else {
-                    $mail_server = $settingData->mail_server;
-                    $mail_from = $settingData->mail_from;
-                    $mail_user_name = $settingData->mail_user_name;
-                    $mail_password = $settingData->mail_password;
-                    $mail_port = $settingData->mail_port;
+                if(isset($user->email) && $user->email != NULL){
+                    if ($settingData->map_settings == "default") {
+    
+                        $centralData = (new Setting)
+                            ->setConnection('central')
+                            ->orderBy("id", "DESC")
+                            ->first();
+    
+                        $mail_server = $centralData->smtp_host;
+                        $mail_from = $centralData->smtp_from_address;
+                        $mail_user_name = $centralData->smtp_user_name;
+                        $mail_password = $centralData->smtp_password;
+                        $mail_port = 587;
+                    } else {
+                        $mail_server = $settingData->mail_server;
+                        $mail_from = $settingData->mail_from;
+                        $mail_user_name = $settingData->mail_user_name;
+                        $mail_password = $settingData->mail_password;
+                        $mail_port = $settingData->mail_port;
+                    }
+    
+                    config([
+                        'mail.mailers.smtp.host' => $mail_server,
+                        'mail.mailers.smtp.port' => $mail_port,
+                        'mail.mailers.smtp.username' => $mail_user_name,
+                        'mail.mailers.smtp.password' => $mail_password,
+                        'mail.from.address' => $mail_from,
+                        'mail.from.name' => $mail_user_name,
+                    ]);
+    
+                    Mail::send('emails.document-status', [
+                        'name' => $user->name ?? 'User',
+                        'status' => $request->status,
+                    ], function ($message) use ($user) {
+                        $message->to($user->email)
+                            ->subject('Document Status Updated');
+                    });
                 }
-
-                config([
-                    'mail.mailers.smtp.host' => $mail_server,
-                    'mail.mailers.smtp.port' => $mail_port,
-                    'mail.mailers.smtp.username' => $mail_user_name,
-                    'mail.mailers.smtp.password' => $mail_password,
-                    'mail.from.address' => $mail_from,
-                    'mail.from.name' => $mail_user_name,
-                ]);
-
-                Mail::send('emails.document-status', [
-                    'name' => $user->name ?? 'User',
-                    'status' => $request->status,
-                ], function ($message) use ($user) {
-                    $message->to($user->email)
-                        ->subject('Document Status Updated');
-                });
             } else if (isset($request->document_approved_office) && $request->document_approved_office == 1) {
                 $driver = CompanyDriver::where("id", $request->driver_id)->first();
                 $driver->document_approved_office = 1;
                 $driver->save();
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
-                if ($settingData->map_settings == "default") {
-
-                    $centralData = (new Setting)
-                        ->setConnection('central')
-                        ->orderBy("id", "DESC")
-                        ->first();
-
-                    $mail_server = $centralData->smtp_host;
-                    $mail_from = $centralData->smtp_from_address;
-                    $mail_user_name = $centralData->smtp_user_name;
-                    $mail_password = $centralData->smtp_password;
-                    $mail_port = 587;
-                } else {
-                    $mail_server = $settingData->mail_server;
-                    $mail_from = $settingData->mail_from;
-                    $mail_user_name = $settingData->mail_user_name;
-                    $mail_password = $settingData->mail_password;
-                    $mail_port = $settingData->mail_port;
+                if(isset($driver->email) && $driver->email != NULL){
+                    if ($settingData->map_settings == "default") {
+    
+                        $centralData = (new Setting)
+                            ->setConnection('central')
+                            ->orderBy("id", "DESC")
+                            ->first();
+    
+                        $mail_server = $centralData->smtp_host;
+                        $mail_from = $centralData->smtp_from_address;
+                        $mail_user_name = $centralData->smtp_user_name;
+                        $mail_password = $centralData->smtp_password;
+                        $mail_port = 587;
+                    } else {
+                        $mail_server = $settingData->mail_server;
+                        $mail_from = $settingData->mail_from;
+                        $mail_user_name = $settingData->mail_user_name;
+                        $mail_password = $settingData->mail_password;
+                        $mail_port = $settingData->mail_port;
+                    }
+    
+                    config([
+                        'mail.mailers.smtp.host' => $mail_server,
+                        'mail.mailers.smtp.port' => $mail_port,
+                        'mail.mailers.smtp.username' => $mail_user_name,
+                        'mail.mailers.smtp.password' => $mail_password,
+                        'mail.from.address' => $mail_from,
+                        'mail.from.name' => $mail_user_name,
+                    ]);
+    
+                    Mail::send('emails.document-status', [
+                        'name' => $driver->name ?? 'Driver',
+                        'status' => "approved",
+                    ], function ($message) use ($driver) {
+                        $message->to($driver->email)
+                            ->subject('Document Status Updated');
+                    });
                 }
-
-                config([
-                    'mail.mailers.smtp.host' => $mail_server,
-                    'mail.mailers.smtp.port' => $mail_port,
-                    'mail.mailers.smtp.username' => $mail_user_name,
-                    'mail.mailers.smtp.password' => $mail_password,
-                    'mail.from.address' => $mail_from,
-                    'mail.from.name' => $mail_user_name,
-                ]);
-
-                Mail::send('emails.document-status', [
-                    'name' => $driver->name ?? 'Driver',
-                    'status' => "approved",
-                ], function ($message) use ($driver) {
-                    $message->to($driver->email)
-                        ->subject('Document Status Updated');
-                });
             }
             return response()->json([
                 'success' => 1,

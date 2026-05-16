@@ -73,43 +73,45 @@ class AuthController extends Controller
             $user->save();
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
-            if($settingData->map_settings == "default"){
-            
-                $centralData = (new Setting)
-                    ->setConnection('central')
-                    ->orderBy("id", "DESC")
-                    ->first();
-                    
-                $mail_server = $centralData->smtp_host;
-                $mail_from = $centralData->smtp_from_address;
-                $mail_user_name = $centralData->smtp_user_name;
-                $mail_password = $centralData->smtp_password;
-                $mail_port = 587;
+            if(isset($user->email) && $user->email != NULL){
+                if($settingData->map_settings == "default"){
+                
+                    $centralData = (new Setting)
+                        ->setConnection('central')
+                        ->orderBy("id", "DESC")
+                        ->first();
+                        
+                    $mail_server = $centralData->smtp_host;
+                    $mail_from = $centralData->smtp_from_address;
+                    $mail_user_name = $centralData->smtp_user_name;
+                    $mail_password = $centralData->smtp_password;
+                    $mail_port = 587;
+                }
+                else{
+                    $mail_server = $settingData->mail_server;
+                    $mail_from = $settingData->mail_from;
+                    $mail_user_name = $settingData->mail_user_name;
+                    $mail_password = $settingData->mail_password;
+                    $mail_port = $settingData->mail_port;
+                }
+    
+                config([
+                    'mail.mailers.smtp.host' => $mail_server,
+                    'mail.mailers.smtp.port' => $mail_port,
+                    'mail.mailers.smtp.username' => $mail_user_name,
+                    'mail.mailers.smtp.password' => $mail_password,
+                    'mail.from.address' => $mail_from,
+                    'mail.from.name' => $mail_user_name,
+                ]);
+    
+                Mail::send('emails.send-otp', [
+                    'name' => $user->name ?? 'User',
+                    'otp' => $otp
+                ], function ($message) use ($user) {
+                    $message->to($user->email)
+                            ->subject('Registration OTP');
+                });
             }
-            else{
-                $mail_server = $settingData->mail_server;
-                $mail_from = $settingData->mail_from;
-                $mail_user_name = $settingData->mail_user_name;
-                $mail_password = $settingData->mail_password;
-                $mail_port = $settingData->mail_port;
-            }
-
-            config([
-                'mail.mailers.smtp.host' => $mail_server,
-                'mail.mailers.smtp.port' => $mail_port,
-                'mail.mailers.smtp.username' => $mail_user_name,
-                'mail.mailers.smtp.password' => $mail_password,
-                'mail.from.address' => $mail_from,
-                'mail.from.name' => $mail_user_name,
-            ]);
-
-            Mail::send('emails.send-otp', [
-                'name' => $user->name ?? 'User',
-                'otp' => $otp
-            ], function ($message) use ($user) {
-                $message->to($user->email)
-                        ->subject('Registration OTP');
-            });
 
             return response()->json([
                 'success' => 1,
@@ -233,7 +235,7 @@ class AuthController extends Controller
              if (!Hash::check($request->password, $user->password)){
                 return response()->json(['error' => 1, 'message' => 'Invalid Password']);
             }
-            
+
             $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
             $user->fcm_token = $request->fcm_token;
             $user->save();
