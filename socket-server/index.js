@@ -1354,29 +1354,36 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const bookingDate = bookingRows[0].booking_date;
         const pickupTime = bookingRows[0].pickup_time;
-        
+
         let isNow = false;
         if (pickupTime === 'asap') {
             isNow = true;
         } else if (bookingDate) {
             const now = new Date();
             const bDate = new Date(bookingDate);
-            
-            // Local date strings (YYYY-MM-DD)
-            const bDateStr = `${bDate.getFullYear()}-${String(bDate.getMonth() + 1).padStart(2, '0')}-${String(bDate.getDate()).padStart(2, '0')}`;
-            const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-            if (bDateStr === todayStr) {
+            // Use UTC methods for bDate as it's an ISO string from DB (usually 00:00:00Z)
+            const bYear = bDate.getUTCFullYear();
+            const bMonth = bDate.getUTCMonth();
+            const bDay = bDate.getUTCDate();
+
+            // Use local methods for 'now' to match the user's current day
+            const todayYear = now.getFullYear();
+            const todayMonth = now.getMonth();
+            const todayDay = now.getDate();
+
+            if (bYear === todayYear && bMonth === todayMonth && bDay === todayDay) {
                 const [pHours, pMinutes] = (pickupTime || "00:00").split(':').map(Number);
                 const pickupTotalMinutes = pHours * 60 + pMinutes;
                 const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
-                
+
                 // Check if pickup time is within 30 minutes before or after current time
                 if (pickupTotalMinutes >= currentTotalMinutes - 30 && pickupTotalMinutes <= currentTotalMinutes + 30) {
                     isNow = true;
                 }
             }
         }
+
 
         const newStatus = (isNow && !isPreJob) ? 'ongoing' : 'pending';
 
