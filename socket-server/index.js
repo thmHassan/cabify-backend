@@ -328,7 +328,6 @@ const autoDispatchRide = async ({
 
         console.log(`[AutoDispatch] Starting 30s timeout for Driver #${driver.id}...`);
 
-        // ✅ 30 second timeout — driver_response column nathi so booking_status check kariye
         setTimeout(async () => {
             try {
                 const [checkRows] = await db.query(
@@ -384,210 +383,6 @@ const autoDispatchRide = async ({
         console.error("[AutoDispatch] Error:", error.message);
     }
 };
-
-// const autoDispatchRide = async ({
-//     bookingId,
-//     tenantDb,
-//     currentPlotId = null,
-//     driverIndex = 0,
-//     visitedPlots = []
-// }) => {
-//     try {
-//         const db = getConnection(tenantDb);
-//         console.log(`[AutoDispatch] Start: Booking #${bookingId} [${tenantDb}]`);
-
-//         const [bookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
-//         if (!bookingRows.length) {
-//             console.log(`[AutoDispatch] Booking #${bookingId} not found in DB.`);
-//             return;
-//         }
-//         const booking = bookingRows[0];
-//         console.log(`[AutoDispatch] Booking Details: Status=${booking.booking_status}, Vehicle=${booking.vehicle}, PickupPlot=${booking.pickup_plot_id}`);
-
-//         if (booking.booking_status === "cancelled" || booking.booking_status === "completed") {
-//             console.log(`[AutoDispatch] Ride is already ${booking.booking_status}. Stopping.`);
-//             return;
-//         }
-//         if (booking.driver && booking.driver_response === "accepted") {
-//             console.log(`[AutoDispatch] Ride already accepted by Driver #${booking.driver}. Stopping.`);
-//             return;
-//         }
-
-//         if (!currentPlotId) {
-//             currentPlotId = booking.pickup_plot_id || booking.destination_plot_id;
-//         }
-
-//         if (!currentPlotId) {
-//             console.log("[AutoDispatch] No plot assigned to this booking.");
-//             return;
-//         }
-
-//         console.log(`[AutoDispatch] Checking Plot ID: ${currentPlotId} (Driver Index: ${driverIndex})`);
-
-//         // 1. Plot-based driver search
-//         let driverQuery = `SELECT * FROM drivers WHERE driving_status = 'idle' AND plot_id = ?`;
-//         let queryParams = [currentPlotId];
-
-//         // if (booking.vehicle) {
-//         //     driverQuery += ` AND vehicle_type = ?`;
-//         //     queryParams.push(booking.vehicle);
-//         // }
-
-//         driverQuery += ` ORDER BY priority_plot ASC`;
-
-//         let [drivers] = await db.query(driverQuery, queryParams);
-
-//         // 2. Nearest Driver Fallback (within 10km) if no drivers found in current plot on first try
-//         if (!drivers.length && driverIndex === 0) {
-//             console.log(`📡 [AutoDispatch] Plot ma koi driver nathi. Nearest driver shodhi rahya chhie (10km)... Location: ${booking.pickup_point}`);
-
-//             if (booking.pickup_point && booking.pickup_point.includes(',')) {
-//                 const [lat, lng] = booking.pickup_point.split(",").map(c => parseFloat(c.trim()));
-
-//                 let nearestQuery = `
-//                     SELECT *, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance 
-//                     FROM drivers 
-//                     WHERE driving_status = 'idle'
-//                 `;
-//                 let nearestParams = [lat, lng, lat];
-
-//                 // if (booking.vehicle) {
-//                 //     nearestQuery += ` AND vehicle_type = ?`;
-//                 //     nearestParams.push(booking.vehicle);
-//                 // }
-
-//                 nearestQuery += ` HAVING distance < 10 ORDER BY distance ASC LIMIT 5`;
-
-//                 const [nearestDrivers] = await db.query(nearestQuery, nearestParams);
-//                 if (nearestDrivers.length > 0) {
-//                     console.log(`[AutoDispatch] ${nearestDrivers.length} nearest drivers found within 10km.`);
-//                     drivers = nearestDrivers;
-//                 }
-//             }
-//         }
-
-//         if (!drivers.length || driverIndex >= drivers.length) {
-//             console.log(`[AutoDispatch] No (more) drivers in plot ${currentPlotId}. Checking backup plots...`);
-
-//             if (!visitedPlots.includes(currentPlotId)) visitedPlots.push(currentPlotId);
-
-//             const [plotRows] = await db.query("SELECT backup_plots FROM plots WHERE id = ?", [currentPlotId]);
-//             const backupPlots = JSON.parse(plotRows[0]?.backup_plots || "[]");
-
-//             const nextPlot = backupPlots.find(p => !visitedPlots.includes(p));
-
-//             if (nextPlot) {
-//                 console.log(`[AutoDispatch] Moving to Backup Plot: ${nextPlot}`);
-//                 return autoDispatchRide({
-//                     bookingId,
-//                     tenantDb,
-//                     currentPlotId: nextPlot,
-//                     driverIndex: 0,
-//                     visitedPlots
-//                 });
-//             } else {
-//                 console.log("[AutoDispatch] All plots exhausted. No drivers found.");
-//                 io.emit("auto-dispatch-failed", {
-//                     booking_id: bookingId,
-//                     message: "No drivers available in assigned or backup plots."
-//                 });
-//                 return;
-//             }
-//         }
-
-//         const driver = drivers[driverIndex];
-//         console.log(`[AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
-
-//         // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
-//         const existingDispatchAmt = booking.booking_amount;
-//         const dispatchAmount = (existingDispatchAmt === null || existingDispatchAmt === undefined || existingDispatchAmt == 0)
-//             ? (booking.offered_amount ?? null)
-//             : existingDispatchAmt;
-
-//         // Update booking with the assigned driver
-//         await db.query(
-//             `UPDATE bookings SET driver = ?, booking_amount = ? WHERE id = ?`,
-//             [driver.id, dispatchAmount, bookingId]
-//         );
-
-
-//         // Fetch updated booking to send to driver
-//         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
-//         const updatedBooking = updatedBookingRows[0];
-
-//         const driverSocketId = driverSockets.get(driver.id.toString());
-//         console.log(`[AutoDispatch] Driver Socket ID: ${driverSocketId || 'N/A (Not Connected)'}`);
-
-//         const rideRequestPayload = {
-//             booking_id: updatedBooking.id,
-//             message: "You have a new ride request",
-//             booking: updatedBooking
-//         };
-
-//         // Emit Socket Event to Driver (ONLY new-ride-request for popup)
-//         if (driverSocketId) {
-//             io.to(driverSocketId).emit("new-ride-request", rideRequestPayload);
-//             console.log(`[AutoDispatch] Socket event 'new-ride-request' sent to Driver #${driver.id}`);
-//         }
-
-//         // Notify all dispatchers/admins about the dispatch
-//         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
-//         adminSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
-
-//         // Send Push Notification
-//         try {
-//             console.log(`[AutoDispatch] Sending Push Notification to Driver #${driver.id}...`);
-//             await sendNotificationToDriver(db, driver.id, "New Ride Available", "You have a new ride request", {
-//                 booking_id: String(updatedBooking.id),
-//                 type: "new_ride"
-//             });
-//         } catch (notifErr) {
-//             console.error("[AutoDispatch] Notification error:", notifErr.message);
-//         }
-
-//         console.log(`[AutoDispatch] Processing Timeout`);
-
-//         setTimeout(async () => {
-//             try {
-//                 const [checkRows] = await db.query(
-//                     "SELECT driver_response, booking_status FROM bookings WHERE id = ?",
-//                     [bookingId]
-//                 );
-
-//                 if (!checkRows.length) return;
-//                 const { driver_response, booking_status } = checkRows[0];
-
-//                 if (driver_response === "accepted") {
-//                     console.log(`[AutoDispatch] Ride #${bookingId} accepted by ${driver.name}`);
-//                     return;
-//                 }
-
-//                 if (booking_status === "cancelled") {
-//                     console.log(`[AutoDispatch] Ride #${bookingId} was cancelled during dispatch.`);
-//                     return;
-//                 }
-
-//                 console.log(`[AutoDispatch] Timeout: Driver ${driver.name} did not respond. Trying next driver...`);
-
-//                 await db.query(`UPDATE bookings SET driver = NULL, driver_response = NULL WHERE id = ?`, [bookingId]);
-
-//                 autoDispatchRide({
-//                     bookingId,
-//                     tenantDb,
-//                     currentPlotId,
-//                     driverIndex: driverIndex + 1,
-//                     visitedPlots
-//                 });
-
-//             } catch (timeoutErr) {
-//                 console.error("[AutoDispatch] Timeout check error:", timeoutErr.message);
-//             }
-//         }, 30000);
-
-//     } catch (error) {
-//         console.error("[AutoDispatch] Error:", error.message);
-//     }
-// };
 
 io.use(async (socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
@@ -830,104 +625,6 @@ io.on("connection", (socket) => {
             console.error("Laravel Socket error:", err.message);
         }
     });
-
-    // socket.on("driver-location", async (data) => {
-    //     try {
-    //         let dataArray;
-    //         if (typeof data === "string") {
-    //             dataArray = JSON.parse(data);
-    //         } else {
-    //             dataArray = data;
-    //         }
-
-    //         const dbName = dataArray.database || socket.handshake.query.database;
-    //         const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
-
-    //         if (dbName && driverIdFromData) {
-    //             try {
-    //                 const db = getConnection(`tenant${dbName}`);
-    //                 const status = dataArray.driving_status || dataArray.status;
-    //                 if (status) {
-    //                     await db.query(
-    //                         `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
-    //                         [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
-    //                     );
-    //                 } else {
-    //                     await db.query(
-    //                         `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
-    //                         [dataArray.latitude, dataArray.longitude, driverIdFromData]
-    //                     );
-    //                 }
-    //             } catch (dbErr) {
-    //                 console.error("Database update error in driver-location:", dbErr.message);
-    //             }
-    //         }
-
-    //         const response = await axios.post(
-    //             "https://backend.cabifyit.com/api/driver/location",
-    //             dataArray,
-    //             {
-    //                 headers: {
-    //                     Authorization: `Bearer ${socket.token}`,
-    //                     database: `${dbName}`,
-    //                 }
-    //             }
-    //         );
-
-    //         const driver = response.data.driver;
-    //         if (driver) {
-    //             io.to(dbName).emit("driver-location-update", driver);
-
-    //             if (driver.driving_status === "idle") {
-    //                 const plotId = driver.plot_id;
-
-    //                 const plotKey = plotId ? `${plotId}_${dbName}` : null;
-    //                 const rank = plotKey ? getOrAssignRank(plotKey, driver.id) : "-";
-
-    //                 const eventData = {
-    //                     driver_id: driver.id,
-    //                     driverName: driver.name,
-    //                     driver_name: driver.name,
-    //                     plot: plotId,
-    //                     plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
-    //                     rank: rank,
-    //                     status: driver.driving_status,
-    //                     latitude: driver.latitude,
-    //                     longitude: driver.longitude
-    //                 };
-
-    //                 io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
-    //                 io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
-    //                 io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
-    //                 socket.emit("waiting-driver-event", eventData);
-
-    //             } else if (driver.driving_status === "busy") {
-    //                 const plotId = driver.plot_id;
-
-    //                 removeFromQueue(driver.id, dbName);
-    //                 if (plotId) broadcastUpdatedQueue(plotId, dbName);
-
-    //                 const eventData = {
-    //                     driver_id: driver.id,
-    //                     driverName: driver.name,
-    //                     driver_name: driver.name,
-    //                     plot: plotId,
-    //                     plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
-    //                     rank: null,
-    //                     status: driver.driving_status,
-    //                     latitude: driver.latitude,
-    //                     longitude: driver.longitude
-    //                 };
-
-    //                 io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
-    //                 io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
-    //                 io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
-    //             }
-    //         }
-    //     } catch (err) {
-    //         console.error("Laravel Socket error:", err.message);
-    //     }
-    // });
 
     socket.on("get-driver-location", async (data) => {
         try {
@@ -2035,247 +1732,6 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
     }
 });
 
-// app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { follow_on_booking_id } = req.body;
-
-//         if (!follow_on_booking_id) {
-//             return res.status(400).json({ success: false, message: "follow_on_booking_id is required" });
-//         }
-
-//         if (parseInt(id) === parseInt(follow_on_booking_id)) {
-//             return res.status(400).json({ success: false, message: "A booking cannot be a follow-on of itself" });
-//         }
-
-//         const db = getConnection(req.tenantDb);
-
-//         const [job1Rows] = await db.query(
-//             "SELECT id, booking_id, booking_status, driver, booking_system FROM bookings WHERE id = ?",
-//             [id]
-//         );
-//         if (!job1Rows.length) return res.status(404).json({ success: false, message: "Job 1 not found" });
-
-//         const job1 = job1Rows[0];
-
-//         if (!job1.driver) {
-//             return res.status(400).json({ success: false, message: "Job 1 has no driver assigned. Assign a driver first." });
-//         }
-
-//         if (!['ongoing', 'arrived', 'started'].includes(job1.booking_status)) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Job 1 must be active (ongoing/arrived/started). Current status: ${job1.booking_status}`
-//             });
-//         }
-
-//         const [job2Rows] = await db.query(
-//             "SELECT id, booking_id, booking_status FROM bookings WHERE id = ?",
-//             [follow_on_booking_id]
-//         );
-//         if (!job2Rows.length) return res.status(404).json({ success: false, message: "Follow-on booking (Job 2) not found" });
-
-//         const job2 = job2Rows[0];
-
-//         if (!['pending', 'pending_acceptance'].includes(job2.booking_status)) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Job 2 must be pending. Current status: ${job2.booking_status}`
-//             });
-//         }
-
-//         const [alreadyLinked] = await db.query(
-//             "SELECT id FROM bookings WHERE booking_system = ?",
-//             [String(follow_on_booking_id)]
-//         );
-//         if (alreadyLinked.length) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Booking #${job2.booking_id} is already queued as a follow-on for another job`
-//             });
-//         }
-
-//         const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
-//         const driverName = driverRows[0]?.name || "Driver";
-//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
-
-//         // ✅ Save follow-on link in booking_system column
-//         await db.query(
-//             "UPDATE bookings SET booking_system = ?, dispatcher_action = ? WHERE id = ?",
-//             [
-//                 String(follow_on_booking_id),
-//                 `${dispatcherName} linked booking #${job2.booking_id} as a follow-on job to this ride`,
-//                 id
-//             ]
-//         );
-
-//         // ✅ Fetch full updated job2 booking to send to driver
-//         const [updatedJob2Rows] = await db.query("SELECT * FROM bookings WHERE id = ?", [follow_on_booking_id]);
-//         const updatedJob2 = updatedJob2Rows[0];
-
-//         const responseData = {
-//             job1_id: job1.id,
-//             job1_booking_id: job1.booking_id,
-//             job2_id: job2.id,
-//             job2_booking_id: job2.booking_id,
-//             driver_id: job1.driver,
-//             driver_name: driverName,
-//             message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
-//         };
-
-//         // ✅ Notify dispatcher/admin/client via socket
-//         dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-//         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-//         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-
-//         // ✅ Send push notification to driver (info only, not accept/reject yet)
-//         const notifTitle = "Follow-On Job Queued";
-//         const notifMessage = `A follow-on ride #${updatedJob2.booking_id} has been queued for you after your current job #${job1.booking_id} completes.`;
-
-//         try {
-//             await sendNotificationToDriver(db, job1.driver, notifTitle, notifMessage, {
-//                 booking_id: String(follow_on_booking_id),
-//                 type: "follow_on_queued"
-//             });
-//             console.log(`[FollowOn] Push notification sent to driver #${job1.driver}`);
-//         } catch (fcmErr) {
-//             console.error("[FollowOn] FCM failed (non-fatal):", fcmErr.message);
-//         }
-
-//         try {
-//             await storeNotification(db, {
-//                 user_type: 'driver',
-//                 user_id: job1.driver,
-//                 title: notifTitle,
-//                 message: notifMessage
-//             });
-//         } catch (storeErr) {
-//             console.error("[FollowOn] Store notification failed (non-fatal):", storeErr.message);
-//         }
-
-//         // ✅ Send socket event to driver — driver app listen kare "follow-on-job-queued" event per
-//         const driverSocketId = driverSockets.get(job1.driver.toString());
-//         if (driverSocketId) {
-//             io.to(driverSocketId).emit("follow-on-job-queued", {
-//                 booking_id: String(follow_on_booking_id),
-//                 job1_booking_id: job1.booking_id,
-//                 job2_booking_id: job2.booking_id,
-//                 message: notifMessage,
-//                 booking: updatedJob2
-//             });
-//             console.log(`[FollowOn] Socket event 'follow-on-job-queued' sent to driver #${job1.driver}`);
-//         } else {
-//             console.log(`[FollowOn] Driver #${job1.driver} not connected via socket — push notification sent only`);
-//         }
-
-//         console.log(`[FollowOn] Linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
-
-//         return res.json({ success: true, message: responseData.message, data: responseData });
-
-//     } catch (error) {
-//         console.error("Set follow-on job error:", error);
-//         return res.status(500).json({ success: false, message: error.message });
-//     }
-// });
-
-// app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { follow_on_booking_id } = req.body;
-
-//         if (!follow_on_booking_id) {
-//             return res.status(400).json({ success: false, message: "follow_on_booking_id is required" });
-//         }
-
-//         if (parseInt(id) === parseInt(follow_on_booking_id)) {
-//             return res.status(400).json({ success: false, message: "A booking cannot be a follow-on of itself" });
-//         }
-
-//         const db = getConnection(req.tenantDb);
-
-//         const [job1Rows] = await db.query(
-//             "SELECT id, booking_id, booking_status, driver, booking_system FROM bookings WHERE id = ?",
-//             [id]
-//         );
-//         if (!job1Rows.length) return res.status(404).json({ success: false, message: "Job 1 not found" });
-
-//         const job1 = job1Rows[0];
-
-//         if (!job1.driver) {
-//             return res.status(400).json({ success: false, message: "Job 1 has no driver assigned. Assign a driver first." });
-//         }
-
-//         if (!['ongoing', 'arrived', 'started'].includes(job1.booking_status)) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Job 1 must be active (ongoing/arrived/started). Current status: ${job1.booking_status}`
-//             });
-//         }
-
-//         const [job2Rows] = await db.query(
-//             "SELECT id, booking_id, booking_status FROM bookings WHERE id = ?",
-//             [follow_on_booking_id]
-//         );
-//         if (!job2Rows.length) return res.status(404).json({ success: false, message: "Follow-on booking (Job 2) not found" });
-
-//         const job2 = job2Rows[0];
-
-//         if (!['pending', 'pending_acceptance'].includes(job2.booking_status)) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Job 2 must be pending. Current status: ${job2.booking_status}`
-//             });
-//         }
-
-//         const [alreadyLinked] = await db.query(
-//             "SELECT id FROM bookings WHERE booking_system = ?",
-//             [String(follow_on_booking_id)]
-//         );
-//         if (alreadyLinked.length) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Booking #${job2.booking_id} is already queued as a follow-on for another job`
-//             });
-//         }
-
-//         const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
-//         const driverName = driverRows[0]?.name || "Driver";
-
-//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
-
-//         await db.query(
-//             "UPDATE bookings SET booking_system = ?, dispatcher_action = ? WHERE id = ?",
-//             [
-//                 String(follow_on_booking_id),
-//                 `${dispatcherName} linked booking #${job2.booking_id} as a follow-on job to this ride`,
-//                 id
-//             ]
-//         );
-
-//         const responseData = {
-//             job1_id: job1.id,
-//             job1_booking_id: job1.booking_id,
-//             job2_id: job2.id,
-//             job2_booking_id: job2.booking_id,
-//             driver_id: job1.driver,
-//             driver_name: driverName,
-//             message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
-//         };
-
-//         dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-//         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-//         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-
-//         console.log(`Follow-on linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
-
-//         return res.json({ success: true, message: responseData.message, data: responseData });
-
-//     } catch (error) {
-//         console.error("Set follow-on job error:", error);
-//         return res.status(500).json({ success: false, message: error.message });
-//     }
-// });
-
 app.put("/bookings/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
@@ -2436,7 +1892,6 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        // ✅ Follow-on job logic using booking_system column instead of follow_on_job_id
         let followOnPayload = null;
         let followOnEventData = null;
 
@@ -2455,13 +1910,10 @@ app.put("/bookings/:id/status", async (req, res) => {
                     const driverId = booking.driver;
 
                     await db.query(
-                        `UPDATE bookings 
-                         SET driver = ?, booking_status = 'pending_acceptance', driver_response = 'pending'
-                         WHERE id = ?`,
+                        `UPDATE bookings SET driver = ?, booking_status = 'pending_acceptance' WHERE id = ?`,
                         [driverId, followOnId]
                     );
 
-                    // Clear the booking_system link after dispatching
                     await db.query(
                         "UPDATE bookings SET booking_system = NULL WHERE id = ?",
                         [id]
@@ -2501,18 +1953,28 @@ app.put("/bookings/:id/status", async (req, res) => {
                     setTimeout(async () => {
                         try {
                             const [checkRows] = await db.query(
-                                "SELECT booking_status, driver_response FROM bookings WHERE id = ?",
+                                "SELECT booking_status, driver FROM bookings WHERE id = ?",
                                 [followOnId]
                             );
                             if (!checkRows.length) return;
 
-                            const { booking_status: currentStatus, driver_response } = checkRows[0];
+                            const { booking_status: currentStatus, driver: currentDriver } = checkRows[0];
 
-                            if (currentStatus === 'pending_acceptance' && driver_response !== 'accepted') {
+                            console.log(`[FollowOn] Timeout check: booking #${followOnId} status=${currentStatus}, driver=${currentDriver}`);
+
+                            if (currentStatus === 'ongoing') {
+                                console.log(`[FollowOn] Booking #${followOnId} already accepted — no action`);
+                                return;
+                            }
+
+                            if (['cancelled', 'completed'].includes(currentStatus)) {
+                                console.log(`[FollowOn] Booking #${followOnId} is ${currentStatus} — no action`);
+                                return;
+                            }
+
+                            if (currentStatus === 'pending_acceptance' && currentDriver == driverId) {
                                 await db.query(
-                                    `UPDATE bookings 
-                                     SET driver = NULL, booking_status = 'pending', driver_response = NULL 
-                                     WHERE id = ?`,
+                                    `UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`,
                                     [followOnId]
                                 );
 
@@ -2522,12 +1984,16 @@ app.put("/bookings/:id/status", async (req, res) => {
                                     driver_name: driverInfo?.name,
                                     message: `Driver ${driverInfo?.name} did not respond to follow-on job #${followOnBooking.booking_id} — reset to pending`
                                 };
+
                                 dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
                                 adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
                                 clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
 
-                                console.log(`Follow-on job #${followOnId} timed out — reset to pending`);
+                                console.log(`[FollowOn] Booking #${followOnId} timed out — reset to pending`);
+                            } else {
+                                console.log(`[FollowOn] Status changed to ${currentStatus} — no action needed`);
                             }
+
                         } catch (timeoutErr) {
                             console.error("Follow-on timeout check error:", timeoutErr.message);
                         }
@@ -3270,91 +2736,6 @@ app.post("/waiting-driver", async (req, res) => {
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
-
-// app.post("/waiting-driver", async (req, res) => {
-//     try {
-//         const { clientId, driver_id } = req.body;
-
-//         if (!req.tenantDb) {
-//             const dbHeader = req.headers['database'] || req.headers['x-database'];
-//             if (dbHeader) {
-//                 req.tenantDb = `tenant${dbHeader}`;
-//             }
-//         }
-
-//         if (!req.tenantDb) {
-//             console.error("Waiting Driver: Missing req.tenantDb and database header");
-//             return res.status(400).json({ success: false, message: "Missing database header" });
-//         }
-
-//         const db = getConnection(req.tenantDb);
-
-//         const [driverRows] = await db.query(
-//             `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot, d.updated_at
-//              FROM drivers d
-//              LEFT JOIN plots p ON d.plot_id = p.id
-//              WHERE d.id = ? 
-//              LIMIT 1`,
-//             [driver_id]
-//         );
-
-//         if (!driverRows.length) {
-//             console.error(`Waiting Driver: Driver ${driver_id} not found in ${req.tenantDb}`);
-//             return res.status(404).json({ success: false, message: "Driver not found" });
-//         }
-
-//         const driver = driverRows[0];
-//         const plotId = driver.plot_id;
-//         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
-
-//         let rank = 1;
-//         if (plotId) {
-//             const [rankRows] = await db.query(
-//                 `SELECT COUNT(*) as count 
-//                  FROM drivers 
-//                  WHERE plot_id = ? AND driving_status = ? AND (updated_at < ? OR (updated_at = ? AND id < ?))`,
-//                 [plotId, driver.driving_status, driver.updated_at, driver.updated_at, driver.id]
-//             );
-//             rank = rankRows[0].count + 1;
-//         }
-
-//         const eventData = {
-//             driver_id: driver.id,
-//             driverName: driver.name,
-//             driver_name: driver.name,
-//             plot: plotId,
-//             plot_name: plotName,
-//             rank: rank
-//         };
-
-//         const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
-
-//         const socketId = clientSockets.get(clientId?.toString());
-//         if (socketId) {
-//             io.to(socketId).emit("waiting-driver-event", eventData);
-//         }
-
-//         if (dbName) {
-//             io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
-//             io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
-//             io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
-
-//             // Also emit to the driver themselves
-//             const driverSocketId = driverSockets.get(driver_id.toString());
-//             if (driverSocketId) {
-//                 io.to(driverSocketId).emit("waiting-driver-event", eventData);
-//             }
-//         }
-
-//         await broadcastDashboardCardsUpdate(req.tenantDb);
-
-//         return res.json({ success: true });
-//     }
-//     catch (error) {
-//         console.error("Waiting Driver Error:", error);
-//         return res.status(500).json({ success: false, message: "Internal server error" });
-//     }
-// });
 
 app.post("/send-reminder", (req, res) => {
     const { clientId, title, description } = req.body;
