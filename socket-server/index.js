@@ -278,13 +278,12 @@ const autoDispatchRide = async ({
         const driver = drivers[driverIndex];
         console.log(`[AutoDispatch] Sending Ride to Driver: ${driver.name} (ID: ${driver.id})`);
 
-        // ✅ Amount set karo
         const existingDispatchAmt = booking.booking_amount;
         const dispatchAmount = (existingDispatchAmt === null || existingDispatchAmt === undefined || existingDispatchAmt == 0)
             ? (booking.offered_amount ?? null)
             : existingDispatchAmt;
 
-        // ✅ Driver assign karo — status pending_acceptance set karo
+        // ✅ Driver assign
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending_acceptance' WHERE id = ?`,
             [driver.id, dispatchAmount, bookingId]
@@ -294,7 +293,7 @@ const autoDispatchRide = async ({
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingId]);
         const updatedBooking = updatedBookingRows[0];
 
-        // ✅ Socket event driver ne moklo
+        // ✅ Socket event driver
         const driverSocketId = driverSockets.get(driver.id.toString());
         console.log(`[AutoDispatch] Driver #${driver.id} Socket ID: ${driverSocketId || 'NOT CONNECTED'}`);
         console.log(`[AutoDispatch] All connected driver sockets:`, Array.from(driverSockets.keys()));
@@ -311,7 +310,6 @@ const autoDispatchRide = async ({
             console.log(`[AutoDispatch] Driver #${driver.id} not connected via socket`);
         }
 
-        // ✅ Dispatcher/Admin ne notify karo
         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
         adminSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
 
@@ -340,13 +338,11 @@ const autoDispatchRide = async ({
 
                 console.log(`[AutoDispatch] Timeout check: Status=${currentStatus}, Driver=${currentDriver}`);
 
-                // ✅ Driver ne accept kari lidhu — ongoing thay gyu
                 if (currentStatus === "ongoing") {
                     console.log(`[AutoDispatch] Ride #${bookingId} accepted by ${driver.name} — status is ongoing`);
                     return;
                 }
 
-                // ✅ Cancelled or completed thay gayu
                 if (currentStatus === "cancelled" || currentStatus === "completed") {
                     console.log(`[AutoDispatch] Ride #${bookingId} is ${currentStatus} — stopping dispatch`);
                     return;
@@ -356,13 +352,11 @@ const autoDispatchRide = async ({
                 if (currentStatus === "pending_acceptance" && currentDriver == driver.id) {
                     console.log(`[AutoDispatch] Timeout: Driver ${driver.name} did not respond. Trying next driver...`);
 
-                    // ✅ Reset booking — driver remove karo, pending per pachho
                     await db.query(
                         `UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`,
                         [bookingId]
                     );
 
-                    // ✅ Next driver try karo
                     autoDispatchRide({
                         bookingId,
                         tenantDb,
@@ -1897,7 +1891,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         if (booking.booking_system && !isNaN(parseInt(booking.booking_system))) {
             const followOnId = parseInt(booking.booking_system);
-            console.log(`Follow-on job detected: #${followOnId} — sending to driver #${booking.driver}`);
+            console.log(`[FollowOn] Detected follow-on job #${followOnId} for driver #${booking.driver}`);
 
             try {
                 const [followOnRows] = await db.query(
@@ -1936,7 +1930,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                             message: foNotifMsg
                         });
                     } catch (notifErr) {
-                        console.error("Notification error in follow-on dispatch:", notifErr.message);
+                        console.error("[FollowOn] Notification error:", notifErr.message);
                     }
 
                     const [driverInfoRows] = await db.query("SELECT name FROM drivers WHERE id = ?", [driverId]);
@@ -1960,15 +1954,15 @@ app.put("/bookings/:id/status", async (req, res) => {
 
                             const { booking_status: currentStatus, driver: currentDriver } = checkRows[0];
 
-                            console.log(`[FollowOn] Timeout check: booking #${followOnId} status=${currentStatus}, driver=${currentDriver}`);
+                            console.log(`[FollowOn] Timeout check for #${followOnId}: status=${currentStatus}, driver=${currentDriver}`);
 
                             if (currentStatus === 'ongoing') {
-                                console.log(`[FollowOn] Booking #${followOnId} already accepted — no action`);
+                                console.log(`[FollowOn] Job #${followOnId} accepted — status is ongoing`);
                                 return;
                             }
 
-                            if (['cancelled', 'completed'].includes(currentStatus)) {
-                                console.log(`[FollowOn] Booking #${followOnId} is ${currentStatus} — no action`);
+                            if (currentStatus === 'cancelled' || currentStatus === 'completed') {
+                                console.log(`[FollowOn] Job #${followOnId} is ${currentStatus} — no action`);
                                 return;
                             }
 
@@ -1984,25 +1978,21 @@ app.put("/bookings/:id/status", async (req, res) => {
                                     driver_name: driverInfo?.name,
                                     message: `Driver ${driverInfo?.name} did not respond to follow-on job #${followOnBooking.booking_id} — reset to pending`
                                 };
-
                                 dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
                                 adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
                                 clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
 
-                                console.log(`[FollowOn] Booking #${followOnId} timed out — reset to pending`);
-                            } else {
-                                console.log(`[FollowOn] Status changed to ${currentStatus} — no action needed`);
+                                console.log(`[FollowOn] Job #${followOnId} timed out — reset to pending`);
                             }
-
                         } catch (timeoutErr) {
-                            console.error("Follow-on timeout check error:", timeoutErr.message);
+                            console.error("[FollowOn] Timeout check error:", timeoutErr.message);
                         }
                     }, 30000);
 
-                    console.log(`Follow-on job #${followOnId} sent to driver #${driverId}`);
+                    console.log(`[FollowOn] Job #${followOnId} dispatched to driver #${driverId}`);
                 }
             } catch (foError) {
-                console.error(`Error dispatching follow-on job:`, foError.message);
+                console.error(`[FollowOn] Error dispatching follow-on job:`, foError.message);
             }
         }
 
@@ -2088,12 +2078,15 @@ app.put("/bookings/:id/status", async (req, res) => {
         if (followOnPayload) {
             const driverSocketId = driverSockets.get(booking.driver.toString());
             if (driverSocketId) {
-                io.to(driverSocketId).emit("new-ride", followOnPayload);
                 io.to(driverSocketId).emit("new-ride-request", {
                     booking_id: followOnPayload.id,
+                    assignment_type: "allocate_driver",
                     message: "You have a follow-on ride request",
                     booking: followOnPayload
                 });
+                console.log(`[FollowOn] new-ride-request sent to driver #${booking.driver}`);
+            } else {
+                console.log(`[FollowOn] Driver #${booking.driver} not connected via socket`);
             }
         }
 
