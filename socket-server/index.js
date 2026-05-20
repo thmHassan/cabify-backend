@@ -758,8 +758,27 @@ io.on("connection", (socket) => {
             if (driver) {
                 io.to(dbName).emit("driver-location-update", driver);
 
+                // ✅ Helper: fetch real plot name from tenant DB
+                const getPlotName = async (plotId) => {
+                    if (!plotId) return "N/A";
+                    try {
+                        const db = getConnection(`tenant${dbName}`);
+                        const [plotRows] = await db.query(
+                            "SELECT name FROM plots WHERE id = ? LIMIT 1",
+                            [plotId]
+                        );
+                        return plotRows.length ? plotRows[0].name : `Plot #${plotId}`;
+                    } catch (err) {
+                        console.error("[driver-location] Failed to fetch plot name:", err.message);
+                        return `Plot #${plotId}`;
+                    }
+                };
+
                 if (driver.driving_status === "idle") {
                     const plotId = driver.plot_id;
+
+                    // ✅ FIX: fetch real plot name from DB
+                    const plotName = await getPlotName(plotId);
 
                     const plotKey = plotId ? `${plotId}_${dbName}` : null;
                     const rank = plotKey ? getOrAssignRank(plotKey, driver.id) : "-";
@@ -769,7 +788,7 @@ io.on("connection", (socket) => {
                         driverName: driver.name,
                         driver_name: driver.name,
                         plot: plotId,
-                        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
+                        plot_name: plotName,
                         rank: rank,
                         status: driver.driving_status,
                         latitude: driver.latitude,
@@ -784,6 +803,9 @@ io.on("connection", (socket) => {
                 } else if (driver.driving_status === "busy") {
                     const plotId = driver.plot_id;
 
+                    // ✅ FIX: fetch real plot name from DB
+                    const plotName = await getPlotName(plotId);
+
                     removeFromQueue(driver.id, dbName);
                     if (plotId) broadcastUpdatedQueue(plotId, dbName);
 
@@ -792,7 +814,7 @@ io.on("connection", (socket) => {
                         driverName: driver.name,
                         driver_name: driver.name,
                         plot: plotId,
-                        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
+                        plot_name: plotName,
                         rank: null,
                         status: driver.driving_status,
                         latitude: driver.latitude,
@@ -808,6 +830,104 @@ io.on("connection", (socket) => {
             console.error("Laravel Socket error:", err.message);
         }
     });
+
+    // socket.on("driver-location", async (data) => {
+    //     try {
+    //         let dataArray;
+    //         if (typeof data === "string") {
+    //             dataArray = JSON.parse(data);
+    //         } else {
+    //             dataArray = data;
+    //         }
+
+    //         const dbName = dataArray.database || socket.handshake.query.database;
+    //         const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
+
+    //         if (dbName && driverIdFromData) {
+    //             try {
+    //                 const db = getConnection(`tenant${dbName}`);
+    //                 const status = dataArray.driving_status || dataArray.status;
+    //                 if (status) {
+    //                     await db.query(
+    //                         `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
+    //                         [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
+    //                     );
+    //                 } else {
+    //                     await db.query(
+    //                         `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
+    //                         [dataArray.latitude, dataArray.longitude, driverIdFromData]
+    //                     );
+    //                 }
+    //             } catch (dbErr) {
+    //                 console.error("Database update error in driver-location:", dbErr.message);
+    //             }
+    //         }
+
+    //         const response = await axios.post(
+    //             "https://backend.cabifyit.com/api/driver/location",
+    //             dataArray,
+    //             {
+    //                 headers: {
+    //                     Authorization: `Bearer ${socket.token}`,
+    //                     database: `${dbName}`,
+    //                 }
+    //             }
+    //         );
+
+    //         const driver = response.data.driver;
+    //         if (driver) {
+    //             io.to(dbName).emit("driver-location-update", driver);
+
+    //             if (driver.driving_status === "idle") {
+    //                 const plotId = driver.plot_id;
+
+    //                 const plotKey = plotId ? `${plotId}_${dbName}` : null;
+    //                 const rank = plotKey ? getOrAssignRank(plotKey, driver.id) : "-";
+
+    //                 const eventData = {
+    //                     driver_id: driver.id,
+    //                     driverName: driver.name,
+    //                     driver_name: driver.name,
+    //                     plot: plotId,
+    //                     plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
+    //                     rank: rank,
+    //                     status: driver.driving_status,
+    //                     latitude: driver.latitude,
+    //                     longitude: driver.longitude
+    //                 };
+
+    //                 io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
+    //                 io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
+    //                 io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+    //                 socket.emit("waiting-driver-event", eventData);
+
+    //             } else if (driver.driving_status === "busy") {
+    //                 const plotId = driver.plot_id;
+
+    //                 removeFromQueue(driver.id, dbName);
+    //                 if (plotId) broadcastUpdatedQueue(plotId, dbName);
+
+    //                 const eventData = {
+    //                     driver_id: driver.id,
+    //                     driverName: driver.name,
+    //                     driver_name: driver.name,
+    //                     plot: plotId,
+    //                     plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
+    //                     rank: null,
+    //                     status: driver.driving_status,
+    //                     latitude: driver.latitude,
+    //                     longitude: driver.longitude
+    //                 };
+
+    //                 io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
+    //                 io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
+    //                 io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
+    //             }
+    //         }
+    //     } catch (err) {
+    //         console.error("Laravel Socket error:", err.message);
+    //     }
+    // });
 
     socket.on("get-driver-location", async (data) => {
         try {
@@ -3099,6 +3219,8 @@ app.post("/waiting-driver", async (req, res) => {
 
         const driver = driverRows[0];
         const plotId = driver.plot_id;
+
+        // ✅ FIX: plot_name already comes from LEFT JOIN — real name like "USA"
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
 
         let rank = 1;
@@ -3117,7 +3239,7 @@ app.post("/waiting-driver", async (req, res) => {
             driverName: driver.name,
             driver_name: driver.name,
             plot: plotId,
-            plot_name: plotName,
+            plot_name: plotName,   // ✅ Real name e.g. "USA"
             rank: rank
         };
 
@@ -3133,7 +3255,6 @@ app.post("/waiting-driver", async (req, res) => {
             io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
             io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
 
-            // Also emit to the driver themselves
             const driverSocketId = driverSockets.get(driver_id.toString());
             if (driverSocketId) {
                 io.to(driverSocketId).emit("waiting-driver-event", eventData);
@@ -3149,6 +3270,91 @@ app.post("/waiting-driver", async (req, res) => {
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
+
+// app.post("/waiting-driver", async (req, res) => {
+//     try {
+//         const { clientId, driver_id } = req.body;
+
+//         if (!req.tenantDb) {
+//             const dbHeader = req.headers['database'] || req.headers['x-database'];
+//             if (dbHeader) {
+//                 req.tenantDb = `tenant${dbHeader}`;
+//             }
+//         }
+
+//         if (!req.tenantDb) {
+//             console.error("Waiting Driver: Missing req.tenantDb and database header");
+//             return res.status(400).json({ success: false, message: "Missing database header" });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [driverRows] = await db.query(
+//             `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot, d.updated_at
+//              FROM drivers d
+//              LEFT JOIN plots p ON d.plot_id = p.id
+//              WHERE d.id = ? 
+//              LIMIT 1`,
+//             [driver_id]
+//         );
+
+//         if (!driverRows.length) {
+//             console.error(`Waiting Driver: Driver ${driver_id} not found in ${req.tenantDb}`);
+//             return res.status(404).json({ success: false, message: "Driver not found" });
+//         }
+
+//         const driver = driverRows[0];
+//         const plotId = driver.plot_id;
+//         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+//         let rank = 1;
+//         if (plotId) {
+//             const [rankRows] = await db.query(
+//                 `SELECT COUNT(*) as count 
+//                  FROM drivers 
+//                  WHERE plot_id = ? AND driving_status = ? AND (updated_at < ? OR (updated_at = ? AND id < ?))`,
+//                 [plotId, driver.driving_status, driver.updated_at, driver.updated_at, driver.id]
+//             );
+//             rank = rankRows[0].count + 1;
+//         }
+
+//         const eventData = {
+//             driver_id: driver.id,
+//             driverName: driver.name,
+//             driver_name: driver.name,
+//             plot: plotId,
+//             plot_name: plotName,
+//             rank: rank
+//         };
+
+//         const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+
+//         const socketId = clientSockets.get(clientId?.toString());
+//         if (socketId) {
+//             io.to(socketId).emit("waiting-driver-event", eventData);
+//         }
+
+//         if (dbName) {
+//             io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
+//             io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
+//             io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+
+//             // Also emit to the driver themselves
+//             const driverSocketId = driverSockets.get(driver_id.toString());
+//             if (driverSocketId) {
+//                 io.to(driverSocketId).emit("waiting-driver-event", eventData);
+//             }
+//         }
+
+//         await broadcastDashboardCardsUpdate(req.tenantDb);
+
+//         return res.json({ success: true });
+//     }
+//     catch (error) {
+//         console.error("Waiting Driver Error:", error);
+//         return res.status(500).json({ success: false, message: "Internal server error" });
+//     }
+// });
 
 app.post("/send-reminder", (req, res) => {
     const { clientId, title, description } = req.body;
