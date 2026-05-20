@@ -31,6 +31,49 @@ const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
 
+const plotDriverQueues = new Map();
+
+const getOrAssignRank = (plotKey, driverId) => {
+    if (!plotDriverQueues.has(plotKey)) {
+        plotDriverQueues.set(plotKey, []);
+    }
+    const queue = plotDriverQueues.get(plotKey);
+
+    const existing = queue.find(d => d.driver_id === driverId.toString());
+    if (existing) {
+        console.log(`[WaitingQueue] Driver #${driverId} already in ${plotKey} with rank ${existing.rank}`);
+        return existing.rank;
+    }
+
+    const newRank = queue.length + 1;
+    queue.push({ driver_id: driverId.toString(), rank: newRank });
+    plotDriverQueues.set(plotKey, queue);
+
+    console.log(`[WaitingQueue] Plot ${plotKey} → Driver #${driverId} assigned rank ${newRank}`);
+    console.log(`[WaitingQueue] Current queue:`, queue);
+
+    return newRank;
+};
+
+const removeFromQueue = (driverId, database) => {
+    plotDriverQueues.forEach((queue, plotKey) => {
+        if (!plotKey.endsWith(`_${database}`)) return;
+
+        const index = queue.findIndex(d => d.driver_id === driverId.toString());
+        if (index === -1) return;
+
+        queue.splice(index, 1);
+
+        queue.forEach((d, i) => { d.rank = i + 1; });
+
+        console.log(`[WaitingQueue] Driver #${driverId} removed from ${plotKey}. Updated queue:`, queue);
+    });
+};
+
+const getQueueSnapshot = (plotKey) => {
+    return plotDriverQueues.get(plotKey) || [];
+};
+
 const storeNotification = async (db, { user_type, user_id, title, message }) => {
     try {
         await db.query(
@@ -106,6 +149,31 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
         console.error("Error broadcasting dashboard cards:", error);
         return null;
     }
+};
+
+const broadcastUpdatedQueue = (plotId, database) => {
+    const plotKey = `${plotId}_${database}`;
+    const queue = getQueueSnapshot(plotKey);
+
+    console.log(`[WaitingQueue] Broadcasting updated queue for ${plotKey}:`, queue);
+
+    queue.forEach(({ driver_id, rank }) => {
+        io.to(`dispatcher_${database}`).emit("waiting-driver-rank-updated", {
+            driver_id,
+            plot: plotId,
+            rank
+        });
+        io.to(`admin_${database}`).emit("waiting-driver-rank-updated", {
+            driver_id,
+            plot: plotId,
+            rank
+        });
+        io.to(`client_${database}`).emit("waiting-driver-rank-updated", {
+            driver_id,
+            plot: plotId,
+            rank
+        });
+    });
 };
 
 const autoDispatchRide = async ({
@@ -337,6 +405,31 @@ io.use(async (socket, next) => {
     next();
 });
 
+io.use(async (socket, next) => {
+    const authHeader = socket.handshake.headers.authorization;
+    const driverId = socket.handshake.query.driver_id;
+    const userId = socket.handshake.query.user_id;
+    const adminId = socket.handshake.query.admin_id;
+    const role = socket.handshake.query.role;
+    const dispatcherId = socket.handshake.query.dispatcher_id;
+    const clientId = socket.handshake.query.client_id;
+
+    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) ||
+        (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) ||
+        (role === 'user' && !userId)) {
+        return next(new Error("Unauthorized"));
+    }
+
+    socket.token = authHeader.split(" ")[1];
+    socket.driverId = driverId;
+    socket.dispatcherId = dispatcherId;
+    socket.clientId = clientId;
+    socket.userId = userId;
+    socket.adminId = adminId;
+
+    next();
+});
+
 io.on("connection", (socket) => {
     const role = socket.handshake.query.role;
     const driverId = socket.handshake.query.driver_id;
@@ -348,25 +441,17 @@ io.on("connection", (socket) => {
 
     if (database) {
         socket.join(database);
-        if (role) {
-            socket.join(`${role}_${database}`);
-        }
+        if (role) socket.join(`${role}_${database}`);
         socket.database = database;
         console.log(`Socket connected: Role=${role}, ID=${driverId || dispatcherId || userId || adminId || clientId}, DB=${database}`);
     }
 
-    if (role === "dispatcher" && dispatcherId) {
-        dispatcherSockets.set(dispatcherId.toString(), socket.id);
-    }
-    if ((role === "user" || role === "customer") && userId) {
-        userSockets.set(userId.toString(), socket.id);
-    }
-    if (role === "client" && clientId) {
-        clientSockets.set(clientId.toString(), socket.id);
-    }
-    if (role === "admin" && adminId) {
-        adminSockets.set(adminId.toString(), socket.id);
-    }
+    if (role === "dispatcher" && dispatcherId) dispatcherSockets.set(dispatcherId.toString(), socket.id);
+    if ((role === "user" || role === "customer") && userId) userSockets.set(userId.toString(), socket.id);
+    if (role === "client" && clientId) clientSockets.set(clientId.toString(), socket.id);
+    if (role === "admin" && adminId) adminSockets.set(adminId.toString(), socket.id);
+
+    // ✅ Driver connect
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
 
@@ -376,23 +461,23 @@ io.on("connection", (socket) => {
 
                 const [rows] = await db.query(
                     `SELECT d.name, d.driving_status, d.plot_id, d.priority_plot, p.name AS plot_name 
-                 FROM drivers d
-                 LEFT JOIN plots p ON d.plot_id = p.id
-                 WHERE d.id = ? 
-                 LIMIT 1`,
+                     FROM drivers d
+                     LEFT JOIN plots p ON d.plot_id = p.id
+                     WHERE d.id = ? LIMIT 1`,
                     [driverId]
                 );
 
                 console.log("Driver row:", rows);
-
                 if (!rows.length) return;
 
                 const driver = rows[0];
 
                 if (driver.driving_status === "idle") {
-
                     const plotId = driver.plot_id;
                     const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+                    const plotKey = plotId ? `${plotId}_${database}` : null;
+                    const rank = plotKey ? getOrAssignRank(plotKey, driverId) : "-";
 
                     const emitData = {
                         driver_id: driverId,
@@ -400,7 +485,7 @@ io.on("connection", (socket) => {
                         driver_name: driver.name,
                         plot: plotId ?? "Unassigned",
                         plot_name: plotName,
-                        rank: driver.priority_plot ?? "-"
+                        rank: rank
                     };
 
                     console.log(`Emitting waiting-driver-event to company ${database}:`, emitData);
@@ -427,21 +512,21 @@ io.on("connection", (socket) => {
             }
 
             const dbName = dataArray.database || socket.handshake.query.database;
-            const driverId = dataArray.id || dataArray.driver_id || socket.driverId;
+            const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
 
-            if (dbName && driverId) {
+            if (dbName && driverIdFromData) {
                 try {
                     const db = getConnection(`tenant${dbName}`);
                     const status = dataArray.driving_status || dataArray.status;
                     if (status) {
                         await db.query(
                             `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, status, driverId]
+                            [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
                         );
                     } else {
                         await db.query(
                             `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, driverId]
+                            [dataArray.latitude, dataArray.longitude, driverIdFromData]
                         );
                     }
                 } catch (dbErr) {
@@ -462,29 +547,49 @@ io.on("connection", (socket) => {
 
             const driver = response.data.driver;
             if (driver) {
-                // Broadcast the updated driver location ONLY to the specific company room
                 io.to(dbName).emit("driver-location-update", driver);
 
-                // Prepare event data for Dashboard lists (Waiting/On Jobs)
-                const eventData = {
-                    driver_id: driver.id,
-                    driverName: driver.name,
-                    driver_name: driver.name,
-                    plot: driver.plot_id,
-                    plot_name: driver.plot_name || (driver.plot_id ? `Plot #${driver.plot_id}` : "N/A"),
-                    rank: driver.priority_plot ?? "-",
-                    status: driver.driving_status,
-                    latitude: driver.latitude,
-                    longitude: driver.longitude
-                };
-
-                // Emit status-specific events ONLY to the relevant company's dispatchers/admins
                 if (driver.driving_status === "idle") {
+                    const plotId = driver.plot_id;
+
+                    const plotKey = plotId ? `${plotId}_${dbName}` : null;
+                    const rank = plotKey ? getOrAssignRank(plotKey, driver.id) : "-";
+
+                    const eventData = {
+                        driver_id: driver.id,
+                        driverName: driver.name,
+                        driver_name: driver.name,
+                        plot: plotId,
+                        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
+                        rank: rank,
+                        status: driver.driving_status,
+                        latitude: driver.latitude,
+                        longitude: driver.longitude
+                    };
+
                     io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
                     io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
                     io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
                     socket.emit("waiting-driver-event", eventData);
+
                 } else if (driver.driving_status === "busy") {
+                    const plotId = driver.plot_id;
+
+                    removeFromQueue(driver.id, dbName);
+                    if (plotId) broadcastUpdatedQueue(plotId, dbName);
+
+                    const eventData = {
+                        driver_id: driver.id,
+                        driverName: driver.name,
+                        driver_name: driver.name,
+                        plot: plotId,
+                        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A"),
+                        rank: null,
+                        status: driver.driving_status,
+                        latitude: driver.latitude,
+                        longitude: driver.longitude
+                    };
+
                     io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
                     io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
                     io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
@@ -506,19 +611,10 @@ io.on("connection", (socket) => {
             const response = await axios.post(
                 "https://backend.cabifyit.com/api/driver/get-location",
                 dataArray,
-                {
-                    headers: {
-                        database: `${dataArray.database}`,
-                    }
-                }
+                { headers: { database: `${dataArray.database}` } }
             );
 
-            const location = response.data;
-
-            socket.emit("get-driver-location-on-user", {
-                success: true,
-                data: location,
-            });
+            socket.emit("get-driver-location-on-user", { success: true, data: response.data });
         } catch (err) {
             console.error("Laravel Socket error", err);
         }
@@ -527,17 +623,38 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());
+
+            if (database) {
+                (async () => {
+                    try {
+                        const db = getConnection(`tenant${database}`);
+                        const [rows] = await db.query(
+                            "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
+                            [driverId]
+                        );
+                        const plotId = rows[0]?.plot_id;
+
+                        removeFromQueue(driverId, database);
+
+                        if (plotId) {
+                            broadcastUpdatedQueue(plotId, database);
+                        }
+
+                        console.log(`[WaitingQueue] Driver #${driverId} disconnected — removed from queue`);
+                    } catch (err) {
+                        console.error("Error removing driver from queue on disconnect:", err);
+                        removeFromQueue(driverId, database);
+                    }
+                })();
+            }
         }
+
         if (role === "dispatcher" && dispatcherId) {
             dispatcherSockets.delete(dispatcherId.toString());
             console.log(`Dispatcher ${dispatcherId} disconnected`);
         }
-        if (role === "user" && userId) {
-            userSockets.delete(userId.toString());
-        }
-        if (role === "client" && clientId) {
-            clientSockets.delete(clientId.toString());
-        }
+        if (role === "user" && userId) userSockets.delete(userId.toString());
+        if (role === "client" && clientId) clientSockets.delete(clientId.toString());
         if (role === "admin" && adminId) {
             adminSockets.delete(adminId.toString());
             console.log(`Admin ${adminId} disconnected`);
@@ -1506,9 +1623,9 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
 
         const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
         const driverName = driverRows[0]?.name || "Driver";
-
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
 
+        // ✅ Save follow-on link in booking_system column
         await db.query(
             "UPDATE bookings SET booking_system = ?, dispatcher_action = ? WHERE id = ?",
             [
@@ -1517,6 +1634,10 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
                 id
             ]
         );
+
+        // ✅ Fetch full updated job2 booking to send to driver
+        const [updatedJob2Rows] = await db.query("SELECT * FROM bookings WHERE id = ?", [follow_on_booking_id]);
+        const updatedJob2 = updatedJob2Rows[0];
 
         const responseData = {
             job1_id: job1.id,
@@ -1528,11 +1649,52 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
         };
 
+        // ✅ Notify dispatcher/admin/client via socket
         dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
 
-        console.log(`Follow-on linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
+        // ✅ Send push notification to driver (info only, not accept/reject yet)
+        const notifTitle = "Follow-On Job Queued";
+        const notifMessage = `A follow-on ride #${updatedJob2.booking_id} has been queued for you after your current job #${job1.booking_id} completes.`;
+
+        try {
+            await sendNotificationToDriver(db, job1.driver, notifTitle, notifMessage, {
+                booking_id: String(follow_on_booking_id),
+                type: "follow_on_queued"
+            });
+            console.log(`[FollowOn] Push notification sent to driver #${job1.driver}`);
+        } catch (fcmErr) {
+            console.error("[FollowOn] FCM failed (non-fatal):", fcmErr.message);
+        }
+
+        try {
+            await storeNotification(db, {
+                user_type: 'driver',
+                user_id: job1.driver,
+                title: notifTitle,
+                message: notifMessage
+            });
+        } catch (storeErr) {
+            console.error("[FollowOn] Store notification failed (non-fatal):", storeErr.message);
+        }
+
+        // ✅ Send socket event to driver — driver app listen kare "follow-on-job-queued" event per
+        const driverSocketId = driverSockets.get(job1.driver.toString());
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("follow-on-job-queued", {
+                booking_id: String(follow_on_booking_id),
+                job1_booking_id: job1.booking_id,
+                job2_booking_id: job2.booking_id,
+                message: notifMessage,
+                booking: updatedJob2
+            });
+            console.log(`[FollowOn] Socket event 'follow-on-job-queued' sent to driver #${job1.driver}`);
+        } else {
+            console.log(`[FollowOn] Driver #${job1.driver} not connected via socket — push notification sent only`);
+        }
+
+        console.log(`[FollowOn] Linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
 
         return res.json({ success: true, message: responseData.message, data: responseData });
 
@@ -1541,6 +1703,104 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 });
+
+// app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { follow_on_booking_id } = req.body;
+
+//         if (!follow_on_booking_id) {
+//             return res.status(400).json({ success: false, message: "follow_on_booking_id is required" });
+//         }
+
+//         if (parseInt(id) === parseInt(follow_on_booking_id)) {
+//             return res.status(400).json({ success: false, message: "A booking cannot be a follow-on of itself" });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [job1Rows] = await db.query(
+//             "SELECT id, booking_id, booking_status, driver, booking_system FROM bookings WHERE id = ?",
+//             [id]
+//         );
+//         if (!job1Rows.length) return res.status(404).json({ success: false, message: "Job 1 not found" });
+
+//         const job1 = job1Rows[0];
+
+//         if (!job1.driver) {
+//             return res.status(400).json({ success: false, message: "Job 1 has no driver assigned. Assign a driver first." });
+//         }
+
+//         if (!['ongoing', 'arrived', 'started'].includes(job1.booking_status)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Job 1 must be active (ongoing/arrived/started). Current status: ${job1.booking_status}`
+//             });
+//         }
+
+//         const [job2Rows] = await db.query(
+//             "SELECT id, booking_id, booking_status FROM bookings WHERE id = ?",
+//             [follow_on_booking_id]
+//         );
+//         if (!job2Rows.length) return res.status(404).json({ success: false, message: "Follow-on booking (Job 2) not found" });
+
+//         const job2 = job2Rows[0];
+
+//         if (!['pending', 'pending_acceptance'].includes(job2.booking_status)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Job 2 must be pending. Current status: ${job2.booking_status}`
+//             });
+//         }
+
+//         const [alreadyLinked] = await db.query(
+//             "SELECT id FROM bookings WHERE booking_system = ?",
+//             [String(follow_on_booking_id)]
+//         );
+//         if (alreadyLinked.length) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Booking #${job2.booking_id} is already queued as a follow-on for another job`
+//             });
+//         }
+
+//         const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
+//         const driverName = driverRows[0]?.name || "Driver";
+
+//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
+
+//         await db.query(
+//             "UPDATE bookings SET booking_system = ?, dispatcher_action = ? WHERE id = ?",
+//             [
+//                 String(follow_on_booking_id),
+//                 `${dispatcherName} linked booking #${job2.booking_id} as a follow-on job to this ride`,
+//                 id
+//             ]
+//         );
+
+//         const responseData = {
+//             job1_id: job1.id,
+//             job1_booking_id: job1.booking_id,
+//             job2_id: job2.id,
+//             job2_booking_id: job2.booking_id,
+//             driver_id: job1.driver,
+//             driver_name: driverName,
+//             message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
+//         };
+
+//         dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+//         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+//         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+
+//         console.log(`Follow-on linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
+
+//         return res.json({ success: true, message: responseData.message, data: responseData });
+
+//     } catch (error) {
+//         console.error("Set follow-on job error:", error);
+//         return res.status(500).json({ success: false, message: error.message });
+//     }
+// });
 
 app.put("/bookings/:id/status", async (req, res) => {
     try {
