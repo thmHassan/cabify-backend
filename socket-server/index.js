@@ -1625,7 +1625,6 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
         const driverName = driverRows[0]?.name || "Driver";
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
 
-        // ✅ Save follow-on link in booking_system column
         await db.query(
             "UPDATE bookings SET booking_system = ?, dispatcher_action = ? WHERE id = ?",
             [
@@ -1654,14 +1653,14 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
 
-        // ✅ Send push notification to driver (info only, not accept/reject yet)
-        const notifTitle = "Follow-On Job Queued";
-        const notifMessage = `A follow-on ride #${updatedJob2.booking_id} has been queued for you after your current job #${job1.booking_id} completes.`;
+        // ✅ Push notification to driver
+        const notifTitle = "New Follow-On Job";
+        const notifMessage = `You have a new follow-on ride #${updatedJob2.booking_id} queued after your current job. Please accept or reject.`;
 
         try {
             await sendNotificationToDriver(db, job1.driver, notifTitle, notifMessage, {
                 booking_id: String(follow_on_booking_id),
-                type: "follow_on_queued"
+                type: "new_ride"
             });
             console.log(`[FollowOn] Push notification sent to driver #${job1.driver}`);
         } catch (fcmErr) {
@@ -1679,17 +1678,20 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             console.error("[FollowOn] Store notification failed (non-fatal):", storeErr.message);
         }
 
-        // ✅ Send socket event to driver — driver app listen kare "follow-on-job-queued" event per
         const driverSocketId = driverSockets.get(job1.driver.toString());
+
+        console.log(`[FollowOn] job1.driver = "${job1.driver}", type = ${typeof job1.driver}`);
+        console.log(`[FollowOn] driverSockets keys:`, Array.from(driverSockets.keys()));
+        console.log(`[FollowOn] Found socketId: ${driverSocketId}`);
+
         if (driverSocketId) {
-            io.to(driverSocketId).emit("follow-on-job-queued", {
+            io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: String(follow_on_booking_id),
-                job1_booking_id: job1.booking_id,
-                job2_booking_id: job2.booking_id,
+                assignment_type: "allocate_driver",
                 message: notifMessage,
                 booking: updatedJob2
             });
-            console.log(`[FollowOn] Socket event 'follow-on-job-queued' sent to driver #${job1.driver}`);
+            console.log(`[FollowOn] Socket event 'new-ride-request' sent to driver #${job1.driver}`);
         } else {
             console.log(`[FollowOn] Driver #${job1.driver} not connected via socket — push notification sent only`);
         }
@@ -1703,6 +1705,149 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 });
+
+// app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { follow_on_booking_id } = req.body;
+
+//         if (!follow_on_booking_id) {
+//             return res.status(400).json({ success: false, message: "follow_on_booking_id is required" });
+//         }
+
+//         if (parseInt(id) === parseInt(follow_on_booking_id)) {
+//             return res.status(400).json({ success: false, message: "A booking cannot be a follow-on of itself" });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [job1Rows] = await db.query(
+//             "SELECT id, booking_id, booking_status, driver, booking_system FROM bookings WHERE id = ?",
+//             [id]
+//         );
+//         if (!job1Rows.length) return res.status(404).json({ success: false, message: "Job 1 not found" });
+
+//         const job1 = job1Rows[0];
+
+//         if (!job1.driver) {
+//             return res.status(400).json({ success: false, message: "Job 1 has no driver assigned. Assign a driver first." });
+//         }
+
+//         if (!['ongoing', 'arrived', 'started'].includes(job1.booking_status)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Job 1 must be active (ongoing/arrived/started). Current status: ${job1.booking_status}`
+//             });
+//         }
+
+//         const [job2Rows] = await db.query(
+//             "SELECT id, booking_id, booking_status FROM bookings WHERE id = ?",
+//             [follow_on_booking_id]
+//         );
+//         if (!job2Rows.length) return res.status(404).json({ success: false, message: "Follow-on booking (Job 2) not found" });
+
+//         const job2 = job2Rows[0];
+
+//         if (!['pending', 'pending_acceptance'].includes(job2.booking_status)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Job 2 must be pending. Current status: ${job2.booking_status}`
+//             });
+//         }
+
+//         const [alreadyLinked] = await db.query(
+//             "SELECT id FROM bookings WHERE booking_system = ?",
+//             [String(follow_on_booking_id)]
+//         );
+//         if (alreadyLinked.length) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Booking #${job2.booking_id} is already queued as a follow-on for another job`
+//             });
+//         }
+
+//         const [driverRows] = await db.query("SELECT id, name FROM drivers WHERE id = ?", [job1.driver]);
+//         const driverName = driverRows[0]?.name || "Driver";
+//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
+
+//         // ✅ Save follow-on link in booking_system column
+//         await db.query(
+//             "UPDATE bookings SET booking_system = ?, dispatcher_action = ? WHERE id = ?",
+//             [
+//                 String(follow_on_booking_id),
+//                 `${dispatcherName} linked booking #${job2.booking_id} as a follow-on job to this ride`,
+//                 id
+//             ]
+//         );
+
+//         // ✅ Fetch full updated job2 booking to send to driver
+//         const [updatedJob2Rows] = await db.query("SELECT * FROM bookings WHERE id = ?", [follow_on_booking_id]);
+//         const updatedJob2 = updatedJob2Rows[0];
+
+//         const responseData = {
+//             job1_id: job1.id,
+//             job1_booking_id: job1.booking_id,
+//             job2_id: job2.id,
+//             job2_booking_id: job2.booking_id,
+//             driver_id: job1.driver,
+//             driver_name: driverName,
+//             message: `Booking #${job2.booking_id} queued as follow-on after #${job1.booking_id} for ${driverName}`
+//         };
+
+//         // ✅ Notify dispatcher/admin/client via socket
+//         dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+//         adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+//         clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+
+//         // ✅ Send push notification to driver (info only, not accept/reject yet)
+//         const notifTitle = "Follow-On Job Queued";
+//         const notifMessage = `A follow-on ride #${updatedJob2.booking_id} has been queued for you after your current job #${job1.booking_id} completes.`;
+
+//         try {
+//             await sendNotificationToDriver(db, job1.driver, notifTitle, notifMessage, {
+//                 booking_id: String(follow_on_booking_id),
+//                 type: "follow_on_queued"
+//             });
+//             console.log(`[FollowOn] Push notification sent to driver #${job1.driver}`);
+//         } catch (fcmErr) {
+//             console.error("[FollowOn] FCM failed (non-fatal):", fcmErr.message);
+//         }
+
+//         try {
+//             await storeNotification(db, {
+//                 user_type: 'driver',
+//                 user_id: job1.driver,
+//                 title: notifTitle,
+//                 message: notifMessage
+//             });
+//         } catch (storeErr) {
+//             console.error("[FollowOn] Store notification failed (non-fatal):", storeErr.message);
+//         }
+
+//         // ✅ Send socket event to driver — driver app listen kare "follow-on-job-queued" event per
+//         const driverSocketId = driverSockets.get(job1.driver.toString());
+//         if (driverSocketId) {
+//             io.to(driverSocketId).emit("follow-on-job-queued", {
+//                 booking_id: String(follow_on_booking_id),
+//                 job1_booking_id: job1.booking_id,
+//                 job2_booking_id: job2.booking_id,
+//                 message: notifMessage,
+//                 booking: updatedJob2
+//             });
+//             console.log(`[FollowOn] Socket event 'follow-on-job-queued' sent to driver #${job1.driver}`);
+//         } else {
+//             console.log(`[FollowOn] Driver #${job1.driver} not connected via socket — push notification sent only`);
+//         }
+
+//         console.log(`[FollowOn] Linked: Job #${job1.booking_id} → Job #${job2.booking_id} (Driver: ${driverName})`);
+
+//         return res.json({ success: true, message: responseData.message, data: responseData });
+
+//     } catch (error) {
+//         console.error("Set follow-on job error:", error);
+//         return res.status(500).json({ success: false, message: error.message });
+//     }
+// });
 
 // app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
 //     try {
