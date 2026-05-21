@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use App\Models\CompanySendNewRide;
 use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
+use App\Models\CompanyDriver;
 
 class BookingController extends Controller
 {
