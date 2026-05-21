@@ -78,6 +78,7 @@ class SettingController extends Controller
                     'maps_api' => $tenant->maps_api,
                     'search_api' => $tenant->search_api,
                     'country_of_use' => $tenant->country_of_use,
+                    'units' => $tenant->units,
                 ]
             ]);
         } catch (\Exception $e) {
