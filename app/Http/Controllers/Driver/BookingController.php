@@ -418,9 +418,11 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
-            $driver->ride_count_price -= 1;
-            $driver->save();
+            if ($companySetting->package_type == "ride_count_price") {
+                $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+                $driver->ride_count_price -= 1;
+                $driver->save();
+            }
             
             $booking->booking_status = "ongoing";
             // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo

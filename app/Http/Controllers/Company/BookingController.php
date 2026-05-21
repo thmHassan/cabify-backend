@@ -16,6 +16,7 @@ use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
 use App\Models\CompanySendNewRide;
 use App\Models\CompanyUser;
+use App\Models\WalletTransaction;
 
 class BookingController extends Controller
 {
@@ -119,10 +120,51 @@ class BookingController extends Controller
             $nearBooking = 0;
             $alertMessage = NULL;
 
+            if(isset($request->driver) && $request->driver != NULL){
+                $driver = CompanyDriver::where("id", $request->driver)->first();
+                $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+                if ($companySetting->package_type == "per_ride_commission_topup") {
+                    $checkAmount = $companySetting->package_amount;
+                    if ($checkAmount > $driver->wallet_balance) {
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver wallet balance is not sufficient'
+                        ], 400);
+                    }
+                }
+                if ($companySetting->package_type == "ride_count_price") {
+                    if($driver->ride_count_price <= 0){
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver ride count is not sufficient'
+                        ], 400);
+                    }
+                }
+                if ($companySetting->package_type == "packages_topup") {
+                    $package = DriverPackage::where("driver_id", $driver->id)
+                        ->where("package_type", "packages_postpaid")
+                        ->orderBy("id", "DESC")
+                        ->first();
+    
+                    if (!isset($package) || (isset($package) && $package->expire_date < date("Y-m-d"))) {
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver wallet balance is not sufficient'
+                        ], 400);
+                    }
+                }
+            }
+
             if (isset($request->multi_booking) && $request->multi_booking == "yes") {
                 $dayArray = array_map('trim', explode(',', $request->multi_days));
                 $startDate = Carbon::parse($request->start_at);
                 $endDate = Carbon::parse($request->end_at);
+
+                if(isset($request->driver) && $request->driver != NULL){
+                    $driver = CompanyDriver::where("id", $request->driver)->first();
+                    $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+                }
+
                 for ($date = $startDate; $date->lte($endDate); $date->addDay()) {
 
                     if (in_array($date->format('D'), $dayArray)) {
@@ -192,6 +234,27 @@ class BookingController extends Controller
                         $newBooking->end_at = $request->end_at;
                         $newBooking->payment_method = $request->payment_method;
                         $newBooking->save();
+
+                        if(isset($request->driver) && $driver != NULL){
+
+                            if ($companySetting->package_type == "ride_count_price") {
+                                $driver->ride_count_price -= 1;
+                                $driver->save();
+                            }
+                            if ($companySetting->package_type == "per_ride_commission_topup") {
+                                $checkAmount = $companySetting->package_amount;
+                                $driver->wallet_balance -= $checkAmount;
+                                $driver->save();
+    
+                                $wallet = new WalletTransaction;
+                                $wallet->user_type = "driver";
+                                $wallet->user_id = $driver->id;
+                                $wallet->type = 'deduct';
+                                $wallet->amount = $checkAmount;
+                                $wallet->comment = "Per ride booking deduction";
+                                $wallet->save();
+                            }
+                        }
                     }
                 }
 
@@ -256,6 +319,11 @@ class BookingController extends Controller
                     $existUser->save();                        
                 }
 
+                if(isset($request->driver) && $request->driver != NULL){
+                    $driver = CompanyDriver::where("id", $request->driver)->first();
+                    $companySetting = CompanySetting::orderBy("id", "DESC")->first();
+                }
+
                 $newBooking = new CompanyBooking;
                 $newBooking->booking_id = "RD" . strtoupper(uniqid());
                 $newBooking->sub_company = $request->sub_company;
@@ -306,6 +374,26 @@ class BookingController extends Controller
                 $newBooking->end_at = $request->end_at;
                 $newBooking->payment_method = $request->payment_method;
                 $newBooking->save();
+
+                if(isset($request->driver) && $driver != NULL){
+                    if ($companySetting->package_type == "ride_count_price") {
+                        $driver->ride_count_price -= 1;
+                        $driver->save();
+                    }
+                    if ($companySetting->package_type == "per_ride_commission_topup") {
+                        $checkAmount = $companySetting->package_amount;
+                        $driver->wallet_balance -= $checkAmount;
+                        $driver->save();
+
+                        $wallet = new WalletTransaction;
+                        $wallet->user_type = "driver";
+                        $wallet->user_id = $driver->id;
+                        $wallet->type = 'deduct';
+                        $wallet->amount = $checkAmount;
+                        $wallet->comment = "Per ride booking deduction";
+                        $wallet->save();
+                    }
+                }
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
