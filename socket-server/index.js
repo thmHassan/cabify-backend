@@ -2279,10 +2279,10 @@ app.post("/bookings/broadcast", async (req, res) => {
             sentCount++;
         });
 
-        driverSockets.forEach((socketId) => {
-            io.to(socketId).emit("new-ride", booking);
-            sentCount++;
-        });
+        // driverSockets.forEach((socketId) => {
+        //     io.to(socketId).emit("new-ride", booking);
+        //     sentCount++;
+        // });
 
         await broadcastDashboardCardsUpdate(finalDb);
 
