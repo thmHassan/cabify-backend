@@ -823,89 +823,89 @@ class BookingController extends Controller
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
             
-            if(isset($booking->email) && $booking->email != NULL){
-                if ($settingData->map_settings == "default") {
-                    $centralData = (new Setting)
-                        ->setConnection('central')
-                        ->orderBy("id", "DESC")
-                        ->first();
+            // if(isset($booking->email) && $booking->email != NULL){
+            //     if ($settingData->map_settings == "default") {
+            //         $centralData = (new Setting)
+            //             ->setConnection('central')
+            //             ->orderBy("id", "DESC")
+            //             ->first();
 
-                    $mail_server = $centralData->smtp_host;
-                    $mail_from = $centralData->smtp_from_address;
-                    $mail_user_name = $centralData->smtp_user_name;
-                    $mail_password = $centralData->smtp_password;
-                    $mail_port = 587;
-                } else {
-                    $mail_server = $settingData->mail_server;
-                    $mail_from = $settingData->mail_from;
-                    $mail_user_name = $settingData->mail_user_name;
-                    $mail_password = $settingData->mail_password;
-                    $mail_port = $settingData->mail_port;
-                }
+            //         $mail_server = $centralData->smtp_host;
+            //         $mail_from = $centralData->smtp_from_address;
+            //         $mail_user_name = $centralData->smtp_user_name;
+            //         $mail_password = $centralData->smtp_password;
+            //         $mail_port = 587;
+            //     } else {
+            //         $mail_server = $settingData->mail_server;
+            //         $mail_from = $settingData->mail_from;
+            //         $mail_user_name = $settingData->mail_user_name;
+            //         $mail_password = $settingData->mail_password;
+            //         $mail_port = $settingData->mail_port;
+            //     }
 
-                config([
-                    'mail.mailers.smtp.host' => $mail_server,
-                    'mail.mailers.smtp.port' => $mail_port,
-                    'mail.mailers.smtp.username' => $mail_user_name,
-                    'mail.mailers.smtp.password' => $mail_password,
-                    'mail.from.address' => $mail_from,
-                    'mail.from.name' => $mail_user_name,
-                ]);
+            //     config([
+            //         'mail.mailers.smtp.host' => $mail_server,
+            //         'mail.mailers.smtp.port' => $mail_port,
+            //         'mail.mailers.smtp.username' => $mail_user_name,
+            //         'mail.mailers.smtp.password' => $mail_password,
+            //         'mail.from.address' => $mail_from,
+            //         'mail.from.name' => $mail_user_name,
+            //     ]);
 
-                Mail::send('emails.ride-complete', [
-                    'name' => $booking->name ?? 'User',
-                    'pickup_location' => $booking->pickup_location,
-                    'dropoff_location' => $booking->destination_location,
-                    'ride_date' => $booking->booking_date,
-                    'total_fare' => $booking->booking_amount,
-                ], function ($message) use ($booking) {
-                    $message->to($booking->email)
-                        ->subject('Ride Completed');
-                });
-            }
+            //     Mail::send('emails.ride-complete', [
+            //         'name' => $booking->name ?? 'User',
+            //         'pickup_location' => $booking->pickup_location,
+            //         'dropoff_location' => $booking->destination_location,
+            //         'ride_date' => $booking->booking_date,
+            //         'total_fare' => $booking->booking_amount,
+            //     ], function ($message) use ($booking) {
+            //         $message->to($booking->email)
+            //             ->subject('Ride Completed');
+            //     });
+            // }
             
-            if(auth("driver")->user()->email && auth("driver")->user()->email != NULL){
-                $settingData = CompanySetting::orderBy("id", "DESC")->first();
-                if ($settingData->map_settings == "default") {
+            // if(auth("driver")->user()->email && auth("driver")->user()->email != NULL){
+            //     $settingData = CompanySetting::orderBy("id", "DESC")->first();
+            //     if ($settingData->map_settings == "default") {
     
-                    $centralData = (new Setting)
-                        ->setConnection('central')
-                        ->orderBy("id", "DESC")
-                        ->first();
+            //         $centralData = (new Setting)
+            //             ->setConnection('central')
+            //             ->orderBy("id", "DESC")
+            //             ->first();
     
-                    $mail_server = $centralData->smtp_host;
-                    $mail_from = $centralData->smtp_from_address;
-                    $mail_user_name = $centralData->smtp_user_name;
-                    $mail_password = $centralData->smtp_password;
-                    $mail_port = 587;
-                } else {
-                    $mail_server = $settingData->mail_server;
-                    $mail_from = $settingData->mail_from;
-                    $mail_user_name = $settingData->mail_user_name;
-                    $mail_password = $settingData->mail_password;
-                    $mail_port = $settingData->mail_port;
-                }
+            //         $mail_server = $centralData->smtp_host;
+            //         $mail_from = $centralData->smtp_from_address;
+            //         $mail_user_name = $centralData->smtp_user_name;
+            //         $mail_password = $centralData->smtp_password;
+            //         $mail_port = 587;
+            //     } else {
+            //         $mail_server = $settingData->mail_server;
+            //         $mail_from = $settingData->mail_from;
+            //         $mail_user_name = $settingData->mail_user_name;
+            //         $mail_password = $settingData->mail_password;
+            //         $mail_port = $settingData->mail_port;
+            //     }
     
-                config([
-                    'mail.mailers.smtp.host' => $mail_server,
-                    'mail.mailers.smtp.port' => $mail_port,
-                    'mail.mailers.smtp.username' => $mail_user_name,
-                    'mail.mailers.smtp.password' => $mail_password,
-                    'mail.from.address' => $mail_from,
-                    'mail.from.name' => $mail_user_name,
-                ]);
+            //     config([
+            //         'mail.mailers.smtp.host' => $mail_server,
+            //         'mail.mailers.smtp.port' => $mail_port,
+            //         'mail.mailers.smtp.username' => $mail_user_name,
+            //         'mail.mailers.smtp.password' => $mail_password,
+            //         'mail.from.address' => $mail_from,
+            //         'mail.from.name' => $mail_user_name,
+            //     ]);
     
-                Mail::send('emails.ride-complete', [
-                    'name' => auth("driver")->user()->name ?? 'User',
-                    'pickup_location' => $booking->pickup_location,
-                    'dropoff_location' => $booking->destination_location,
-                    'ride_date' => $booking->booking_date,
-                    'total_fare' => $booking->booking_amount,
-                ], function ($message) {
-                    $message->to(auth("driver")->user()->email)
-                        ->subject('Ride Completed');
-                });
-            }
+            //     Mail::send('emails.ride-complete', [
+            //         'name' => auth("driver")->user()->name ?? 'User',
+            //         'pickup_location' => $booking->pickup_location,
+            //         'dropoff_location' => $booking->destination_location,
+            //         'ride_date' => $booking->booking_date,
+            //         'total_fare' => $booking->booking_amount,
+            //     ], function ($message) {
+            //         $message->to(auth("driver")->user()->email)
+            //             ->subject('Ride Completed');
+            //     });
+            // }
 
             return response()->json([
                 'success' => 1,
