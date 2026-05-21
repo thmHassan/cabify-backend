@@ -236,7 +236,7 @@ class BookingController extends Controller
                         $newBooking->payment_method = $request->payment_method;
                         $newBooking->save();
 
-                        if(isset($request->driver) && $driver != NULL){
+                        if(isset($request->driver) && $request->driver != NULL){
 
                             if ($companySetting->package_type == "ride_count_price") {
                                 $driver->ride_count_price -= 1;
@@ -376,7 +376,7 @@ class BookingController extends Controller
                 $newBooking->payment_method = $request->payment_method;
                 $newBooking->save();
 
-                if(isset($request->driver) && $driver != NULL){
+                if(isset($request->driver) && $request->driver != NULL){
                     if ($companySetting->package_type == "ride_count_price") {
                         $driver->ride_count_price -= 1;
                         $driver->save();
@@ -405,7 +405,6 @@ class BookingController extends Controller
 
                 if (!isset($request->driver) || $request->driver == NULL) {
                     $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
-
                     if ($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base") {
                         AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
                     } elseif ($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base") {
