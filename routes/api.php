@@ -308,6 +308,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
         Route::get('/driver/get-mobile-setting', [DriverSettingController::class, 'getMobileSetting']);
         Route::post('/driver/purchase-package', [DriverSettingController::class, 'purchasePackage']);
+            Route::get('/driver/list-plot', [DriverSettingController::class, 'plotList']);
+
 
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);

@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\DB;
 use App\Models\Setting;
 use App\Models\MobileAppSetting;
 use App\Models\PackageRideCountSetting;
+use App\Models\CompanyPlot;
 
 class SettingController extends Controller
 {
@@ -534,6 +535,33 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'setting' => $settings
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+        public function plotList(Request $request)
+    {
+        try {
+            $perPage = 10;
+            if (isset($request->perPage) && $request->perPage != NULL) {
+                $perPage = $request->perPage;
+            }
+            $plots = CompanyPlot::orderBy("id", "DESC");
+            if (isset($request->search) && $request->search != NULL) {
+                $plots->where(function ($query) use ($request) {
+                    $query->where("name", "LIKE", "%" . $request->search . "%")
+                        ->orWhere("features", "LIKE", "%" . $request->search . "%");
+                });
+            }
+            $data = $plots->paginate($perPage);
+            return response()->json([
+                'success' => 1,
+                'list' => $data
             ]);
         } catch (\Exception $e) {
             return response()->json([
