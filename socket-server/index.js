@@ -1655,6 +1655,30 @@ app.get("/debug/dispatch-check", async (req, res) => {
     }
 });
 
+app.get("/debug/server-logs", async (req, res) => {
+    try {
+        const { exec } = require("child_process");
+        const action = req.query.action || "logs";
+        
+        let command = "pm2 logs project-socket --raw --lines 100";
+        if (action === "list") {
+            command = "pm2 list";
+        }
+
+        exec(command, (error, stdout, stderr) => {
+            res.json({
+                success: true,
+                command,
+                error: error ? error.message : null,
+                stdout: stdout,
+                stderr: stderr
+            });
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post("/bookings/:id/record-action", async (req, res) => {
     try {
         const { id } = req.params;
