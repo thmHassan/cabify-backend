@@ -371,7 +371,7 @@ const autoDispatchRide = async ({
 
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride-request", {
-                booking_id: updatedBooking.id,
+                booking_id: String(updatedBooking.id),
                 assignment_type: "auto_dispatch",
                 message: "You have a new ride request",
                 booking: updatedBooking
@@ -2174,7 +2174,7 @@ app.put("/bookings/:id/status", async (req, res) => {
             const driverSocketId = driverSockets.get(booking.driver.toString());
             if (driverSocketId) {
                 io.to(driverSocketId).emit("new-ride-request", {
-                    booking_id: followOnPayload.id,
+                    booking_id: String(followOnPayload.id),
                     assignment_type: "allocate_driver",
                     message: "You have a follow-on ride request",
                     booking: followOnPayload
@@ -2395,7 +2395,7 @@ app.post("/send-new-ride", async (req, res) => {
                     });
                 } else {
                     io.to(socketId).emit("new-ride-request", {
-                        booking_id: booking.id,
+                        booking_id: String(booking.id),
                         message: message,
                         booking: booking
                     });
