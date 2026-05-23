@@ -265,7 +265,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 }
             }
 
-            $bookingDateTime = Carbon\Carbon::createFromFormat(
+            $bookingDateTime = \Carbon\Carbon::createFromFormat(
                 'Y-m-d H:i:s',
                 $booking->booking_date . ' ' . $booking->pickup_time
             );

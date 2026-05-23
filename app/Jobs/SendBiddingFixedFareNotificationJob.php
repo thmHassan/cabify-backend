@@ -58,7 +58,7 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
 
             $pickup_time = NULL;
             $booking_date = NULL;
-            $bookingDateTime = Carbon\Carbon::createFromFormat(
+            $bookingDateTime = \Carbon\Carbon::createFromFormat(
                 'Y-m-d H:i:s',
                 $booking->booking_date . ' ' . $booking->pickup_time
             );
