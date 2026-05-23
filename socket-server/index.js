@@ -1660,9 +1660,13 @@ app.get("/debug/server-logs", async (req, res) => {
         const { exec } = require("child_process");
         const action = req.query.action || "logs";
         
-        let command = "pm2 logs project-socket --raw --lines 100";
-        if (action === "list") {
+        let command = "tail -n 150 ~/.pm2/logs/project-socket-out.log";
+        if (action === "error") {
+            command = "tail -n 150 ~/.pm2/logs/project-socket-error.log";
+        } else if (action === "list") {
             command = "pm2 list";
+        } else if (action === "show") {
+            command = "pm2 show project-socket";
         }
 
         exec(command, (error, stdout, stderr) => {
