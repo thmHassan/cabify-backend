@@ -1683,6 +1683,20 @@ app.get("/debug/server-logs", async (req, res) => {
     }
 });
 
+app.get("/debug/query-booking", async (req, res) => {
+    try {
+        const { id, database } = req.query;
+        if (!database || !id) {
+            return res.status(400).json({ error: "database and id query params required" });
+        }
+        const db = getConnection(`tenant${database}`);
+        const [rows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
+        res.json({ success: true, booking: rows[0] || null });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post("/bookings/:id/record-action", async (req, res) => {
     try {
         const { id } = req.params;
