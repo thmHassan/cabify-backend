@@ -112,7 +112,13 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                 return;
             }
 
-            if($booking->pickup_time > now()->format('H:i:s')){
+            $bookingDateTime = Carbon\Carbon::createFromFormat(
+                'Y-m-d H:i:s',
+                $booking->booking_date . ' ' . $booking->pickup_time
+            );
+
+            if ($bookingDateTime->isFuture()) {
+
                 $pickup_time = $booking->pickup_time;
                 $booking_date = $booking->booking_date;
             }

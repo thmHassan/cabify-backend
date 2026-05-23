@@ -56,7 +56,13 @@ class SendBiddingNotificationJob implements ShouldQueue
                 ->orderBy('distance')
                 ->chunk(100, function ($drivers) use ($booking) {
                     foreach ($drivers as $driver) {
-                        if($booking->pickup_time > now()->format('H:i:s')){
+                        $bookingDateTime = Carbon\Carbon::createFromFormat(
+                            'Y-m-d H:i:s',
+                            $booking->booking_date . ' ' . $booking->pickup_time
+                        );
+
+                        if ($bookingDateTime->isFuture()) {
+
                             $pickup_time = $booking->pickup_time;
                             $booking_date = $booking->booking_date;
                         }
