@@ -663,6 +663,57 @@ io.on("connection", (socket) => {
         }
     });
 
+    socket.on("get-my-rank", async (data) => {
+        try {
+            const dbName = data?.database || socket.handshake.query.database;
+            const driverIdFromData = data?.driver_id || socket.driverId || driverId;
+
+            if (!dbName || !driverIdFromData) {
+                socket.emit("my-rank-update", { success: false, message: "Missing driver_id or database" });
+                return;
+            }
+
+            const db = getConnection(`tenant${dbName}`);
+
+            const [rows] = await db.query(
+                `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name
+             FROM drivers d
+             LEFT JOIN plots p ON d.plot_id = p.id
+             WHERE d.id = ? LIMIT 1`,
+                [driverIdFromData]
+            );
+
+            if (!rows.length) {
+                socket.emit("my-rank-update", { success: false, message: "Driver not found" });
+                return;
+            }
+
+            const driver = rows[0];
+            const plotId = driver.plot_id;
+            const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+            let rank = null;
+            if (driver.driving_status === "idle" && plotId) {
+                const plotKey = `${plotId}_${dbName}`;
+                rank = getOrAssignRank(plotKey, driverIdFromData);
+            }
+
+            socket.emit("my-rank-update", {
+                success: true,
+                driver_id: driver.id,
+                driver_name: driver.name,
+                driving_status: driver.driving_status,
+                plot: plotId ?? null,
+                plot_name: plotName,
+                rank: rank
+            });
+
+        } catch (err) {
+            console.error("[get-my-rank] Error:", err.message);
+            socket.emit("my-rank-update", { success: false, message: err.message });
+        }
+    });
+
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());
