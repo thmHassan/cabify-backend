@@ -1531,23 +1531,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         const booking = bookingRows[0];
 
-        // ✅ ±30 min window check — only if pickup_time exists
-        if (booking.booking_date && booking.pickup_time) {
-            const bookingDateStr = new Date(booking.booking_date).toISOString().split("T")[0];
-            const bookingDateTime = new Date(`${bookingDateStr}T${booking.pickup_time}`);
-
-            const now = new Date();
-            const diffMs = bookingDateTime.getTime() - now.getTime();
-            const diffMins = diffMs / (1000 * 60); // +ve = future, -ve = past
-
-            if (diffMins < -30 || diffMins > 30) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Booking can only be set to ongoing within 30 minutes of pickup time. Pickup is at ${booking.pickup_time} — current difference is ${Math.round(Math.abs(diffMins))} minutes ${diffMins > 0 ? 'early' : 'late'}.`
-                });
-            }
-        }
-
         const [driverRows] = await db.query(
             "SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?",
             [driver_id]
@@ -1560,7 +1543,32 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         const driverName = driverRows[0].name || "Driver";
 
-        const newStatus = 'ongoing';
+        // ✅ ±30 min window check — બંને assignment_type માટે
+        let newStatus = 'pending_acceptance';
+        let isWithinWindow = false;
+
+        if (booking.booking_date && booking.pickup_time) {
+            const bookingDateStr = new Date(booking.booking_date).toISOString().split("T")[0];
+            const bookingDateTime = new Date(`${bookingDateStr}T${booking.pickup_time}`);
+
+            const now = new Date();
+            const diffMs = bookingDateTime.getTime() - now.getTime();
+            const diffMins = diffMs / (1000 * 60); // +ve = future, -ve = past
+
+            if (diffMins >= -30 && diffMins <= 30) {
+                // ±30 min ની અંદર → ongoing
+                isWithinWindow = true;
+                newStatus = 'ongoing';
+            } else {
+                // ±30 min ની બહાર → pending_acceptance
+                isWithinWindow = false;
+                newStatus = 'pending_acceptance';
+            }
+        } else {
+            // pickup_time ન હોય (immediate booking) → ongoing
+            isWithinWindow = true;
+            newStatus = 'ongoing';
+        }
 
         const actionText = isPreJob
             ? `${dispatcherName} sent a pre-job request and automatically accepted for driver ${driverName}`
@@ -1577,15 +1585,20 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             [driver_id, amountToSet, actionText, newStatus, id]
         );
 
-        await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
+        // ✅ Window ની અંદર હોય તો જ driver busy થાય
+        if (isWithinWindow) {
+            await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
+        }
 
         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         const updatedBooking = updatedBookingRows[0];
 
         const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
-        const notifMessage = isPreJob
-            ? `You have been assigned a pre-job ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`
-            : `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`;
+        const notifMessage = isWithinWindow
+            ? isPreJob
+                ? `You have been assigned a pre-job ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`
+                : `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`
+            : `You have been assigned a ride #${updatedBooking.booking_id}. Pickup is scheduled at ${booking.pickup_time}. Please be ready.`;
 
         try {
             await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, {
@@ -1612,7 +1625,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
-                assignment_type: "allocate_driver",
+                assignment_type: assignment_type,
                 message: notifMessage,
                 booking: updatedBooking
             });
@@ -1622,9 +1635,13 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
         return res.json({
             success: true,
-            message: isPreJob
-                ? "Pre-job assigned and automatically accepted successfully."
-                : "Driver assigned and ride accepted successfully."
+            is_within_window: isWithinWindow,
+            booking_status: newStatus,
+            message: isWithinWindow
+                ? isPreJob
+                    ? "Pre-job assigned and automatically accepted successfully."
+                    : "Driver assigned and ride accepted successfully."
+                : `Driver assigned successfully. Pickup is at ${booking.pickup_time} — ride will activate closer to pickup time.`
         });
 
     } catch (error) {
