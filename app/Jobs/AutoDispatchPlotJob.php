@@ -265,12 +265,11 @@ class AutoDispatchPlotJob implements ShouldQueue
                 }
             }
 
-            $bookingDateTime = \Carbon\Carbon::createFromFormat(
-                'Y-m-d H:i:s',
+            $bookingDateTime = \Carbon\Carbon::parse(
                 $booking->booking_date . ' ' . $booking->pickup_time
             );
 
-            if ($bookingDateTime->isFuture()) {
+            if ($bookingDateTime->greaterThan(now())) {
 
                 $pickup_time = $booking->pickup_time;
                 $booking_date = $booking->booking_date;
