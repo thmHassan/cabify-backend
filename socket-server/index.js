@@ -220,8 +220,8 @@ const autoDispatchRide = async ({
             console.log(`[AutoDispatch] Already ongoing.`);
             return;
         }
-        if (booking.booking_status === "pending_acceptance" && booking.driver && driverIndex === 0) {
-            console.log(`[AutoDispatch] Booking already pending_acceptance with driver #${booking.driver} — resetting for fresh dispatch`);
+        if (booking.booking_status === "pending" && booking.driver && driverIndex === 0) {
+            console.log(`[AutoDispatch] Booking already pending with driver #${booking.driver} — resetting for fresh dispatch`);
             try {
                 await db.query(
                     `UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`,
@@ -1543,8 +1543,8 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
         const driverName = driverRows[0].name || "Driver";
 
-        // ✅ ±30 min window check — બંને assignment_type માટે
-        let newStatus = 'pending_acceptance';
+        // ✅ ±30 min window check
+        let newStatus = 'pending';
         let isWithinWindow = false;
 
         if (booking.booking_date && booking.pickup_time) {
@@ -1553,16 +1553,16 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
 
             const now = new Date();
             const diffMs = bookingDateTime.getTime() - now.getTime();
-            const diffMins = diffMs / (1000 * 60); // +ve = future, -ve = past
+            const diffMins = diffMs / (1000 * 60);
 
             if (diffMins >= -30 && diffMins <= 30) {
                 // ±30 min ની અંદર → ongoing
                 isWithinWindow = true;
                 newStatus = 'ongoing';
             } else {
-                // ±30 min ની બહાર → pending_acceptance
+                // ±30 min ની બહાર → pending (driver assign, status pending)
                 isWithinWindow = false;
-                newStatus = 'pending_acceptance';
+                newStatus = 'pending';
             }
         } else {
             // pickup_time ન હોય (immediate booking) → ongoing
@@ -1641,7 +1641,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
                 ? isPreJob
                     ? "Pre-job assigned and automatically accepted successfully."
                     : "Driver assigned and ride accepted successfully."
-                : `Driver assigned successfully. Pickup is at ${booking.pickup_time} — ride will activate closer to pickup time.`
+                : `Driver assigned successfully. Pickup is at ${booking.pickup_time} — status remains pending until closer to pickup time.`
         });
 
     } catch (error) {
