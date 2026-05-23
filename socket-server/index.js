@@ -346,6 +346,7 @@ const autoDispatchRide = async ({
 
         // Update booking
         try {
+            await db.query("SET innodb_lock_wait_timeout = 3");
             await db.query(
                 `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending_acceptance' WHERE id = ?`,
                 [driver.id, dispatchAmount, bookingIdInt]
@@ -1692,6 +1693,34 @@ app.get("/debug/query-booking", async (req, res) => {
         const db = getConnection(`tenant${database}`);
         const [rows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         res.json({ success: true, booking: rows[0] || null });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get("/debug/db-locks", async (req, res) => {
+    try {
+        const { database } = req.query;
+        if (!database) {
+            return res.status(400).json({ error: "database query param required" });
+        }
+        const db = getConnection(`tenant${database}`);
+        const [processlist] = await db.query("SHOW FULL PROCESSLIST");
+        const [transactions] = await db.query("SELECT * FROM information_schema.innodb_trx");
+        res.json({
+            success: true,
+            processlist: processlist.map(p => ({
+                Id: p.Id,
+                User: p.User,
+                Host: p.Host,
+                db: p.db,
+                Command: p.Command,
+                Time: p.Time,
+                State: p.State,
+                Info: p.Info
+            })),
+            transactions
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
