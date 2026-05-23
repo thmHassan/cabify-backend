@@ -547,10 +547,6 @@ class SettingController extends Controller
         public function plotList(Request $request)
     {
         try {
-            $perPage = 10;
-            if (isset($request->perPage) && $request->perPage != NULL) {
-                $perPage = $request->perPage;
-            }
             $plots = CompanyPlot::orderBy("id", "DESC");
             if (isset($request->search) && $request->search != NULL) {
                 $plots->where(function ($query) use ($request) {
@@ -558,7 +554,7 @@ class SettingController extends Controller
                         ->orWhere("features", "LIKE", "%" . $request->search . "%");
                 });
             }
-            $data = $plots->paginate($perPage);
+            $data = $plots->get();
             return response()->json([
                 'success' => 1,
                 'list' => $data
