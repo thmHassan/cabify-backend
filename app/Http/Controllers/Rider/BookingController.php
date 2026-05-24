@@ -32,7 +32,7 @@ class BookingController extends Controller
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
-            $completedRides = $query->with(['userDetail', 'driverDetail','ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+            $completedRides = $query->with(['userDetail', 'driverDetail','ratingDetail', 'waitingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -606,7 +606,7 @@ class BookingController extends Controller
                             $q->where("booking_status", 'arrived')
                               ->orWhere("booking_status", 'started')
                               ->orWhere("booking_status", 'ongoing');
-                        })->with(['driverDetail', 'vehicleDetail'])->first();
+                        })->with(['driverDetail', 'vehicleDetail', 'waitingDetail'])->first();
 
             return response()->json([
                 'success' => 1,

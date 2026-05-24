@@ -34,4 +34,8 @@ class CompanyBooking extends Model
     public function ratingDetail(){
         return $this->hasMany(CompanyRating::class, "booking_id", "id");
     }
+
+    public function waitingDetail(){
+        return $this->hasMany(CompanyWaitingTimeLog::class, "booking_id", "id");
+    }
 }

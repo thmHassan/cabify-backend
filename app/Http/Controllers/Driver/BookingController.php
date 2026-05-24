@@ -32,7 +32,7 @@ class BookingController extends Controller
             if (isset($request->date) && $request->date != NULL) {
                 $query->where("booking_date", $request->date);
             }
-            $completedRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+            $completedRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail', 'waitingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
 
             return response()->json([
                 'success' => 1,
@@ -418,13 +418,23 @@ class BookingController extends Controller
                 }
             }
 
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             if ($companySetting->package_type == "ride_count_price") {
-                $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
                 $driver->ride_count_price -= 1;
                 $driver->save();
             }
+
+            $bookingDateTime = \Carbon\Carbon::parse(
+                $booking->booking_date . ' ' . $booking->pickup_time
+            );
+
+            $startWindow = now()->subMinutes(30);
+            $endWindow = now()->addMinutes(30);
             
-            $booking->booking_status = "ongoing";
+            if (!$bookingDateTime->between($startWindow, $endWindow)) {
+                $booking->booking_status = "ongoing";
+            }
+
             // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
             if (is_null($booking->booking_amount) || $booking->booking_amount == 0) {
                 $booking->booking_amount = $booking->offered_amount;
@@ -531,7 +541,7 @@ class BookingController extends Controller
                     $q->where("booking_status", 'started')
                         ->orWhere("booking_status", 'arrived')
                         ->orWhere("booking_status", 'ongoing');
-                })->with(['userDetail', 'vehicleDetail'])->first();
+                })->with(['userDetail', 'vehicleDetail', 'waitingDetail'])->first();
 
             return response()->json([
                 'success' => 1,
@@ -777,7 +787,9 @@ class BookingController extends Controller
                             'destination_point' => $booking->destination_point,
                             'offered_amount' => $booking->offered_amount,
                             'distance' => $booking->distance,
-                            'booking_status' => $booking->booking_status
+                            'booking_status' => $booking->booking_status,
+                            'waiting_time' => $booking->waiting_time,
+                            'waiting_amount' => $booking->waiting_amount,
                         ]
                     ]);
 
