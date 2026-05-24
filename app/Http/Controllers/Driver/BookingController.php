@@ -431,7 +431,7 @@ class BookingController extends Controller
             $startWindow = now()->subMinutes(30);
             $endWindow = now()->addMinutes(30);
             
-            if (!$bookingDateTime->between($startWindow, $endWindow)) {
+            if ($bookingDateTime->between($startWindow, $endWindow)) {
                 $booking->booking_status = "ongoing";
             }
 
