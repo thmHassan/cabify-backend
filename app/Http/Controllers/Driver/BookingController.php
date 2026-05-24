@@ -631,6 +631,7 @@ class BookingController extends Controller
             ]);
 
             $waitingRecord = CompanyWaitingTimeLog::where("booking_id", $request->booking_id)->where("status", 'start')->orderBy("id", "DESC")->first();
+            $booking = CompanyBooking::where("id", $request->booking_id)->first();
 
             if (!isset($waitingRecord) || $waitingRecord == NULL) {
                 $waitingRecord = new CompanyWaitingTimeLog;
@@ -638,6 +639,21 @@ class BookingController extends Controller
                 $waitingRecord->start_time = date("Y-m-d H:i:s");
                 $waitingRecord->status = "start";
                 $waitingRecord->save();
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/waiting-time-event', [
+                    'userId' => $booking->user_id,
+                    'status' => "start",
+                    'booking' => [
+                        'id' => $booking->id,
+                        'booking_id' => $booking->booking_id,
+                        'pickup_point' => $booking->pickup_point,
+                        'destination_point' => $booking->destination_point,
+                        'offered_amount' => $booking->offered_amount,
+                        'distance' => $booking->distance,
+                    ]
+                ]);
 
                 return response()->json([
                     'success' => 1,
@@ -661,6 +677,21 @@ class BookingController extends Controller
                 $booking->save();
                 $waitingRecord->charge = $amount;
                 $waitingRecord->save();
+
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                ])->post(env('NODE_SOCKET_URL') . '/waiting-time-event', [
+                    'userId' => $booking->user_id,
+                    'status' => "stop",
+                    'booking' => [
+                        'id' => $booking->id,
+                        'booking_id' => $booking->booking_id,
+                        'pickup_point' => $booking->pickup_point,
+                        'destination_point' => $booking->destination_point,
+                        'offered_amount' => $booking->offered_amount,
+                        'distance' => $booking->distance,
+                    ]
+                ]);
 
                 return response()->json([
                     'success' => 1,

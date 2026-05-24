@@ -2741,6 +2741,15 @@ app.post("/place-bid", (req, res) => {
     return res.json({ success: true });
 });
 
+app.post("/waiting-time-event", (req, res) => {
+    const { userId, status, booking } = req.body;
+    const socketId = userSockets.get(userId.toString());
+    if (socketId) {
+        io.to(socketId).emit("waiting-time-event", {status, booking});
+    }
+    return res.json({ success: true });
+});
+
 app.post("/change-ride-status", async (req, res) => {
     const { userId, status, booking } = req.body;
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
