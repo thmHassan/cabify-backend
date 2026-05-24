@@ -433,6 +433,7 @@ class BookingController extends Controller
             
             if ($bookingDateTime->between($startWindow, $endWindow)) {
                 $booking->booking_status = "ongoing";
+                $driver->driving_status = "busy";
             }
 
             // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
@@ -442,7 +443,6 @@ class BookingController extends Controller
             $booking->driver = $driver->id;
             $booking->save();
 
-            $driver->driving_status = "busy";
             if ($companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = $companySetting->package_amount;
                 $driver->wallet_balance -= $checkAmount;
