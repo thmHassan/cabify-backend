@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Models\CompanyVehicleType;
+use Hash;
 
 class DriverController extends Controller
 {
@@ -119,6 +120,7 @@ class DriverController extends Controller
             $driver->name = isset($request->name) ? $request->name : $driver->name;
             $driver->email = isset($request->email) ? $request->email : $driver->email;
             $driver->country_code = isset($request->country_code) ? $request->country_code : $driver->country_code; 
+            $driver->password = isset($request->password) ? Hash::make($request->password) : $driver->password; 
             $driver->phone_no = isset($request->phone_no) ? $request->phone_no : $driver->phone_no; 
             $driver->address = isset($request->address) ? $request->address : $driver->address;
             $driver->driver_license = isset($request->driver_license) ? $request->driver_license : $driver->driver_license;
