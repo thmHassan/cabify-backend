@@ -32,10 +32,7 @@ class DocumentController extends Controller
             $folderName = $request->header('database');
 
             $request->validate([
-                'document_id' => 'required',
-                'front_photo' => 'nullable|image|max:20480',
-                'back_photo' => 'nullable|image|max:20480',
-                'profile_photo' => 'nullable|image|max:20480',
+                'document_id' => 'required'
             ]);
 
             $newDocument = new DriverDocument;
