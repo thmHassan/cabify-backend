@@ -32,7 +32,7 @@ class VehicleTypeController extends Controller
                 'from_array' => Rule::requiredIf($request->mileage_system === 'dynamic'),
                 'to_array' => Rule::requiredIf($request->mileage_system === 'dynamic'),
                 'price_array' => Rule::requiredIf($request->mileage_system === 'dynamic'),
-                'attribute_array' => 'required',
+                // 'attribute_array' => 'required',
             ]);
 
             $vehicleType = new CompanyVehicleType;
@@ -61,7 +61,7 @@ class VehicleTypeController extends Controller
             $vehicleType->from_array = (isset($request->from_array) && $request->from_array != NULL) ? implode(",",$request->from_array) : NULL;
             $vehicleType->to_array = (isset($request->to_array) && $request->to_array != NULL) ? implode(",",$request->to_array) : NULL;
             $vehicleType->price_array = (isset($request->price_array) && $request->price_array != NULL) ? implode(",",$request->price_array) : NULL;
-            $vehicleType->attributes = $request->attribute_array;
+            $vehicleType->attributes = (isset($request->attribute_array) && $request->attribute_array != NULL) ? $request->attribute_array : NULL;
             $vehicleType->save();
 
             return response()->json([
@@ -100,7 +100,7 @@ class VehicleTypeController extends Controller
                 'from_array' => Rule::requiredIf($request->mileage_system === 'dynamic'),
                 'to_array' => Rule::requiredIf($request->mileage_system === 'dynamic'),
                 'price_array' => Rule::requiredIf($request->mileage_system === 'dynamic'),
-                'attribute_array' => 'required',
+                // 'attribute_array' => 'required',
             ]);
 
             $vehicleType = CompanyVehicleType::where("id", $request->id)->first();
@@ -129,7 +129,7 @@ class VehicleTypeController extends Controller
             $vehicleType->from_array = (isset($request->from_array) && $request->from_array != NULL) ? implode(",",$request->from_array) : NULL;
             $vehicleType->to_array = (isset($request->to_array) && $request->to_array != NULL) ? implode(",",$request->to_array) : NULL;
             $vehicleType->price_array = (isset($request->price_array) && $request->price_array != NULL) ? implode(",",$request->price_array) : NULL;
-            $vehicleType->attributes = $request->attribute_array;
+            $vehicleType->attributes = (isset($request->attribute_array) && $request->attribute_array != NULL) ? $request->attribute_array : NULL;
             $vehicleType->save();
 
             return response()->json([
