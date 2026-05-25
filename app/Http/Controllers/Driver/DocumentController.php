@@ -32,7 +32,10 @@ class DocumentController extends Controller
             $folderName = $request->header('database');
 
             $request->validate([
-                'document_id' => 'required'
+                'document_id' => 'required',
+                'front_photo' => 'nullable|image|max:20480',
+                'back_photo' => 'nullable|image|max:20480',
+                'profile_photo' => 'nullable|image|max:20480',
             ]);
 
             $newDocument = new DriverDocument;
@@ -83,7 +86,7 @@ class DocumentController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
-            ]);
+            ], 400);
         }
     }
 }
