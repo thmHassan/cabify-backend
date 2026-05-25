@@ -204,15 +204,13 @@ const broadcastFullQueueToDrivers = async (database) => {
             };
         });
 
-        console.log(`[FullQueue] Broadcasting to all drivers in ${database}:`, fullQueueData.length, "drivers");
+        console.log(`[FullQueue] Broadcasting to database room: driver_${database}`, fullQueueData.length, "idle drivers");
 
-        driverSockets.forEach((socketId, driverId) => {
-            io.to(socketId).emit("my-rank-update", {
-                success: true,
-                database: database,
-                total_idle_drivers: fullQueueData.length,
-                drivers: fullQueueData
-            });
+        io.to(`driver_${database}`).emit("my-rank-update", {
+            success: true,
+            database: database,
+            total_idle_drivers: fullQueueData.length,
+            drivers: fullQueueData
         });
 
     } catch (err) {
