@@ -4014,6 +4014,7 @@ server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
 
+
 // app.put("/bookings/:id/assign-driver", async (req, res) => {
 //     try {
 //         const { id } = req.params;
