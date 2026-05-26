@@ -189,29 +189,29 @@ const broadcastFullQueueToDrivers = async (database) => {
              WHERE d.driving_status = 'idle'`
         );
 
-        const fullQueueData = idleDrivers.map(driver => {
-            let rank = null;
-
-            if (driver.plot_id) {
+        const fullQueueData = idleDrivers
+            .map(driver => {
+                if (!driver.plot_id) return null;
                 const plotKey = `${driver.plot_id}_${database}`;
                 const queue = getQueueSnapshot(plotKey);
                 const entry = queue.find(d => d.driver_id === driver.id.toString());
-                rank = entry ? entry.rank : null;
-            }
 
-            return {
-                driver_id: driver.id,
-                driver_name: driver.name,
-                driving_status: driver.driving_status,
-                plot: driver.plot_id ?? null,
-                plot_name: driver.plot_name || (driver.plot_id ? `Plot #${driver.plot_id}` : "N/A"),
-                latitude: driver.latitude,
-                longitude: driver.longitude,
-                rank: rank
-            };
-        });
+                if (!entry) return null;
 
-        console.log(`[FullQueue] Broadcasting to driver_${database}: idle=${fullQueueData.length}`);
+                return {
+                    driver_id: driver.id,
+                    driver_name: driver.name,
+                    driving_status: driver.driving_status,
+                    plot: driver.plot_id,
+                    plot_name: driver.plot_name || `Plot #${driver.plot_id}`,
+                    latitude: driver.latitude,
+                    longitude: driver.longitude,
+                    rank: entry.rank
+                };
+            })
+            .filter(d => d !== null);
+
+        console.log(`[FullQueue] Broadcasting to driver_${database}: ranked drivers=${fullQueueData.length}`);
 
         io.to(`driver_${database}`).emit("my-rank-update", {
             success: true,
@@ -734,27 +734,28 @@ io.on("connection", (socket) => {
              WHERE d.driving_status = 'idle'`
             );
 
-            const fullQueueData = idleDrivers.map(driver => {
-                let rank = null;
+            const fullQueueData = idleDrivers
+                .map(driver => {
+                    if (!driver.plot_id) return null;
 
-                if (driver.plot_id) {
                     const plotKey = `${driver.plot_id}_${dbName}`;
                     const queue = getQueueSnapshot(plotKey);
                     const entry = queue.find(d => d.driver_id === driver.id.toString());
-                    rank = entry ? entry.rank : null;
-                }
 
-                return {
-                    driver_id: driver.id,
-                    driver_name: driver.name,
-                    driving_status: driver.driving_status,
-                    plot: driver.plot_id ?? null,
-                    plot_name: driver.plot_name || (driver.plot_id ? `Plot #${driver.plot_id}` : "N/A"),
-                    latitude: driver.latitude,
-                    longitude: driver.longitude,
-                    rank: rank
-                };
-            });
+                    if (!entry) return null;
+
+                    return {
+                        driver_id: driver.id,
+                        driver_name: driver.name,
+                        driving_status: driver.driving_status,
+                        plot: driver.plot_id,
+                        plot_name: driver.plot_name || `Plot #${driver.plot_id}`,
+                        latitude: driver.latitude,
+                        longitude: driver.longitude,
+                        rank: entry.rank
+                    };
+                })
+                .filter(d => d !== null);
 
             socket.emit("my-rank-update", {
                 success: true,
