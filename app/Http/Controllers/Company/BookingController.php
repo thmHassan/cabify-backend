@@ -18,6 +18,7 @@ use App\Models\CompanySendNewRide;
 use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
 use App\Models\CompanyDriver;
+use App\Models\DriverPackage;
 
 class BookingController extends Controller
 {
