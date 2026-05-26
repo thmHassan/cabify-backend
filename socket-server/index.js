@@ -182,17 +182,22 @@ const broadcastFullQueueToDrivers = async (database) => {
         const db = getConnection(`tenant${database}`);
 
         const [idleDrivers] = await db.query(
-            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name
+            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name,
+                    d.latitude, d.longitude
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              WHERE d.driving_status = 'idle'`
         );
 
         const fullQueueData = idleDrivers.map(driver => {
-            const plotKey = driver.plot_id ? `${driver.plot_id}_${database}` : null;
-            const queue = plotKey ? getQueueSnapshot(plotKey) : [];
-            const entry = queue.find(d => d.driver_id === driver.id.toString());
-            const rank = entry ? entry.rank : null;
+            let rank = null;
+
+            if (driver.plot_id) {
+                const plotKey = `${driver.plot_id}_${database}`;
+                const queue = getQueueSnapshot(plotKey);
+                const entry = queue.find(d => d.driver_id === driver.id.toString());
+                rank = entry ? entry.rank : null;
+            }
 
             return {
                 driver_id: driver.id,
@@ -200,11 +205,13 @@ const broadcastFullQueueToDrivers = async (database) => {
                 driving_status: driver.driving_status,
                 plot: driver.plot_id ?? null,
                 plot_name: driver.plot_name || (driver.plot_id ? `Plot #${driver.plot_id}` : "N/A"),
+                latitude: driver.latitude,
+                longitude: driver.longitude,
                 rank: rank
             };
         });
 
-        console.log(`[FullQueue] Broadcasting to database room: driver_${database}`, fullQueueData.length, "idle drivers");
+        console.log(`[FullQueue] Broadcasting to driver_${database}: idle=${fullQueueData.length}`);
 
         io.to(`driver_${database}`).emit("my-rank-update", {
             success: true,
@@ -720,17 +727,22 @@ io.on("connection", (socket) => {
             const db = getConnection(`tenant${dbName}`);
 
             const [idleDrivers] = await db.query(
-                `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name
+                `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name,
+                    d.latitude, d.longitude
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              WHERE d.driving_status = 'idle'`
             );
 
             const fullQueueData = idleDrivers.map(driver => {
-                const plotKey = driver.plot_id ? `${driver.plot_id}_${dbName}` : null;
-                const queue = plotKey ? getQueueSnapshot(plotKey) : [];
-                const entry = queue.find(d => d.driver_id === driver.id.toString());
-                const rank = entry ? entry.rank : null;
+                let rank = null;
+
+                if (driver.plot_id) {
+                    const plotKey = `${driver.plot_id}_${dbName}`;
+                    const queue = getQueueSnapshot(plotKey);
+                    const entry = queue.find(d => d.driver_id === driver.id.toString());
+                    rank = entry ? entry.rank : null;
+                }
 
                 return {
                     driver_id: driver.id,
@@ -738,6 +750,8 @@ io.on("connection", (socket) => {
                     driving_status: driver.driving_status,
                     plot: driver.plot_id ?? null,
                     plot_name: driver.plot_name || (driver.plot_id ? `Plot #${driver.plot_id}` : "N/A"),
+                    latitude: driver.latitude,
+                    longitude: driver.longitude,
                     rank: rank
                 };
             });
