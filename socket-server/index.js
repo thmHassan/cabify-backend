@@ -174,6 +174,55 @@ const broadcastUpdatedQueue = (plotId, database) => {
             rank
         });
     });
+    broadcastFullQueueToDrivers(database);
+};
+
+const broadcastFullQueueToDrivers = async (database) => {
+    try {
+        const db = getConnection(`tenant${database}`);
+
+        const [idleDrivers] = await db.query(
+            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name,
+                    d.latitude, d.longitude
+             FROM drivers d
+             LEFT JOIN plots p ON d.plot_id = p.id
+             WHERE d.driving_status = 'idle'`
+        );
+
+        const fullQueueData = idleDrivers
+            .map(driver => {
+                if (!driver.plot_id) return null;
+                const plotKey = `${driver.plot_id}_${database}`;
+                const queue = getQueueSnapshot(plotKey);
+                const entry = queue.find(d => d.driver_id === driver.id.toString());
+
+                if (!entry) return null;
+
+                return {
+                    driver_id: driver.id,
+                    driver_name: driver.name,
+                    driving_status: driver.driving_status,
+                    plot: driver.plot_id,
+                    plot_name: driver.plot_name || `Plot #${driver.plot_id}`,
+                    latitude: driver.latitude,
+                    longitude: driver.longitude,
+                    rank: entry.rank
+                };
+            })
+            .filter(d => d !== null);
+
+        console.log(`[FullQueue] Broadcasting to driver_${database}: ranked drivers=${fullQueueData.length}`);
+
+        io.to(`driver_${database}`).emit("my-rank-update", {
+            success: true,
+            database: database,
+            total_idle_drivers: fullQueueData.length,
+            drivers: fullQueueData
+        });
+
+    } catch (err) {
+        console.error("[FullQueue] Error:", err.message);
+    }
 };
 
 const autoDispatchRide = async ({
@@ -347,10 +396,10 @@ const autoDispatchRide = async ({
         // Update booking
         try {
             await db.query(
-                `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending_acceptance' WHERE id = ?`,
+                `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending' WHERE id = ?`,
                 [driver.id, dispatchAmount, bookingIdInt]
             );
-            console.log(`[AutoDispatch] Booking updated: driver=${driver.id} status=pending_acceptance`);
+            console.log(`[AutoDispatch] Booking updated: driver=${driver.id} status=pending`);
         } catch (e) {
             console.error(`[AutoDispatch] Booking update error:`, e.message);
             return;
@@ -407,7 +456,8 @@ const autoDispatchRide = async ({
                 if (cs === "ongoing") { console.log(`[AutoDispatch] Accepted`); return; }
                 if (["cancelled", "completed"].includes(cs)) { console.log(`[AutoDispatch] ${cs}`); return; }
 
-                if (cs === "pending_acceptance" && String(cd) === String(driver.id)) {
+                // ✅ pending_acceptance → pending
+                if (cs === "pending" && String(cd) === String(driver.id)) {
                     console.log(`[AutoDispatch] ⏭ No response → next driver (index ${driverIndex + 1})`);
                     await db.query(
                         `UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`,
@@ -515,6 +565,8 @@ io.on("connection", (socket) => {
                     io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
                     io.to(`client_${database}`).emit("waiting-driver-event", emitData);
                     socket.emit("waiting-driver-event", emitData);
+
+                    await broadcastFullQueueToDrivers(database);
                 }
 
             } catch (err) {
@@ -588,8 +640,6 @@ io.on("connection", (socket) => {
 
                 if (driver.driving_status === "idle") {
                     const plotId = driver.plot_id;
-
-                    // ✅ FIX: fetch real plot name from DB
                     const plotName = await getPlotName(plotId);
 
                     const plotKey = plotId ? `${plotId}_${dbName}` : null;
@@ -612,15 +662,7 @@ io.on("connection", (socket) => {
                     io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
                     socket.emit("waiting-driver-event", eventData);
 
-                    socket.emit("my-rank-update", {
-                        success: true,
-                        driver_id: driverId,
-                        driver_name: driver.name,
-                        driving_status: driver.driving_status,
-                        plot: plotId ?? null,
-                        plot_name: plotName,
-                        rank: rank
-                    });
+                    await broadcastFullQueueToDrivers(dbName);
 
                 } else if (driver.driving_status === "busy") {
                     const plotId = driver.plot_id;
@@ -676,46 +718,50 @@ io.on("connection", (socket) => {
     socket.on("get-my-rank", async (data) => {
         try {
             const dbName = data?.database || socket.handshake.query.database;
-            const driverIdFromData = data?.driver_id || socket.driverId || driverId;
 
-            if (!dbName || !driverIdFromData) {
-                socket.emit("my-rank-update", { success: false, message: "Missing driver_id or database" });
+            if (!dbName) {
+                socket.emit("my-rank-update", { success: false, message: "Missing database" });
                 return;
             }
 
             const db = getConnection(`tenant${dbName}`);
 
-            const [rows] = await db.query(
-                `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name
+            const [idleDrivers] = await db.query(
+                `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name,
+                    d.latitude, d.longitude
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
-             WHERE d.id = ? LIMIT 1`,
-                [driverIdFromData]
+             WHERE d.driving_status = 'idle'`
             );
 
-            if (!rows.length) {
-                socket.emit("my-rank-update", { success: false, message: "Driver not found" });
-                return;
-            }
+            const fullQueueData = idleDrivers
+                .map(driver => {
+                    if (!driver.plot_id) return null;
 
-            const driver = rows[0];
-            const plotId = driver.plot_id;
-            const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+                    const plotKey = `${driver.plot_id}_${dbName}`;
+                    const queue = getQueueSnapshot(plotKey);
+                    const entry = queue.find(d => d.driver_id === driver.id.toString());
 
-            let rank = null;
-            if (driver.driving_status === "idle" && plotId) {
-                const plotKey = `${plotId}_${dbName}`;
-                rank = getOrAssignRank(plotKey, driverIdFromData);
-            }
+                    if (!entry) return null;
+
+                    return {
+                        driver_id: driver.id,
+                        driver_name: driver.name,
+                        driving_status: driver.driving_status,
+                        plot: driver.plot_id,
+                        plot_name: driver.plot_name || `Plot #${driver.plot_id}`,
+                        latitude: driver.latitude,
+                        longitude: driver.longitude,
+                        rank: entry.rank
+                    };
+                })
+                .filter(d => d !== null);
 
             socket.emit("my-rank-update", {
                 success: true,
-                driver_id: driver.id,
-                driver_name: driver.name,
-                driving_status: driver.driving_status,
-                plot: plotId ?? null,
-                plot_name: plotName,
-                rank: rank
+                database: dbName,
+                total_idle_drivers: fullQueueData.length,
+                drivers: fullQueueData
             });
 
         } catch (err) {
@@ -1649,110 +1695,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 });
-
-// app.put("/bookings/:id/assign-driver", async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { driver_id, assignment_type } = req.body;
-
-//         if (!driver_id) {
-//             return res.status(400).json({ success: false, message: "Driver ID is required" });
-//         }
-
-//         const db = getConnection(req.tenantDb);
-
-//         const [bookingRows] = await db.query(
-//             "SELECT id, booking_status, booking_id, offered_amount, booking_amount, recommended_amount FROM bookings WHERE id = ?",
-//             [id]
-//         );
-//         if (bookingRows.length === 0) {
-//             return res.status(404).json({ success: false, message: "Booking not found" });
-//         }
-
-//         const [driverRows] = await db.query(
-//             "SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?",
-//             [driver_id]
-//         );
-//         if (driverRows.length === 0) {
-//             return res.status(404).json({ success: false, message: "Driver not found" });
-//         }
-
-//         const isPreJob = assignment_type === "pre_job";
-//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
-//         const driverName = driverRows[0].name || "Driver";
-
-//         const newStatus = 'ongoing';
-
-//         const actionText = isPreJob
-//             ? `${dispatcherName} sent a pre-job request and automatically accepted for driver ${driverName}`
-//             : `${dispatcherName} assigned and automatically accepted for driver ${driverName}`;
-
-//         const existingAmount = bookingRows[0].booking_amount;
-//         const offeredAmount = bookingRows[0].offered_amount;
-//         const amountToSet = (existingAmount === null || existingAmount === undefined || existingAmount == 0)
-//             ? (offeredAmount ?? null)
-//             : existingAmount;
-
-//         await db.query(
-//             `UPDATE bookings SET driver = ?, booking_amount = ?, dispatcher_action = ?, booking_status = ? WHERE id = ?`,
-//             [driver_id, amountToSet, actionText, newStatus, id]
-//         );
-
-//         await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
-
-//         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
-//         const updatedBooking = updatedBookingRows[0];
-
-//         const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
-//         const notifMessage = isPreJob
-//             ? `You have been assigned a pre-job ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`
-//             : `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`;
-
-//         try {
-//             await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, {
-//                 booking_id: String(id),
-//                 type: "new_ride"
-//             });
-//             console.log("Notification sent to driver:", driverRows[0].name);
-//         } catch (fcmError) {
-//             console.error("FCM failed (non-fatal):", fcmError.message);
-//         }
-
-//         try {
-//             await storeNotification(db, {
-//                 user_type: 'driver',
-//                 user_id: driver_id,
-//                 title: notifTitle,
-//                 message: notifMessage
-//             });
-//         } catch (storeError) {
-//             console.error("Store notification failed (non-fatal):", storeError.message);
-//         }
-
-//         const driverSocketId = driverSockets.get(driver_id.toString());
-//         if (driverSocketId) {
-//             io.to(driverSocketId).emit("new-ride-request", {
-//                 booking_id: id,
-//                 assignment_type: "allocate_driver",
-//                 message: notifMessage,
-//                 booking: updatedBooking
-//             });
-//         }
-
-//         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
-
-//         return res.json({
-//             success: true,
-//             message: isPreJob
-//                 ? "Pre-job assigned and automatically accepted successfully."
-//                 : "Driver assigned and ride accepted successfully."
-//         });
-
-//     } catch (error) {
-//         console.error("Assign driver error:", error);
-//         return res.status(500).json({ success: false, message: error.message });
-//     }
-// });
 
 app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
     try {
@@ -2745,7 +2687,7 @@ app.post("/waiting-time-event", (req, res) => {
     const { userId, status, booking } = req.body;
     const socketId = userSockets.get(userId.toString());
     if (socketId) {
-        io.to(socketId).emit("waiting-time-event", {status, booking});
+        io.to(socketId).emit("waiting-time-event", { status, booking });
     }
     return res.json({ success: true });
 });
@@ -4086,3 +4028,108 @@ app.post('/driver/send-package-history', async (req, res) => {
 server.listen(3001, "0.0.0.0", () => {
     console.log("🚀 Socket server running on port 3001");
 });
+
+
+// app.put("/bookings/:id/assign-driver", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { driver_id, assignment_type } = req.body;
+
+//         if (!driver_id) {
+//             return res.status(400).json({ success: false, message: "Driver ID is required" });
+//         }
+
+//         const db = getConnection(req.tenantDb);
+
+//         const [bookingRows] = await db.query(
+//             "SELECT id, booking_status, booking_id, offered_amount, booking_amount, recommended_amount FROM bookings WHERE id = ?",
+//             [id]
+//         );
+//         if (bookingRows.length === 0) {
+//             return res.status(404).json({ success: false, message: "Booking not found" });
+//         }
+
+//         const [driverRows] = await db.query(
+//             "SELECT id, name, phone_no, driving_status FROM drivers WHERE id = ?",
+//             [driver_id]
+//         );
+//         if (driverRows.length === 0) {
+//             return res.status(404).json({ success: false, message: "Driver not found" });
+//         }
+
+//         const isPreJob = assignment_type === "pre_job";
+//         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
+//         const driverName = driverRows[0].name || "Driver";
+
+//         const newStatus = 'ongoing';
+
+//         const actionText = isPreJob
+//             ? `${dispatcherName} sent a pre-job request and automatically accepted for driver ${driverName}`
+//             : `${dispatcherName} assigned and automatically accepted for driver ${driverName}`;
+
+//         const existingAmount = bookingRows[0].booking_amount;
+//         const offeredAmount = bookingRows[0].offered_amount;
+//         const amountToSet = (existingAmount === null || existingAmount === undefined || existingAmount == 0)
+//             ? (offeredAmount ?? null)
+//             : existingAmount;
+
+//         await db.query(
+//             `UPDATE bookings SET driver = ?, booking_amount = ?, dispatcher_action = ?, booking_status = ? WHERE id = ?`,
+//             [driver_id, amountToSet, actionText, newStatus, id]
+//         );
+
+//         await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
+
+//         const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
+//         const updatedBooking = updatedBookingRows[0];
+
+//         const notifTitle = isPreJob ? "Pre-Job Assigned" : "New Ride Assigned";
+//         const notifMessage = isPreJob
+//             ? `You have been assigned a pre-job ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`
+//             : `You have been assigned a new ride #${updatedBooking.booking_id}. It has been automatically accepted for you.`;
+
+//         try {
+//             await sendNotificationToDriver(db, driver_id, notifTitle, notifMessage, {
+//                 booking_id: String(id),
+//                 type: "new_ride"
+//             });
+//             console.log("Notification sent to driver:", driverRows[0].name);
+//         } catch (fcmError) {
+//             console.error("FCM failed (non-fatal):", fcmError.message);
+//         }
+
+//         try {
+//             await storeNotification(db, {
+//                 user_type: 'driver',
+//                 user_id: driver_id,
+//                 title: notifTitle,
+//                 message: notifMessage
+//             });
+//         } catch (storeError) {
+//             console.error("Store notification failed (non-fatal):", storeError.message);
+//         }
+
+//         const driverSocketId = driverSockets.get(driver_id.toString());
+//         if (driverSocketId) {
+//             io.to(driverSocketId).emit("new-ride-request", {
+//                 booking_id: id,
+//                 assignment_type: "allocate_driver",
+//                 message: notifMessage,
+//                 booking: updatedBooking
+//             });
+//         }
+
+//         dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
+
+//         return res.json({
+//             success: true,
+//             message: isPreJob
+//                 ? "Pre-job assigned and automatically accepted successfully."
+//                 : "Driver assigned and ride accepted successfully."
+//         });
+
+//     } catch (error) {
+//         console.error("Assign driver error:", error);
+//         return res.status(500).json({ success: false, message: error.message });
+//     }
+// });
