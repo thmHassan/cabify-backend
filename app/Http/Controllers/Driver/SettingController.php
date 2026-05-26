@@ -544,7 +544,7 @@ class SettingController extends Controller
         }
     }
 
-        public function plotList(Request $request)
+    public function plotList(Request $request)
     {
         try {
             $plots = CompanyPlot::orderBy("id", "DESC");
@@ -559,6 +559,31 @@ class SettingController extends Controller
                 'success' => 1,
                 'list' => $data
             ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function changeStatus(Request $request){
+        try{
+
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            if($driver->online_status == "online"){
+                $driver->online_status = "offline";
+            }
+            else{
+                $driver->online_status = "online";
+            }
+            $driver->save();
+            
+            return response()->json([
+                'success' => 1,
+                'message' => "Status changed successfully"
+            ], 200);
+
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
