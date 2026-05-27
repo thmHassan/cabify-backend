@@ -310,6 +310,18 @@ const autoDispatchRide = async ({
         }
 
         // 4. Get idle drivers in current plot
+        // let drivers = driversInCurrentPlot;
+
+        // if (!drivers) {
+        //     try {
+        //         const [idleRows] = await db.query(
+        //             `SELECT * FROM drivers WHERE driving_status = 'idle' AND (plot_id = ? OR plot_id = ?) ORDER BY id ASC`,
+        //             [plotIdStr, plotIdInt]
+        //         );
+        //         drivers = idleRows;
+        //         console.log(`[AutoDispatch] Idle drivers in plot ${plotIdInt}: ${drivers.length}`,
+        //             drivers.map(d => `#${d.id} ${d.name}`));
+        //     } catch (e) { console.error(`[AutoDispatch] DB error (drivers):`, e.message); return; }
         let drivers = driversInCurrentPlot;
 
         if (!drivers) {
@@ -319,8 +331,26 @@ const autoDispatchRide = async ({
                     [plotIdStr, plotIdInt]
                 );
                 drivers = idleRows;
-                console.log(`[AutoDispatch] Idle drivers in plot ${plotIdInt}: ${drivers.length}`,
-                    drivers.map(d => `#${d.id} ${d.name}`));
+
+                // ✅ Queue rank according sort — rank 1 → rank 2 → rank 3
+                const plotQueueKey = `${plotIdInt}_${dbName}`;
+                const queueSnapshot = getQueueSnapshot(plotQueueKey);
+
+                if (queueSnapshot.length > 0) {
+                    drivers = drivers.sort((a, b) => {
+                        const rankA = queueSnapshot.find(q => q.driver_id === String(a.id))?.rank ?? 9999;
+                        const rankB = queueSnapshot.find(q => q.driver_id === String(b.id))?.rank ?? 9999;
+                        return rankA - rankB;
+                    });
+                    console.log(`[AutoDispatch] Drivers sorted by rank:`,
+                        drivers.map(d => {
+                            const r = queueSnapshot.find(q => q.driver_id === String(d.id))?.rank ?? '?';
+                            return `#${d.id} ${d.name} (rank=${r})`;
+                        })
+                    );
+                }
+
+                console.log(`[AutoDispatch] Idle drivers in plot ${plotIdInt}: ${drivers.length}`);
             } catch (e) { console.error(`[AutoDispatch] DB error (drivers):`, e.message); return; }
 
             // Nearest fallback — only on very first call
