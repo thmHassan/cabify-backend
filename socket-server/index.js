@@ -413,7 +413,7 @@ const autoDispatchRide = async ({
                 [
                     driver.id,
                     dispatchAmount,
-                    `Auto dispatch is working — request sent to driver ${driver.name} (#${driver.id})`,
+                    `Auto dispatch is working — request sent to driver)`,
                     bookingIdInt
                 ]
             );
@@ -484,7 +484,7 @@ const autoDispatchRide = async ({
                         `UPDATE bookings SET driver = NULL, booking_status = 'pending',
                          dispatcher_action = ? WHERE id = ?`,
                         [
-                            `Auto dispatch is working — driver ${driver.name} (#${driver.id}) did not respond, trying next driver`,
+                            `Auto dispatch is working — driver did not respond`,
                             bookingIdInt
                         ]
                     );
