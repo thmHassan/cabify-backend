@@ -95,9 +95,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 if(isset($backupPlots) && $backupPlots != NULL){
                     if(isset($currentPlotId) && $currentPlotId != NULL){
                         $currentIndex = array_search($currentPlotId, $backupPlots);
-                        \Log::info("currentIndex");
-                        \Log::info($currentIndex);
-                        $plotId = $currentPlotId = $backupPlots[$currentIndex] ?? null;
+                        $plotId = $currentPlotId = $backupPlots[$currentIndex + 1] ?? null;
                     }
                     else{
                         $plotId = $currentPlotId = $backupPlots[0] ?? null;
