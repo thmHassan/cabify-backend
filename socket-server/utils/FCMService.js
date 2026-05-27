@@ -16,7 +16,33 @@ const getAccessToken = async () => {
 
 const sendToDevice = async (deviceToken, title, body, data = {}) => {
   try {
+    if (!deviceToken || typeof deviceToken !== "string") {
+      console.warn("⚠️ [FCM] Skipped sending. Token is empty or invalid:", deviceToken);
+      return { success: false, skipped: true, reason: "Empty or invalid token type" };
+    }
+
+    const cleanToken = deviceToken.trim();
+
+    // Check if it's a JWT Bearer token
+    const isBearer = cleanToken.startsWith("Bearer ");
+    const isJwtPattern = cleanToken.includes("eyJhbGciOi") || cleanToken.split(".").length === 3;
+    const isTooShort = cleanToken.length < 20;
+
+    if (isBearer || isJwtPattern || isTooShort) {
+      let tokenType = "Unknown Invalid Token";
+      if (isBearer) tokenType = "JWT Bearer Token";
+      else if (isJwtPattern) tokenType = "JWT Token (without Bearer prefix)";
+      else if (isTooShort) tokenType = "Token too short (not a valid FCM token)";
+
+      console.warn(`⚠️ [FCM] Skipped sending notification. Invalid token format detected:`);
+      console.warn(`   - Type: ${tokenType}`);
+      console.warn(`   - Token value: "${cleanToken.substring(0, 50)}${cleanToken.length > 50 ? '...' : ''}"`);
+      console.warn(`   - Length: ${cleanToken.length} characters`);
+      return { success: false, skipped: true, reason: `Invalid token format (${tokenType})` };
+    }
+
     const accessToken = await getAccessToken();
+
 
     const message = {
       token: deviceToken,

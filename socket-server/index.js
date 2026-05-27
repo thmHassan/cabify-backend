@@ -2158,6 +2158,73 @@ app.get("/debug/dispatch-check", async (req, res) => {
     }
 });
 
+app.get("/debug/tokens", async (req, res) => {
+    try {
+        const { database, limit = 100 } = req.query;
+        if (!database) {
+            return res.status(400).json({ error: "database query param is required (e.g., ?database=1 or ?database=tenant1)" });
+        }
+
+        let tenantDb = database;
+        if (!isNaN(database)) {
+            tenantDb = `tenant${database}`;
+        }
+
+        const db = getConnection(tenantDb);
+        const rowLimit = parseInt(limit) || 100;
+
+        // 1. Fetch from tokens table
+        let tokensTableRows = [];
+        try {
+            const [rows] = await db.query(
+                "SELECT id, user_id, user_type, LEFT(fcm_token, 50) as fcm_token_prefix, LENGTH(fcm_token) as token_length, created_at FROM tokens ORDER BY id DESC LIMIT ?",
+                [rowLimit]
+            );
+            tokensTableRows = rows;
+        } catch (e) {
+            console.warn(`[Debug Tokens] tokens table query failed: ${e.message}`);
+        }
+
+        // 2. Fetch from drivers table (where fcm_token or device_token is set)
+        let driversTableRows = [];
+        try {
+            const [rows] = await db.query(
+                "SELECT id, name, email, LEFT(fcm_token, 50) as fcm_token_prefix, LENGTH(fcm_token) as fcm_token_length, LEFT(device_token, 50) as device_token_prefix, LENGTH(device_token) as device_token_length FROM drivers WHERE fcm_token IS NOT NULL OR device_token IS NOT NULL LIMIT ?",
+                [rowLimit]
+            );
+            driversTableRows = rows;
+        } catch (e) {
+            console.warn(`[Debug Tokens] drivers table query failed: ${e.message}`);
+        }
+
+        // 3. Fetch from users table (where fcm_token or device_token is set)
+        let usersTableRows = [];
+        try {
+            const [rows] = await db.query(
+                "SELECT id, name, email, LEFT(fcm_token, 50) as fcm_token_prefix, LENGTH(fcm_token) as fcm_token_length, LEFT(device_token, 50) as device_token_prefix, LENGTH(device_token) as device_token_length FROM users WHERE fcm_token IS NOT NULL OR device_token IS NOT NULL LIMIT ?",
+                [rowLimit]
+            );
+            usersTableRows = rows;
+        } catch (e) {
+            console.warn(`[Debug Tokens] users table query failed: ${e.message}`);
+        }
+
+        return res.json({
+            success: true,
+            database: tenantDb,
+            tokens_table_count: tokensTableRows.length,
+            tokens_table: tokensTableRows,
+            drivers_tokens: driversTableRows,
+            users_tokens: usersTableRows
+        });
+
+    } catch (err) {
+        console.error("[Debug Tokens] Error fetching tokens:", err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+
 app.post("/bookings/:id/record-action", async (req, res) => {
     try {
         const { id } = req.params;
