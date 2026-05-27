@@ -232,7 +232,8 @@ const autoDispatchRide = async ({
     currentPlotId = null,
     driverIndex = 0,
     visitedPlots = [],
-    driversInCurrentPlot = null
+    driversInCurrentPlot = null,
+    allBackupPlots = null   // full backup list loaded ONCE from original plot
 }) => {
     try {
         const db = getConnection(tenantDb);
@@ -242,9 +243,9 @@ const autoDispatchRide = async ({
 
         const bookingIdInt = parseInt(bookingId);
 
-        console.log(`[AutoDispatch] ▶ bookingId=${bookingIdInt} plot=${currentPlotId} driverIndex=${driverIndex} visited=${JSON.stringify(visitedPlots)}`);
+        console.log(`[AutoDispatch] bookingId=${bookingIdInt} plot=${currentPlotId} index=${driverIndex} visited=${JSON.stringify(visitedPlots)} allBackup=${JSON.stringify(allBackupPlots)}`);
 
-        //  1. Load booking 
+        // 1. Load booking
         let booking;
         try {
             const [rows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
@@ -258,7 +259,8 @@ const autoDispatchRide = async ({
         if (booking.booking_status === "ongoing" && booking.driver) {
             console.log(`[AutoDispatch] Already ongoing.`); return;
         }
-        // Fresh dispatch reset
+
+        // Fresh dispatch reset (only on very first call)
         if (booking.booking_status === "pending" && booking.driver && driverIndex === 0 && visitedPlots.length === 0) {
             try {
                 await db.query(`UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`, [bookingIdInt]);
@@ -266,7 +268,7 @@ const autoDispatchRide = async ({
             } catch (e) { console.error(`[AutoDispatch] Reset error:`, e.message); return; }
         }
 
-        // 2. Resolve current plot 
+        // 2. Resolve current plot
         if (!currentPlotId) {
             currentPlotId = booking.pickup_plot_id || booking.destination_plot_id;
         }
@@ -275,24 +277,45 @@ const autoDispatchRide = async ({
         const plotIdInt = parseInt(currentPlotId);
         const plotIdStr = String(plotIdInt);
 
-        // Mark this plot visited (only once)
+        // Mark visited
         if (!visitedPlots.includes(plotIdStr)) {
             visitedPlots = [...visitedPlots, plotIdStr];
         }
 
-        console.log(`[AutoDispatch] Plot=${plotIdInt} | Visited so far: ${JSON.stringify(visitedPlots)}`);
+        // 3. Load allBackupPlots ONCE from original booking's plot (not current plot)
+        if (allBackupPlots === null) {
+            try {
+                const originalPlotId = parseInt(booking.pickup_plot_id || booking.destination_plot_id);
+                const [plotRows] = await db.query(
+                    "SELECT backup_plots FROM plots WHERE id = ?",
+                    [originalPlotId]
+                );
+                const rawBackup = plotRows[0]?.backup_plots;
+                if (rawBackup) {
+                    if (typeof rawBackup === 'string') {
+                        try { allBackupPlots = JSON.parse(rawBackup); } catch (e) { allBackupPlots = []; }
+                    } else if (Array.isArray(rawBackup)) {
+                        allBackupPlots = rawBackup;
+                    } else {
+                        allBackupPlots = [];
+                    }
+                } else {
+                    allBackupPlots = [];
+                }
+                console.log(`[AutoDispatch] Loaded backup plots from original plot ${originalPlotId}: ${JSON.stringify(allBackupPlots)}`);
+            } catch (e) {
+                console.error(`[AutoDispatch] Backup plots fetch error:`, e.message);
+                allBackupPlots = [];
+            }
+        }
 
-        // 3. Get idle drivers — only fetch if not passed in 
-        // driversInCurrentPlot is passed on timeout retry so we use same ordered list
+        // 4. Get idle drivers in current plot
         let drivers = driversInCurrentPlot;
 
         if (!drivers) {
             try {
                 const [idleRows] = await db.query(
-                    `SELECT * FROM drivers 
-                     WHERE driving_status = 'idle' 
-                     AND (plot_id = ? OR plot_id = ?)
-                     ORDER BY id ASC`,
+                    `SELECT * FROM drivers WHERE driving_status = 'idle' AND (plot_id = ? OR plot_id = ?) ORDER BY id ASC`,
                     [plotIdStr, plotIdInt]
                 );
                 drivers = idleRows;
@@ -300,62 +323,75 @@ const autoDispatchRide = async ({
                     drivers.map(d => `#${d.id} ${d.name}`));
             } catch (e) { console.error(`[AutoDispatch] DB error (drivers):`, e.message); return; }
 
-            // 4. Nearest fallback (only on first plot, first try) 
+            // Nearest fallback — only on very first call
             if (!drivers.length && driverIndex === 0 && visitedPlots.length === 1) {
-                console.log(`[AutoDispatch] No idle drivers in plot ${plotIdInt}. Trying nearest 10km...`);
+                console.log(`[AutoDispatch] No idle in plot ${plotIdInt}. Trying nearest 10km...`);
                 try {
                     if (booking.pickup_point && booking.pickup_point.includes(',')) {
                         const [latStr, lngStr] = booking.pickup_point.split(",");
                         const lat = parseFloat(latStr.trim());
                         const lng = parseFloat(lngStr.trim());
-
                         const [nearestRows] = await db.query(`
-                            SELECT *,
-                                (6371 * acos(
-                                    cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?))
-                                    + sin(radians(?)) * sin(radians(latitude))
-                                )) AS distance
-                            FROM drivers
-                            WHERE driving_status = 'idle'
-                            HAVING distance < 10
-                            ORDER BY distance ASC
-                            LIMIT 5
+                            SELECT *, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance
+                            FROM drivers WHERE driving_status = 'idle' HAVING distance < 10 ORDER BY distance ASC LIMIT 5
                         `, [lat, lng, lat]);
-
-                        console.log(`[AutoDispatch] Nearest idle (10km): ${nearestRows.length}`,
-                            nearestRows.map(d => `#${d.id} ${d.name} (${Number(d.distance || 0).toFixed(2)}km)`));
+                        console.log(`[AutoDispatch] Nearest (10km): ${nearestRows.length}`, nearestRows.map(d => `#${d.id} (${Number(d.distance || 0).toFixed(2)}km)`));
                         if (nearestRows.length) drivers = nearestRows;
                     }
                 } catch (e) { console.error(`[AutoDispatch] Nearest query error:`, e.message); }
             }
         }
 
-        // 5. No drivers at all in this plot → try backup plots 
-        if (!drivers.length) {
-            console.log(`[AutoDispatch] No idle drivers in plot ${plotIdInt}. Checking backup plots...`);
-            return await tryNextBackupPlot({ bookingIdInt, tenantDb, db, dbName, plotIdInt, plotIdStr, visitedPlots });
+        // 5. No drivers OR index exhausted → go to next backup plot
+        if (!drivers.length || driverIndex >= drivers.length) {
+            const reason = !drivers.length
+                ? `no idle drivers in plot ${plotIdInt}`
+                : `all ${drivers.length} driver(s) in plot ${plotIdInt} exhausted (index=${driverIndex})`;
+            console.log(`[AutoDispatch] ${reason} → checking backup plots`);
+            console.log(`[AutoDispatch] allBackupPlots=${JSON.stringify(allBackupPlots)} | visited=${JSON.stringify(visitedPlots)}`);
+
+            // Find next unvisited plot from the ORIGINAL backup list
+            const nextPlot = allBackupPlots.find(p => !visitedPlots.includes(String(p)));
+            console.log(`[AutoDispatch] Next unvisited backup: ${nextPlot ?? 'NONE'}`);
+
+            if (nextPlot) {
+                console.log(`[AutoDispatch] Moving to backup plot ${nextPlot}`);
+                return autoDispatchRide({
+                    bookingId: bookingIdInt,
+                    tenantDb,
+                    currentPlotId: nextPlot,
+                    driverIndex: 0,
+                    visitedPlots: [...visitedPlots],
+                    driversInCurrentPlot: null,
+                    allBackupPlots: allBackupPlots  // pass same list forward
+                });
+            }
+
+            // All exhausted
+            console.log(`[AutoDispatch] No drivers anywhere. All visited: ${JSON.stringify(visitedPlots)}`);
+            try {
+                await db.query(
+                    `UPDATE bookings SET dispatcher_action = ? WHERE id = ?`,
+                    [`Ride not selected during auto dispatch. Please book manually.`, bookingIdInt]
+                );
+            } catch (e) { /* non-fatal */ }
+
+            io.to(`dispatcher_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available in any plot." });
+            io.to(`admin_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available in any plot." });
+            return;
         }
 
-        // 6. driverIndex exhausted for this plot → try backup plots 
-        if (driverIndex >= drivers.length) {
-            console.log(`[AutoDispatch] All ${drivers.length} driver(s) in plot ${plotIdInt} exhausted (index=${driverIndex}). Trying backup plots...`);
-            return await tryNextBackupPlot({ bookingIdInt, tenantDb, db, dbName, plotIdInt, plotIdStr, visitedPlots });
-        }
-
-        // 7. Select driver and send ride request
+        // 6. Select driver and notify
         const driver = drivers[driverIndex];
-        console.log(`[AutoDispatch] ✉ Sending to driver #${driver.id} "${driver.name}" (index=${driverIndex}, plot=${plotIdInt})`);
+        console.log(`[AutoDispatch] Sending to driver #${driver.id} "${driver.name}" (plot=${plotIdInt}, index=${driverIndex})`);
 
         const dispatchAmount = (
-            booking.booking_amount === null ||
-            booking.booking_amount === undefined ||
-            booking.booking_amount == 0
+            booking.booking_amount === null || booking.booking_amount === undefined || booking.booking_amount == 0
         ) ? (booking.offered_amount ?? null) : booking.booking_amount;
 
         try {
             await db.query(
-                `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending',
-                 dispatcher_action = ? WHERE id = ?`,
+                `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending', dispatcher_action = ? WHERE id = ?`,
                 [driver.id, dispatchAmount, `Auto dispatch is working — request sent to driver #${driver.id}`, bookingIdInt]
             );
         } catch (e) { console.error(`[AutoDispatch] Booking update error:`, e.message); return; }
@@ -363,9 +399,7 @@ const autoDispatchRide = async ({
         const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
         const updatedBooking = updatedRows[0];
 
-        const driverIdStr = String(driver.id).trim();
-        const driverSocketId = driverSockets.get(driverIdStr);
-
+        const driverSocketId = driverSockets.get(String(driver.id).trim());
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: updatedBooking.id,
@@ -373,9 +407,9 @@ const autoDispatchRide = async ({
                 message: "You have a new ride request",
                 booking: updatedBooking
             });
-            console.log(`[AutoDispatch] Socket event sent to driver #${driver.id}`);
+            console.log(`[AutoDispatch] Socket sent to driver #${driver.id}`);
         } else {
-            console.log(`[AutoDispatch] ⚠ Driver #${driver.id} not in socket map — FCM only`);
+            console.log(`[AutoDispatch] Driver #${driver.id} not in socket map — FCM only`);
         }
 
         dispatcherSockets.forEach(sid => io.to(sid).emit("notification-ride", updatedBooking));
@@ -387,27 +421,24 @@ const autoDispatchRide = async ({
             });
         } catch (e) { console.error(`[AutoDispatch] FCM error:`, e.message); }
 
-        // 8. 30s timeout
-        console.log(`[AutoDispatch] ⏱ 30s timeout for driver #${driver.id} (plot=${plotIdInt}, index=${driverIndex})`);
+        // 7. 30s timeout
+        console.log(`[AutoDispatch] 30s timeout for driver #${driver.id} (plot=${plotIdInt}, index=${driverIndex})`);
         setTimeout(async () => {
             try {
-                const [checkRows] = await db.query(
-                    "SELECT booking_status, driver FROM bookings WHERE id = ?", [bookingIdInt]
-                );
+                const [checkRows] = await db.query("SELECT booking_status, driver FROM bookings WHERE id = ?", [bookingIdInt]);
                 if (!checkRows.length) return;
 
                 const { booking_status: cs, driver: cd } = checkRows[0];
-                console.log(`[AutoDispatch] Timeout check: status=${cs} driver=${cd} (expected driver=${driver.id})`);
+                console.log(`[AutoDispatch] Timeout check: status=${cs} driver=${cd}`);
 
-                if (cs === "ongoing") { console.log(`[AutoDispatch] Accepted by driver #${driver.id}`); return; }
-                if (["cancelled", "completed"].includes(cs)) { console.log(`[AutoDispatch] ${cs} — stop`); return; }
+                if (cs === "ongoing") { console.log(`[AutoDispatch] Accepted`); return; }
+                if (["cancelled", "completed"].includes(cs)) { return; }
 
                 if (cs === "pending" && String(cd) === String(driver.id)) {
-                    console.log(`[AutoDispatch] ⏭ No response from driver #${driver.id} → next (index ${driverIndex + 1})`);
+                    console.log(`[AutoDispatch] No response from #${driver.id} → next index ${driverIndex + 1}`);
 
                     await db.query(
-                        `UPDATE bookings SET driver = NULL, booking_status = 'pending',
-                         dispatcher_action = ? WHERE id = ?`,
+                        `UPDATE bookings SET driver = NULL, booking_status = 'pending', dispatcher_action = ? WHERE id = ?`,
                         [`Auto dispatch is working — driver #${driver.id} did not respond`, bookingIdInt]
                     );
 
@@ -417,7 +448,8 @@ const autoDispatchRide = async ({
                         currentPlotId: plotIdInt,
                         driverIndex: driverIndex + 1,
                         visitedPlots: [...visitedPlots],
-                        driversInCurrentPlot: drivers
+                        driversInCurrentPlot: drivers,       // reuse same list
+                        allBackupPlots: allBackupPlots       // keep same backup list
                     });
                 }
             } catch (e) { console.error(`[AutoDispatch] Timeout error:`, e.message); }
