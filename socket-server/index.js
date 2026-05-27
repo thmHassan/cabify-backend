@@ -233,7 +233,7 @@ const autoDispatchRide = async ({
     driverIndex = 0,
     visitedPlots = [],
     driversInCurrentPlot = null,
-    allBackupPlots = null   // full backup list loaded ONCE from original plot
+    allBackupPlots = null
 }) => {
     try {
         const db = getConnection(tenantDb);
@@ -309,19 +309,6 @@ const autoDispatchRide = async ({
             }
         }
 
-        // 4. Get idle drivers in current plot
-        // let drivers = driversInCurrentPlot;
-
-        // if (!drivers) {
-        //     try {
-        //         const [idleRows] = await db.query(
-        //             `SELECT * FROM drivers WHERE driving_status = 'idle' AND (plot_id = ? OR plot_id = ?) ORDER BY id ASC`,
-        //             [plotIdStr, plotIdInt]
-        //         );
-        //         drivers = idleRows;
-        //         console.log(`[AutoDispatch] Idle drivers in plot ${plotIdInt}: ${drivers.length}`,
-        //             drivers.map(d => `#${d.id} ${d.name}`));
-        //     } catch (e) { console.error(`[AutoDispatch] DB error (drivers):`, e.message); return; }
         let drivers = driversInCurrentPlot;
 
         if (!drivers) {
@@ -908,6 +895,41 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+app.use(async (req, res, next) => {
+    if (req.tenantDb || req.method !== 'POST') {
+        return next();
+    }
+
+    const bookingId = req.body?.booking?.booking_id || req.body?.booking_id;
+    if (bookingId) {
+        console.log(` to auto-resolve database for booking_id: ${bookingId}`);
+        const centralDb = getConnection();
+        try {
+            const [databases] = await centralDb.query("SHOW DATABASES LIKE 'tenant%'");
+            for (const row of databases) {
+                const dbName = Object.values(row)[0];
+                try {
+                    const tenantPool = getConnection(dbName);
+                    const [rows] = await tenantPool.query(
+                        "SELECT id FROM bookings WHERE booking_id = ? LIMIT 1",
+                        [bookingId]
+                    );
+                    if (rows.length > 0) {
+                        req.tenantDb = dbName;
+                        console.log(`Successfully resolved to database: ${dbName}`);
+                        break;
+                    }
+                } catch (dbErr) {
+                    // Ignore database query errors (e.g., if database is offline or table doesn't exist)
+                }
+            }
+        } catch (err) {
+            console.error("Error listing databases:", err.message);
+        }
+    }
+    next();
+});
 
 app.use(cors({
     origin: [
@@ -1688,16 +1710,13 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             const diffMins = diffMs / (1000 * 60);
 
             if (diffMins >= -30 && diffMins <= 30) {
-                // ±30 min ની અંદર → ongoing
                 isWithinWindow = true;
                 newStatus = 'ongoing';
             } else {
-                // ±30 min ની બહાર → pending (driver assign, status pending)
                 isWithinWindow = false;
                 newStatus = 'pending';
             }
         } else {
-            // pickup_time ન હોય (immediate booking) → ongoing
             isWithinWindow = true;
             newStatus = 'ongoing';
         }
@@ -1717,7 +1736,6 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             [driver_id, amountToSet, actionText, newStatus, id]
         );
 
-        // ✅ Window ની અંદર હોય તો જ driver busy થાય
         if (isWithinWindow) {
             await db.query("UPDATE drivers SET driving_status = 'busy' WHERE id = ?", [driver_id]);
         }
@@ -1789,7 +1807,7 @@ app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
         const dispatcherName = dispatcher_name || "Dispatcher";
 
         if (!req.tenantDb) {
-            console.error("[API /start-auto-dispatch] ❌ req.tenantDb is undefined — missing 'database' header");
+            console.error("[API /start-auto-dispatch] req.tenantDb is undefined — missing 'database' header");
             return res.status(400).json({
                 success: false,
                 message: "Missing 'database' header in request"
