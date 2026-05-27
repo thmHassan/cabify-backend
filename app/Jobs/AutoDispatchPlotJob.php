@@ -68,36 +68,30 @@ class AutoDispatchPlotJob implements ShouldQueue
                     ->take(1)
                     ->first();
 
-            \Log::info($priority);
-            \Log::info("plot id");
-            \Log::info($this->tenantDatabase);
-            \Log::info($plotId);
-            \Log::info($driver);
-
             if(!isset($driver) || $driver == NULL){
-                \Log::info("driver not fount");
+                // \Log::info("driver not fount");
                 $plotData = CompanyPlot::where("id", $booking->pickup_plot_id)->first();
                 if(!isset($plotData) || $plotData == NULL || $plotData == ""){
-                    \Log::info("plot not found");
-                    $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
-                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                    // \Log::info("plot not found");
+                    // $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
+                    // $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
-                    if(!isset($dispatch_system) || count($dispatch_system) <= 0){
-                        return;
-                    }
-                    if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                        SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
-                    }
-                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
-                    }
+                    // if(!isset($dispatch_system) || count($dispatch_system) <= 0){
+                    //     return;
+                    // }
+                    // if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                    //     SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
+                    // }
+                    // elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                    //     AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
+                    // }
                     return;
                 }
 
                 $backupPlots = $plotData->backup_plots;
                 $plotId = NULL;
                 \Log::info("Backup Plots");
-                \Log::info($plotData->backup_plots);
+                \Log::info($currentPlotId);
                 if(isset($backupPlots) && $backupPlots != NULL){
                     if(isset($currentPlotId) && $currentPlotId != NULL){
                         $currentIndex = array_search($currentPlotId, $backupPlots);
@@ -107,23 +101,25 @@ class AutoDispatchPlotJob implements ShouldQueue
                         $plotId = $currentPlotId = $backupPlots[0] ?? null;
                     }
                 }
+                \Log::info($plotId);
                 $priority = 0;
 
                 if(!isset($plotId) || $plotId == NULL || $plotId == ""){
-                    \Log::info("new plot not found");
-                    $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
-                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
-
-                    if(!isset($dispatch_system) || count($dispatch_system) <= 0){
-                        return;
-                    }
-                    if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                        SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
-                    }
-                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
-                    }
+                    // \Log::info("new plot not found");
                     return;
+                    // $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
+                    // $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+
+                    // if(!isset($dispatch_system) || count($dispatch_system) <= 0){
+                    //     return;
+                    // }
+                    // if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                    //     SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
+                    // }
+                    // elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                    //     AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
+                    // }
+                    // return;
                 }
 
                 $driver = CompanyDriver::where('driving_status', 'idle')
@@ -136,24 +132,26 @@ class AutoDispatchPlotJob implements ShouldQueue
                     ->first();
                 
                 if(!isset($driver) || $driver == NULL || $driver == ""){
-                    \Log::info("new plot not found & Driver Found");
-                    $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
-                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
+                    // \Log::info("new plot not found & Driver Found");
+                    // $dispatch_system_priority = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->first();
+                    // $dispatch_system = CompanyDispatchSystem::where("status", "enable")->where("priority", (int) $dispatch_system_priority->priority + 1)->get();
 
-                    if(!isset($dispatch_system) || count($dispatch_system) <= 0){
-                        return;
-                    }
-                    if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                        SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
-                    }
-                    elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                        AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
-                    }
-                    return;
+                    // if(!isset($dispatch_system) || count($dispatch_system) <= 0){
+                    //     return;
+                    // }
+                    // if($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
+                    //     SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $this->tenantDatabase);
+                    // }
+                    // elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
+                    //     AutoDispatchNearestDriverJob::dispatch($booking->id, $this->tenantDatabase, []);
+                    // }
+                    // return;
+                    AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $this->tenantDatabase, $plotId, $currentPlotId)
+                        ->delay(now()->addSeconds(30));
                 }
             }
-            \Log::info("Priority");
-            \Log::info($priority);
+            // \Log::info("Priority");
+            // \Log::info($priority);
 
             if($priority < 4){
                 $dispatch_system_followup = CompanyDispatchSystem::where("dispatch_system", "auto_dispatch_plot_base")->orderBy("sub_priority")->get();
@@ -333,10 +331,10 @@ class AutoDispatchPlotJob implements ShouldQueue
             //         );
             //     }
             // }
-            \Log::info($response->status());
-            \Log::info($response->json());    
-            \Log::info("Driver Id");
-            \Log::info($driver->id);
+            // \Log::info($response->status());
+            // \Log::info($response->json());    
+            // \Log::info("Driver Id");
+            // \Log::info($driver->id);
 
             AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $this->tenantDatabase, $plotId, $currentPlotId)
                 ->delay(now()->addSeconds(30));
