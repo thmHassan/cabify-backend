@@ -431,8 +431,12 @@ class BookingController extends Controller
             $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                // AutoDispatchPlotSocketService::dispatch($newBooking, 0);
+                // AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
+                $url = "https://backend.cabifyit.com/socket-api/bookings/".$newBooking->id."/start-auto-dispatch";
+                Http::withHeaders([
+                    'database' => $request->header('database'),
+                    'Accept' => 'application/json',
+                ])->post($url);
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
