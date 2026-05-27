@@ -105,7 +105,22 @@ const sendNotificationToDriver = async (db, driverId, title, body, data = {}) =>
 
     for (const token of tokens) {
       if (token.fcm_token) {
-        await sendToDevice(token.fcm_token, title, body, data);
+        try {
+          await sendToDevice(token.fcm_token, title, body, data);
+        } catch (err) {
+          const isNotFoundError = 
+            err.code === 404 ||
+            err.status === 'NOT_FOUND' ||
+            err.error?.code === 404 ||
+            err.error?.status === 'NOT_FOUND' ||
+            (err.message && (err.message.includes('404') || err.message.includes('NOT_FOUND')));
+
+          if (isNotFoundError) {
+            console.warn(`⚠️ [FCM] Token "${token.fcm_token.substring(0, 30)}..." is invalid or expired (404 NOT_FOUND) but kept in database.`);
+          } else {
+            console.error(`❌ [FCM] Error sending to token:`, err.message || err);
+          }
+        }
       }
     }
   }
@@ -145,7 +160,22 @@ const sendNotificationToUser = async (db, userId, title, body, data = {}) => {
 
     for (const token of tokens) {
       if (token.fcm_token) {
-        await sendToDevice(token.fcm_token, title, body, data);
+        try {
+          await sendToDevice(token.fcm_token, title, body, data);
+        } catch (err) {
+          const isNotFoundError = 
+            err.code === 404 ||
+            err.status === 'NOT_FOUND' ||
+            err.error?.code === 404 ||
+            err.error?.status === 'NOT_FOUND' ||
+            (err.message && (err.message.includes('404') || err.message.includes('NOT_FOUND')));
+
+          if (isNotFoundError) {
+            console.warn(`[FCM] Token "${token.fcm_token.substring(0, 30)}..." is invalid or expired.`);
+          } else {
+            console.error(`[FCM] Error sending to token:`, err.message || err);
+          }
+        }
       }
     }
 
