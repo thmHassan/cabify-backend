@@ -28,7 +28,7 @@ class AutoDispatchPlotJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public int $bookingId, public int $priority, public string $tenantDatabase, public ?int $plotId = NULL)
+    public function __construct(public int $bookingId, public int $priority, public string $tenantDatabase, public ?int $plotId = NULL, public ?int $currentPlotId = NULL)
     {
         
     }
@@ -98,8 +98,13 @@ class AutoDispatchPlotJob implements ShouldQueue
                 \Log::info("Backup Plots");
                 \Log::info($plotData->backup_plots);
                 if(isset($backupPlots) && $backupPlots != NULL){
-                    $currentIndex = array_search($plotId, $backupPlots);
-                    $plotId = $backupPlots[$currentIndex + 1] ?? null;
+                    if(isset($currentPlotId) && $currentPlotId != NULL){
+                        $currentIndex = array_search($currentPlotId, $backupPlots);
+                        $plotId = $currentPlotId = $backupPlots[$currentIndex] ?? null;
+                    }
+                    else{
+                        $plotId = $currentPlotId = $backupPlots[0] ?? null;
+                    }
                 }
                 $priority = 0;
 
@@ -332,7 +337,7 @@ class AutoDispatchPlotJob implements ShouldQueue
             \Log::info("Driver Id");
             \Log::info($driver->id);
 
-            AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $this->tenantDatabase, $plotId)
+            AutoDispatchPlotJob::dispatch($booking->id, $priority + 1, $this->tenantDatabase, $plotId, $currentPlotId)
                 ->delay(now()->addSeconds(30));
         }
         catch(\Exception $e){
