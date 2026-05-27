@@ -60,6 +60,7 @@ class AutoDispatchPlotJob implements ShouldQueue
             $priority = $this->priority;
             $driver = CompanyDriver::where('driving_status', 'idle')
                     ->where('plot_id', $plotId)
+                    ->where('online_status', "online")
                     // ->where('device_token', '!=', '')
                     ->orderBy("priority_plot", "ASC")
                     ->skip($priority)
@@ -94,6 +95,8 @@ class AutoDispatchPlotJob implements ShouldQueue
 
                 $backupPlots = $plotData->backup_plots;
                 $plotId = NULL;
+                \Log::info("Backup Plots");
+                \Log::info($plotData->backup_plots);
                 if(isset($backupPlots) && $backupPlots != NULL){
                     $currentIndex = array_search($plotId, $backupPlots);
                     $plotId = $backupPlots[$currentIndex + 1] ?? null;
@@ -119,6 +122,7 @@ class AutoDispatchPlotJob implements ShouldQueue
 
                 $driver = CompanyDriver::where('driving_status', 'idle')
                     ->where('plot_id', $plotId)
+                    ->where('online_status', "online")
                     // ->whereNotNull("device_token")
                     ->orderBy("priority_plot")
                     ->skip($priority)
