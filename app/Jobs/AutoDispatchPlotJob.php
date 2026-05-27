@@ -53,6 +53,7 @@ class AutoDispatchPlotJob implements ShouldQueue
                 return;
             }
             $plotId = $this->plotId;
+            $currentPlotId = $this->currentPlotId;
             if(!isset($this->plotId) || $this->plotId == NULL){
                 $plotId = (int) $booking->pickup_plot_id;
             }
