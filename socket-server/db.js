@@ -16,7 +16,7 @@ REQUIRED_ENVS.forEach((key) => {
 
 
 for (const key of REQUIRED_ENVS) {
-    if (!process.env[key]) {
+    if (process.env[key] === undefined || process.env[key] === null) {
         console.error(`Missing ENV variable: ${key}`);
         process.exit(1);
     }
@@ -25,6 +25,9 @@ for (const key of REQUIRED_ENVS) {
 const pools = {};
 
 function getConnection(databaseName) {
+    if (!databaseName) {
+        console.warn("⚠️ Warning: getConnection called without a databaseName. Falling back to default central DB:", process.env.DB_DATABASE);
+    }
     const dbName = databaseName || process.env.DB_DATABASE;
 
     if (!pools[dbName]) {
