@@ -242,7 +242,6 @@ const autoDispatchRide = async ({
         const bookingIdInt = parseInt(bookingId);
 
         console.log(`[AutoDispatch] bookingId=${bookingIdInt} tenantDb=${tenantDb} dbName=${dbName} index=${driverIndex}`);
-        console.log(`[AutoDispatch] Connected drivers:`, Array.from(driverSockets.entries()).map(([k, v]) => `#${k}→${v}`));
 
         // 1 Load booking
         let booking;
@@ -378,7 +377,15 @@ const autoDispatchRide = async ({
                 return autoDispatchRide({ bookingId: bookingIdInt, tenantDb, currentPlotId: nextPlot, driverIndex: 0, visitedPlots });
             }
 
-            console.log(`[AutoDispatch] No drivers anywhere. Dispatch failed.`);
+            // io.to(`dispatcher_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available." });
+            // io.to(`admin_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available." });
+            // return;
+
+            await db.query(
+                `UPDATE bookings SET dispatcher_action = ? WHERE id = ?`,
+                [`Ride not selected during auto dispatch. Please book manually.`, bookingIdInt]
+            );
+
             io.to(`dispatcher_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available." });
             io.to(`admin_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available." });
             return;
@@ -396,11 +403,20 @@ const autoDispatchRide = async ({
 
         // Update booking
         try {
+            // await db.query(
+            //     `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending' WHERE id = ?`,
+            //     [driver.id, dispatchAmount, bookingIdInt]
+            // );
             await db.query(
-                `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending' WHERE id = ?`,
-                [driver.id, dispatchAmount, bookingIdInt]
+                `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending', 
+                 dispatcher_action = ? WHERE id = ?`,
+                [
+                    driver.id,
+                    dispatchAmount,
+                    `Auto dispatch is working — request sent to driver ${driver.name} (#${driver.id})`,
+                    bookingIdInt
+                ]
             );
-            console.log(`[AutoDispatch] Booking updated: driver=${driver.id} status=pending`);
         } catch (e) {
             console.error(`[AutoDispatch] Booking update error:`, e.message);
             return;
@@ -460,9 +476,17 @@ const autoDispatchRide = async ({
                 // ✅ pending_acceptance → pending
                 if (cs === "pending" && String(cd) === String(driver.id)) {
                     console.log(`[AutoDispatch] ⏭ No response → next driver (index ${driverIndex + 1})`);
+                    // await db.query(
+                    //     `UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`,
+                    //     [bookingIdInt]
+                    // );
                     await db.query(
-                        `UPDATE bookings SET driver = NULL, booking_status = 'pending' WHERE id = ?`,
-                        [bookingIdInt]
+                        `UPDATE bookings SET driver = NULL, booking_status = 'pending',
+                         dispatcher_action = ? WHERE id = ?`,
+                        [
+                            `Auto dispatch is working — driver ${driver.name} (#${driver.id}) did not respond, trying next driver`,
+                            bookingIdInt
+                        ]
                     );
                     autoDispatchRide({ bookingId: bookingIdInt, tenantDb, currentPlotId: plotIdInt, driverIndex: driverIndex + 1, visitedPlots });
                 }
