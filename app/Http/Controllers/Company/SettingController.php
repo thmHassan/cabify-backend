@@ -120,6 +120,7 @@ class SettingController extends Controller
             $settings->support_contact_no = $request->support_contact_no;
             $settings->support_emergency_no = $request->support_emergency_no;
             $settings->support_rescue_number = $request->support_rescue_number;
+            $settings->search_radius = $request->search_radius;
             $settings->save();
 
             return response()->json([
