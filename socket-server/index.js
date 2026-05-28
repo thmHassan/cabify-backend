@@ -34,27 +34,6 @@ const adminSockets = new Map();
 const plotDriverQueues = new Map();
 const driverLastLocationTime = new Map();
 
-// const getOrAssignRank = (plotKey, driverId) => {
-//     if (!plotDriverQueues.has(plotKey)) {
-//         plotDriverQueues.set(plotKey, []);
-//     }
-//     const queue = plotDriverQueues.get(plotKey);
-
-//     const existing = queue.find(d => d.driver_id === driverId.toString());
-//     if (existing) {
-//         console.log(`[WaitingQueue] Driver #${driverId} already in ${plotKey} with rank ${existing.rank}`);
-//         return existing.rank;
-//     }
-
-//     const newRank = queue.length + 1;
-//     queue.push({ driver_id: driverId.toString(), rank: newRank });
-//     plotDriverQueues.set(plotKey, queue);
-
-//     console.log(`[WaitingQueue] Plot ${plotKey} → Driver #${driverId} assigned rank ${newRank}`);
-//     console.log(`[WaitingQueue] Current queue:`, queue);
-
-//     return newRank;
-// };
 const getOrAssignRank = (plotKey, driverId) => {
     if (!plotDriverQueues.has(plotKey)) {
         plotDriverQueues.set(plotKey, []);
@@ -820,7 +799,6 @@ io.on("connection", (socket) => {
             try {
                 const db = getConnection(`tenant${database}`);
 
-                // ✅ online_status UPDATE નથી કરવો — DB value respect કરો
                 const [rows] = await db.query(
                     `SELECT d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name 
                  FROM drivers d
@@ -835,7 +813,6 @@ io.on("connection", (socket) => {
                 console.log(`[Connect] Driver #${driverId} online_status=${driver.online_status} driving_status=${driver.driving_status}`);
 
                 if (driver.driving_status === "idle" && driver.online_status === "online") {
-                    // Queue ma add karo
                     const plotId = driver.plot_id;
                     const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
                     const plotKey = plotId ? `${plotId}_${database}` : null;
@@ -848,7 +825,7 @@ io.on("connection", (socket) => {
                         plot: plotId ?? "Unassigned",
                         plot_name: plotName,
                         rank: rank,
-                        online_status: driver.online_status  // ✅ send to frontend
+                        online_status: driver.online_status
                     };
 
                     io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
@@ -859,12 +836,11 @@ io.on("connection", (socket) => {
                     await broadcastFullQueueToDrivers(database);
 
                 } else {
-                    // ✅ offline છે — queue માંથી remove, offline event send
+
                     removeFromQueue(driverId, database);
                     const plotId = driver.plot_id;
                     if (plotId) broadcastUpdatedQueue(plotId, database);
 
-                    // Frontend ને offline status send karo
                     const offlineData = {
                         driver_id: driverId,
                         driver_name: driver.name,
