@@ -333,7 +333,7 @@ const autoDispatchRide = async ({
         if (!drivers) {
             try {
                 const [idleRows] = await db.query(
-                    `SELECT * FROM drivers WHERE driving_status = 'idle' AND (plot_id = ? OR plot_id = ?) ORDER BY id ASC`,
+                    `SELECT * FROM drivers WHERE driving_status = 'idle' AND online_status = 'online' AND (plot_id = ? OR plot_id = ?) ORDER BY id ASC`,
                     [plotIdStr, plotIdInt]
                 );
                 drivers = idleRows;
@@ -356,7 +356,7 @@ const autoDispatchRide = async ({
                     );
                 }
 
-                console.log(`[AutoDispatch] Idle drivers in plot ${plotIdInt}: ${drivers.length}`);
+                console.log(`[AutoDispatch] Idle & Online drivers in plot ${plotIdInt}: ${drivers.length}`);
             } catch (e) { console.error(`[AutoDispatch] DB error (drivers):`, e.message); return; }
 
             // Nearest fallback — only on very first call
@@ -369,7 +369,7 @@ const autoDispatchRide = async ({
                         const lng = parseFloat(lngStr.trim());
                         const [nearestRows] = await db.query(`
                             SELECT *, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance
-                            FROM drivers WHERE driving_status = 'idle' HAVING distance < 10 ORDER BY distance ASC LIMIT 5
+                            FROM drivers WHERE driving_status = 'idle' AND online_status = 'online' HAVING distance < 10 ORDER BY distance ASC LIMIT 5
                         `, [lat, lng, lat]);
                         console.log(`[AutoDispatch] Nearest (10km): ${nearestRows.length}`, nearestRows.map(d => `#${d.id} (${Number(d.distance || 0).toFixed(2)}km)`));
                         if (nearestRows.length) drivers = nearestRows;
