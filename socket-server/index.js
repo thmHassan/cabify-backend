@@ -34,28 +34,47 @@ const adminSockets = new Map();
 const plotDriverQueues = new Map();
 const driverLastLocationTime = new Map();
 
+// const getOrAssignRank = (plotKey, driverId) => {
+//     if (!plotDriverQueues.has(plotKey)) {
+//         plotDriverQueues.set(plotKey, []);
+//     }
+//     const queue = plotDriverQueues.get(plotKey);
+
+//     const existing = queue.find(d => d.driver_id === driverId.toString());
+//     if (existing) {
+//         console.log(`[WaitingQueue] Driver #${driverId} already in ${plotKey} with rank ${existing.rank}`);
+//         return existing.rank;
+//     }
+
+//     const newRank = queue.length + 1;
+//     queue.push({ driver_id: driverId.toString(), rank: newRank });
+//     plotDriverQueues.set(plotKey, queue);
+
+//     console.log(`[WaitingQueue] Plot ${plotKey} → Driver #${driverId} assigned rank ${newRank}`);
+//     console.log(`[WaitingQueue] Current queue:`, queue);
+
+//     return newRank;
+// };
 const getOrAssignRank = (plotKey, driverId) => {
     if (!plotDriverQueues.has(plotKey)) {
         plotDriverQueues.set(plotKey, []);
     }
     const queue = plotDriverQueues.get(plotKey);
 
-    const existing = queue.find(d => d.driver_id === driverId.toString());
+    const existing = queue.find(d => d.driver_id === String(driverId));
     if (existing) {
-        console.log(`[WaitingQueue] Driver #${driverId} already in ${plotKey} with rank ${existing.rank}`);
         return existing.rank;
     }
 
     const newRank = queue.length + 1;
-    queue.push({ driver_id: driverId.toString(), rank: newRank });
+    queue.push({ driver_id: String(driverId), rank: newRank });
     plotDriverQueues.set(plotKey, queue);
 
-    console.log(`[WaitingQueue] Plot ${plotKey} → Driver #${driverId} assigned rank ${newRank}`);
-    console.log(`[WaitingQueue] Current queue:`, queue);
+    console.log(`[Queue] Plot ${plotKey} → Driver #${driverId} rank=${newRank}`);
+    console.log(`[Queue] Full queue:`, queue);
 
     return newRank;
 };
-
 const removeFromQueue = (driverId, database) => {
     plotDriverQueues.forEach((queue, plotKey) => {
         if (!plotKey.endsWith(`_${database}`)) return;
@@ -786,46 +805,44 @@ io.on("connection", (socket) => {
     if (role === "client" && clientId) clientSockets.set(clientId.toString(), socket.id);
     if (role === "admin" && adminId) adminSockets.set(adminId.toString(), socket.id);
 
-    // ✅ Driver connect
     if (driverId) {
         driverSockets.set(driverId.toString(), socket.id);
-
         driverLastLocationTime.set(driverId.toString(), Date.now());
 
         (async () => {
             try {
                 const db = getConnection(`tenant${database}`);
 
+                // ✅ online_status UPDATE નથી કરવો — DB value respect કરો
                 const [rows] = await db.query(
-                    `SELECT d.name, d.driving_status, d.online_status, d.plot_id, d.priority_plot, p.name AS plot_name 
-                     FROM drivers d
-                     LEFT JOIN plots p ON d.plot_id = p.id
-                     WHERE d.id = ? LIMIT 1`,
+                    `SELECT d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name 
+                 FROM drivers d
+                 LEFT JOIN plots p ON d.plot_id = p.id
+                 WHERE d.id = ? LIMIT 1`,
                     [driverId]
                 );
 
-                console.log("Driver row:", rows);
                 if (!rows.length) return;
-
                 const driver = rows[0];
 
+                console.log(`[Connect] Driver #${driverId} online_status=${driver.online_status} driving_status=${driver.driving_status}`);
+
                 if (driver.driving_status === "idle" && driver.online_status === "online") {
+                    // Queue ma add karo
                     const plotId = driver.plot_id;
                     const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
-
                     const plotKey = plotId ? `${plotId}_${database}` : null;
                     const rank = plotKey ? getOrAssignRank(plotKey, driverId) : "-";
 
                     const emitData = {
                         driver_id: driverId,
-                        driverName: driver.name,
                         driver_name: driver.name,
+                        driverName: driver.name,
                         plot: plotId ?? "Unassigned",
                         plot_name: plotName,
-                        rank: rank
+                        rank: rank,
+                        online_status: driver.online_status  // ✅ send to frontend
                     };
-
-                    console.log(`Emitting waiting-driver-event to company ${database}:`, emitData);
 
                     io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
                     io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
@@ -833,28 +850,129 @@ io.on("connection", (socket) => {
                     socket.emit("waiting-driver-event", emitData);
 
                     await broadcastFullQueueToDrivers(database);
+
                 } else {
+                    // ✅ offline છે — queue માંથી remove, offline event send
                     removeFromQueue(driverId, database);
                     const plotId = driver.plot_id;
-                    if (plotId) {
-                        broadcastUpdatedQueue(plotId, database);
-                    }
+                    if (plotId) broadcastUpdatedQueue(plotId, database);
+
+                    // Frontend ને offline status send karo
+                    const offlineData = {
+                        driver_id: driverId,
+                        driver_name: driver.name,
+                        online_status: driver.online_status,
+                        driving_status: driver.driving_status
+                    };
+                    io.to(`dispatcher_${database}`).emit("driver-offline-event", offlineData);
+                    io.to(`admin_${database}`).emit("driver-offline-event", offlineData);
+                    io.to(`client_${database}`).emit("driver-offline-event", offlineData);
                 }
 
             } catch (err) {
-                console.error("Driver connect waiting error:", err);
+                console.error("Driver connect error:", err);
             }
         })();
     }
+    // ✅ Driver connect
+    // if (driverId) {
+    //     driverSockets.set(driverId.toString(), socket.id);
 
+    //     driverLastLocationTime.set(driverId.toString(), Date.now());
+
+    //     (async () => {
+    //         try {
+    //             const db = getConnection(`tenant${database}`);
+
+    //             const [rows] = await db.query(
+    //                 `SELECT d.name, d.driving_status, d.online_status, d.plot_id, d.priority_plot, p.name AS plot_name 
+    //                  FROM drivers d
+    //                  LEFT JOIN plots p ON d.plot_id = p.id
+    //                  WHERE d.id = ? LIMIT 1`,
+    //                 [driverId]
+    //             );
+
+    //             console.log("Driver row:", rows);
+    //             if (!rows.length) return;
+
+    //             const driver = rows[0];
+
+    //             if (driver.driving_status === "idle" && driver.online_status === "online") {
+    //                 const plotId = driver.plot_id;
+    //                 const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+
+    //                 const plotKey = plotId ? `${plotId}_${database}` : null;
+    //                 const rank = plotKey ? getOrAssignRank(plotKey, driverId) : "-";
+
+    //                 const emitData = {
+    //                     driver_id: driverId,
+    //                     driverName: driver.name,
+    //                     driver_name: driver.name,
+    //                     plot: plotId ?? "Unassigned",
+    //                     plot_name: plotName,
+    //                     rank: rank
+    //                 };
+
+    //                 console.log(`Emitting waiting-driver-event to company ${database}:`, emitData);
+
+    //                 io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
+    //                 io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
+    //                 io.to(`client_${database}`).emit("waiting-driver-event", emitData);
+    //                 socket.emit("waiting-driver-event", emitData);
+
+    //                 await broadcastFullQueueToDrivers(database);
+    //             } else {
+    //                 removeFromQueue(driverId, database);
+    //                 const plotId = driver.plot_id;
+    //                 if (plotId) {
+    //                     broadcastUpdatedQueue(plotId, database);
+    //                 }
+    //             }
+
+    //         } catch (err) {
+    //             console.error("Driver connect waiting error:", err);
+    //         }
+    //     })();
+    // }
+
+    // socket.on("driver-location", async (data) => {
+    //     try {
+    //         let dataArray;
+    //         if (typeof data === "string") {
+    //             dataArray = JSON.parse(data);
+    //         } else {
+    //             dataArray = data;
+    //         }
+
+    //         const dbName = dataArray.database || socket.handshake.query.database;
+    //         const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
+
+    //         if (driverIdFromData) {
+    //             driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
+    //         }
+
+    //         if (dbName && driverIdFromData) {
+    //             try {
+    //                 const db = getConnection(`tenant${dbName}`);
+    //                 const status = dataArray.driving_status || dataArray.status;
+    //                 if (status) {
+    //                     await db.query(
+    //                         `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
+    //                         [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
+    //                     );
+    //                 } else {
+    //                     await db.query(
+    //                         `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
+    //                         [dataArray.latitude, dataArray.longitude, driverIdFromData]
+    //                     );
+    //                 }
+    //             } catch (dbErr) {
+    //                 console.error("Database update error in driver-location:", dbErr.message);
+    //             }
+    //         }
     socket.on("driver-location", async (data) => {
         try {
-            let dataArray;
-            if (typeof data === "string") {
-                dataArray = JSON.parse(data);
-            } else {
-                dataArray = data;
-            }
+            let dataArray = typeof data === "string" ? JSON.parse(data) : data;
 
             const dbName = dataArray.database || socket.handshake.query.database;
             const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
@@ -867,7 +985,15 @@ io.on("connection", (socket) => {
                 try {
                     const db = getConnection(`tenant${dbName}`);
                     const status = dataArray.driving_status || dataArray.status;
-                    if (status) {
+
+                    const onlineStatus = dataArray.online_status;
+
+                    if (status && onlineStatus) {
+                        await db.query(
+                            `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, online_status = ?, updated_at = NOW() WHERE id = ?`,
+                            [dataArray.latitude, dataArray.longitude, status, onlineStatus, driverIdFromData]
+                        );
+                    } else if (status) {
                         await db.query(
                             `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
                             [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
@@ -879,7 +1005,7 @@ io.on("connection", (socket) => {
                         );
                     }
                 } catch (dbErr) {
-                    console.error("Database update error in driver-location:", dbErr.message);
+                    console.error("DB update error:", dbErr.message);
                 }
             }
 
@@ -1043,6 +1169,35 @@ io.on("connection", (socket) => {
         }
     });
 
+    // socket.on("disconnect", () => {
+    //     if (driverId) {
+    //         driverSockets.delete(driverId.toString());
+    //         driverLastLocationTime.delete(driverId.toString());
+
+    //         if (database) {
+    //             (async () => {
+    //                 try {
+    //                     const db = getConnection(`tenant${database}`);
+    //                     const [rows] = await db.query(
+    //                         "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
+    //                         [driverId]
+    //                     );
+    //                     const plotId = rows[0]?.plot_id;
+
+    //                     removeFromQueue(driverId, database);
+
+    //                     if (plotId) {
+    //                         broadcastUpdatedQueue(plotId, database);
+    //                     }
+
+    //                     console.log(`[WaitingQueue] Driver #${driverId} disconnected — removed from queue`);
+    //                 } catch (err) {
+    //                     console.error("Error removing driver from queue on disconnect:", err);
+    //                     removeFromQueue(driverId, database);
+    //                 }
+    //             })();
+    //         }
+    //     }
     socket.on("disconnect", () => {
         if (driverId) {
             driverSockets.delete(driverId.toString());
@@ -1052,6 +1207,12 @@ io.on("connection", (socket) => {
                 (async () => {
                     try {
                         const db = getConnection(`tenant${database}`);
+
+                        await db.query(
+                            "UPDATE drivers SET online_status = 'offline' WHERE id = ?",
+                            [driverId]
+                        );
+
                         const [rows] = await db.query(
                             "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
                             [driverId]
@@ -1059,14 +1220,13 @@ io.on("connection", (socket) => {
                         const plotId = rows[0]?.plot_id;
 
                         removeFromQueue(driverId, database);
+                        if (plotId) broadcastUpdatedQueue(plotId, database);
 
-                        if (plotId) {
-                            broadcastUpdatedQueue(plotId, database);
-                        }
+                        await broadcastFullQueueToDrivers(database);
 
-                        console.log(`[WaitingQueue] Driver #${driverId} disconnected — removed from queue`);
+                        console.log(`[Disconnect] Driver #${driverId} → offline, removed from queue`);
                     } catch (err) {
-                        console.error("Error removing driver from queue on disconnect:", err);
+                        console.error("Disconnect error:", err);
                         removeFromQueue(driverId, database);
                     }
                 })();
