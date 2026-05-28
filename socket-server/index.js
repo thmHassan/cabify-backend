@@ -398,8 +398,27 @@ const autoDispatchRide = async ({
                 );
             } catch (e) { /* non-fatal */ }
 
-            io.to(`dispatcher_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available in any plot." });
-            io.to(`admin_${dbName}`).emit("auto-dispatch-failed", { booking_id: bookingIdInt, message: "No drivers available in any plot." });
+            let updatedBooking = null;
+            try {
+                const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
+                updatedBooking = updatedRows[0];
+            } catch (e) { console.error(`[AutoDispatch] Error fetching updated booking:`, e.message); }
+
+            io.to(`dispatcher_${dbName}`).emit("auto-dispatch-failed", {
+                booking_id: bookingIdInt,
+                message: "Ride not selected during auto dispatch. Please book manually.",
+                booking: updatedBooking
+            });
+            io.to(`admin_${dbName}`).emit("auto-dispatch-failed", {
+                booking_id: bookingIdInt,
+                message: "Ride not selected during auto dispatch. Please book manually.",
+                booking: updatedBooking
+            });
+            io.to(`client_${dbName}`).emit("auto-dispatch-failed", {
+                booking_id: bookingIdInt,
+                message: "Ride not selected during auto dispatch. Please book manually.",
+                booking: updatedBooking
+            });
             return;
         }
 
@@ -531,15 +550,27 @@ const tryNextBackupPlot = async ({ bookingIdInt, tenantDb, db, dbName, plotIdInt
         );
     } catch (e) { /* non-fatal */ }
 
-    const io_instance = global._io || null;
+    let updatedBooking = null;
+    try {
+        const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
+        updatedBooking = updatedRows[0];
+    } catch (e) { console.error(`[AutoDispatch] Error fetching updated booking:`, e.message); }
+
     if (io) {
         io.to(`dispatcher_${dbName}`).emit("auto-dispatch-failed", {
             booking_id: bookingIdInt,
-            message: "No drivers available in any plot."
+            message: "Ride not selected during auto dispatch. Please book manually.",
+            booking: updatedBooking
         });
         io.to(`admin_${dbName}`).emit("auto-dispatch-failed", {
             booking_id: bookingIdInt,
-            message: "No drivers available in any plot."
+            message: "Ride not selected during auto dispatch. Please book manually.",
+            booking: updatedBooking
+        });
+        io.to(`client_${dbName}`).emit("auto-dispatch-failed", {
+            booking_id: bookingIdInt,
+            message: "Ride not selected during auto dispatch. Please book manually.",
+            booking: updatedBooking
         });
     }
 };
