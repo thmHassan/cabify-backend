@@ -231,9 +231,16 @@ const broadcastFullQueueToDrivers = async (database) => {
             })
             .filter(d => d !== null);
 
-        console.log(`[FullQueue] Broadcasting to driver_${database}: ranked drivers=${fullQueueData.length}`);
+        console.log(`[FullQueue] Broadcasting to driver_${database} and dispatcher_${database}: ranked drivers=${fullQueueData.length}`);
 
         io.to(`driver_${database}`).emit("my-rank-update", {
+            success: true,
+            database: database,
+            total_idle_drivers: fullQueueData.length,
+            drivers: fullQueueData
+        });
+
+        io.to(`dispatcher_${database}`).emit("my-rank-update", {
             success: true,
             database: database,
             total_idle_drivers: fullQueueData.length,
