@@ -573,6 +573,20 @@ class SettingController extends Controller
             $driver->online_status = $request->status;
             $driver->save();
             
+            // Notify Node socket server
+            try {
+                $database = $request->header('database');
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $database,
+                ])->post(env('NODE_SOCKET_URL') . '/driver/status-change', [
+                    'driver_id' => $driver->id,
+                    'online_status' => $driver->online_status,
+                ]);
+            } catch (\Exception $nodeEx) {
+                \Log::error("Node status change notification failed: " . $nodeEx->getMessage());
+            }
+            
             return response()->json([
                 'success' => 1,
                 'message' => "Status changed successfully"

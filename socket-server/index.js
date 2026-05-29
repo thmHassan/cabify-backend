@@ -1423,15 +1423,15 @@ io.on("connection", (socket) => {
                         );
                         const driver = rows[0];
 
-                        // Only keep in queue if they were idle+online
+                        // Only keep in queue if they were idle
                         // Busy drivers (on a job) should not show as reconnecting
-                        if (driver && driver.driving_status === "idle" && driver.online_status === "online") {
+                        if (driver && driver.driving_status === "idle") {
                             // Broadcast updated queue — is_reconnecting will be true
                             // because driverLastLocationTime is stale (no delete above)
                             await broadcastFullQueueToDrivers(database);
                             console.log(`[Disconnect] Driver #${driverId} marked as reconnecting in queue`);
                         } else {
-                            // Busy/offline driver — remove from queue normally
+                            // Busy driver — remove from queue normally
                             removeFromQueue(driverId, database);
                             const plotId = driver?.plot_id;
                             if (plotId) broadcastUpdatedQueue(plotId, database);
@@ -3866,6 +3866,129 @@ app.post("/waiting-driver", async (req, res) => {
     }
     catch (error) {
         console.error("Waiting Driver Error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+app.post("/driver/status-change", async (req, res) => {
+    try {
+        const { driver_id, online_status } = req.body;
+        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+
+        if (!driver_id || !online_status || !dbName) {
+            return res.status(400).json({ success: false, message: "Missing required fields" });
+        }
+
+        console.log(`[REST] Driver #${driver_id} status change request to ${online_status} on ${dbName}`);
+
+        const db = getConnection(`tenant${dbName}`);
+
+        if (online_status === "offline") {
+            // Do NOT remove immediately! Start 15-minute grace period instead.
+            if (driverDisconnectTimers.has(driver_id.toString())) {
+                clearTimeout(driverDisconnectTimers.get(driver_id.toString()));
+                driverDisconnectTimers.delete(driver_id.toString());
+            }
+
+            console.log(`[REST] Driver #${driver_id} went offline — starting ${DISCONNECT_GRACE_MS / 60000}min grace period`);
+
+            // Start grace timer — fires after 15 minutes if they don't go online
+            const timer = setTimeout(async () => {
+                driverDisconnectTimers.delete(driver_id.toString());
+
+                // Check if driver went online again in the database
+                try {
+                    const [rows] = await db.query(
+                        "SELECT online_status, plot_id, name FROM drivers WHERE id = ? LIMIT 1",
+                        [driver_id]
+                    );
+                    const driver = rows[0];
+
+                    if (driver && driver.online_status === "online") {
+                        console.log(`[GraceTimer] Driver #${driver_id} went online again — skip offline cleanup`);
+                        return;
+                    }
+
+                    console.log(`[GraceTimer] Driver #${driver_id} — manual offline grace period expired, cleaning up`);
+
+                    driverLastLocationTime.delete(driver_id.toString());
+                    removeFromQueue(driver_id, dbName);
+
+                    const plotId = driver?.plot_id;
+                    if (plotId) broadcastUpdatedQueue(plotId, dbName);
+                    await broadcastFullQueueToDrivers(dbName);
+
+                    const offlineData = {
+                        driver_id: driver_id,
+                        driver_name: driver?.name || "Driver",
+                        online_status: "offline",
+                        driving_status: "idle"
+                    };
+
+                    io.to(`dispatcher_${dbName}`).emit("driver-offline-event", offlineData);
+                    io.to(`admin_${dbName}`).emit("driver-offline-event", offlineData);
+                    io.to(`client_${dbName}`).emit("driver-offline-event", offlineData);
+                } catch (err) {
+                    console.error(`[GraceTimer] Manual offline cleanup error for #${driver_id}:`, err.message);
+                }
+            }, DISCONNECT_GRACE_MS);
+
+            driverDisconnectTimers.set(driver_id.toString(), timer);
+
+            // Broadcast the queue immediately — they will show as "Reconnecting..."
+            await broadcastFullQueueToDrivers(dbName);
+
+        } else if (online_status === "online") {
+            // Cancel grace timer if running
+            if (driverDisconnectTimers.has(driver_id.toString())) {
+                clearTimeout(driverDisconnectTimers.get(driver_id.toString()));
+                driverDisconnectTimers.delete(driver_id.toString());
+                console.log(`[REST] Driver #${driver_id} went online — cancelled grace timer`);
+            }
+
+            // If going online, get driver details and add to queue if idle
+            const [rows] = await db.query(
+                `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name 
+                 FROM drivers d
+                 LEFT JOIN plots p ON d.plot_id = p.id
+                 WHERE d.id = ? LIMIT 1`,
+                [driver_id]
+            );
+
+            if (rows.length > 0) {
+                const driver = rows[0];
+                driverLastLocationTime.set(driver_id.toString(), Date.now());
+
+                if (driver.driving_status === "idle") {
+                    const plotId = driver.plot_id;
+                    const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+                    const plotKey = plotId ? `${plotId}_${dbName}` : null;
+                    const rank = plotKey ? getOrAssignRank(plotKey, driver_id) : "-";
+
+                    const emitData = {
+                        driver_id: driver_id,
+                        driver_name: driver.name,
+                        driverName: driver.name,
+                        plot: plotId ?? "Unassigned",
+                        plot_name: plotName,
+                        rank: rank,
+                        online_status: "online"
+                    };
+
+                    io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", emitData);
+                    io.to(`admin_${dbName}`).emit("waiting-driver-event", emitData);
+                    io.to(`client_${dbName}`).emit("waiting-driver-event", emitData);
+                    
+                    if (plotId) broadcastUpdatedQueue(plotId, dbName);
+                }
+            }
+
+            await broadcastFullQueueToDrivers(dbName);
+        }
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("Status Change REST Error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
