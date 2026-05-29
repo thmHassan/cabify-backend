@@ -251,13 +251,33 @@ const broadcastFullQueueToDrivers = async (database) => {
     try {
         const db = getConnection(`tenant${database}`);
 
-        const [idleDrivers] = await db.query(
-            `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name,
+        // Get all driver IDs currently in the queue snapshot for this database
+        const queuedDriverIds = [];
+        for (const [plotKey, queue] of plotDriverQueues.entries()) {
+            if (plotKey.endsWith(`_${database}`) && queue) {
+                queue.forEach(d => {
+                    if (d.driver_id) {
+                        queuedDriverIds.push(d.driver_id.toString());
+                    }
+                });
+            }
+        }
+
+        let query = `
+            SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name,
                     d.latitude, d.longitude
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
-             WHERE d.driving_status = 'idle' AND d.online_status = 'online'`
-        );
+             WHERE (d.driving_status = 'idle' AND d.online_status = 'online')
+        `;
+        const queryParams = [];
+
+        if (queuedDriverIds.length > 0) {
+            query += ` OR (d.id IN (?))`;
+            queryParams.push(queuedDriverIds);
+        }
+
+        const [idleDrivers] = await db.query(query, queryParams);
 
         const now = Date.now();
 
@@ -274,9 +294,9 @@ const broadcastFullQueueToDrivers = async (database) => {
                 const secondsSinceUpdate = Math.floor((now - lastUpdate) / 1000);
 
                 const timeSince = now - lastUpdate;
-                const isReconnecting = lastUpdate > 0
+                const isReconnecting = (lastUpdate > 0
                     && timeSince > RECONNECTING_THRESHOLD_MS
-                    && timeSince < LOCATION_TIMEOUT_MS;
+                    && timeSince < LOCATION_TIMEOUT_MS) || (driver.online_status === 'offline');
 
                 return {
                     driver_id: driver.id,
@@ -287,7 +307,7 @@ const broadcastFullQueueToDrivers = async (database) => {
                     latitude: driver.latitude,
                     longitude: driver.longitude,
                     rank: entry.rank,
-                    is_reconnecting: isReconnecting,
+                    is_reconnecting: !!isReconnecting,
                     last_location_update_seconds: secondsSinceUpdate,
                     display_name: isReconnecting
                         ? `Reconnecting... ${driver.name} - Rank ${entry.rank}`
@@ -314,6 +334,7 @@ const broadcastFullQueueToDrivers = async (database) => {
         console.error("[FullQueue] Error:", err.message);
     }
 };
+
 const autoDispatchRide = async ({
     bookingId,
     tenantDb,
@@ -1078,13 +1099,88 @@ io.on("connection", (socket) => {
                     && (Date.now() - prevTime) > RECONNECTING_THRESHOLD_MS
                     && (Date.now() - prevTime) < LOCATION_TIMEOUT_MS;
 
+                const incomingOnlineStatus = dataArray.online_status;
+
+                if (incomingOnlineStatus === 'offline') {
+                    const driverIdStr = String(driverIdFromData);
+                    const dbForOffline = dataArray.database || socket.handshake.query.database;
+
+                    console.log(`[LocationEvent] Driver #${driverIdStr} sent online_status=offline — starting grace`);
+
+                    if (driverDisconnectTimers.has(driverIdStr)) {
+                        clearTimeout(driverDisconnectTimers.get(driverIdStr));
+                        driverDisconnectTimers.delete(driverIdStr);
+                    }
+
+                    if (dbForOffline) {
+                        broadcastFullQueueToDrivers(dbForOffline).catch(() => { });
+                    }
+
+                    const timer = setTimeout(async () => {
+                        driverDisconnectTimers.delete(driverIdStr);
+
+                        if (driverSockets.has(driverIdStr)) {
+                            try {
+                                const db = getConnection(`tenant${dbForOffline}`);
+                                const [rows] = await db.query(
+                                    "SELECT online_status FROM drivers WHERE id = ? LIMIT 1",
+                                    [driverIdStr]
+                                );
+                                if (rows[0]?.online_status === 'online') {
+                                    console.log(`[ManualOfflineTimer] Driver #${driverIdStr} back online — skip`);
+                                    return;
+                                }
+                            } catch (e) { /* continue */ }
+                        }
+
+                        console.log(`[ManualOfflineTimer] Driver #${driverIdStr} — grace expired, truly offline`);
+
+                        driverLastLocationTime.delete(driverIdStr);
+
+                        try {
+                            const db = getConnection(`tenant${dbForOffline}`);
+                            const [rows] = await db.query(
+                                "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
+                                [driverIdStr]
+                            );
+                            const plotId = rows[0]?.plot_id;
+
+                            removeFromQueue(driverIdStr, dbForOffline);
+                            if (plotId) broadcastUpdatedQueue(plotId, dbForOffline);
+                            await broadcastFullQueueToDrivers(dbForOffline);
+
+                            io.to(`dispatcher_${dbForOffline}`).emit("driver-offline-event", {
+                                driver_id: driverIdStr,
+                                online_status: "offline",
+                                reason: "15 min grace period expired"
+                            });
+                            io.to(`admin_${dbForOffline}`).emit("driver-offline-event", {
+                                driver_id: driverIdStr,
+                                online_status: "offline",
+                                reason: "15 min grace period expired"
+                            });
+                            io.to(`client_${dbForOffline}`).emit("driver-offline-event", {
+                                driver_id: driverIdStr,
+                                online_status: "offline",
+                                reason: "15 min grace period expired"
+                            });
+
+                        } catch (err) {
+                            console.error(`[ManualOfflineTimer] Error:`, err.message);
+                            removeFromQueue(driverIdStr, dbForOffline);
+                        }
+                    }, DISCONNECT_GRACE_MS);
+
+                    driverDisconnectTimers.set(driverIdStr, timer);
+                    return;
+                }
+
                 driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
 
-                // ← FIX: on first location after a reconnect gap, push a clean broadcast
                 if (wasReconnecting) {
                     const dbName = dataArray.database || socket.handshake.query.database;
                     if (dbName) {
-                        console.log(`[LocationUpdate] Driver #${driverIdFromData} back from reconnecting — re-broadcasting queue`);
+                        console.log(`[LocationUpdate] Driver #${driverIdFromData} back from reconnecting`);
                         broadcastFullQueueToDrivers(dbName).catch(() => { });
                     }
                 }
@@ -4862,9 +4958,14 @@ setInterval(async () => {
                 if (!driverDb) {
                     shouldRemove = true;
                     reason = "not found in database";
-                } else if (driverDb.online_status !== 'online') {
-                    shouldRemove = true;
-                    reason = `online_status is '${driverDb.online_status}'`;
+                }
+                else if (driverDb.online_status !== 'online') {
+                    if (driverDisconnectTimers.has(driverIdStr)) {
+                        console.log(`[QueueCheck] Driver #${driverIdStr} offline but grace active — skip remove`);
+                    } else {
+                        shouldRemove = true;
+                        reason = `online_status is '${driverDb.online_status}'`;
+                    }
                 } else if (driverDb.driving_status !== 'idle') {
                     shouldRemove = true;
                     reason = `driving_status is '${driverDb.driving_status}'`;
