@@ -569,14 +569,8 @@ class SettingController extends Controller
 
     public function changeStatus(Request $request){
         try{
-
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
-            if($driver->online_status == "online"){
-                $driver->online_status = "offline";
-            }
-            else{
-                $driver->online_status = "online";
-            }
+            $driver->online_status = $request->status;
             $driver->save();
             
             return response()->json([
