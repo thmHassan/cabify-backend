@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyUser;
 use App\Models\CompanyBooking;
-use Hash;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Http;
 use App\Models\TenantUser;
@@ -31,6 +31,7 @@ class UserController extends Controller
                 ],
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
+                'password' => 'nullable|string|min:6',
             ]);
 
             $dataCheck = (new TenantUser)
@@ -63,6 +64,9 @@ class UserController extends Controller
             $newUser->address = $request->address;
             $newUser->city = $request->city;
             $newUser->dispatcher_id = $request->dispatcher_id;
+            if ($request->filled('password')) {
+                $newUser->password = Hash::make($request->password);
+            }
             $newUser->save();
 
             return response()->json([

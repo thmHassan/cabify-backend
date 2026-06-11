@@ -17,6 +17,39 @@ use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
+    private function isBcryptHash(?string $hash): bool
+    {
+        if (empty($hash)) {
+            return false;
+        }
+
+        return str_starts_with($hash, '$2y$')
+            || str_starts_with($hash, '$2a$')
+            || str_starts_with($hash, '$2b$');
+    }
+
+    private function verifyRiderPassword(string $plainPassword, CompanyRider $user): bool
+    {
+        $stored = $user->password;
+
+        if ($this->isBcryptHash($stored)) {
+            return Hash::check($plainPassword, $stored);
+        }
+
+        if (empty($stored)) {
+            return false;
+        }
+
+        if (hash_equals($stored, $plainPassword)) {
+            $user->password = Hash::make($plainPassword);
+            $user->save();
+
+            return true;
+        }
+
+        return false;
+    }
+
     public function register(Request $request){
         try{
             $request->validate([
@@ -202,9 +235,14 @@ class AuthController extends Controller
             //             ->subject('Login OTP');
             // });
 
+            $requiresPasswordSetup = empty($existUser->password) || !$this->isBcryptHash($existUser->password);
+
             return response()->json([
                 'success' => 1,
-                'message' => "User exist. Please enter your password",
+                'message' => $requiresPasswordSetup
+                    ? 'User exist. Please set your password'
+                    : 'User exist. Please enter your password',
+                'requires_password_setup' => $requiresPasswordSetup,
             ], 200);
         }
         catch(\Exception $e){
@@ -232,10 +270,19 @@ class AuthController extends Controller
                 ]);
             }
 
-             if (!Hash::check($request->password, $user->password)){
+            if (empty($user->password)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Password not set. Please set your password first.',
+                    'requires_password_setup' => true,
+                ], 400);
+            }
+
+            if (!$this->verifyRiderPassword($request->password, $user)) {
                 return response()->json(['error' => 1, 'message' => 'Invalid Password']);
             }
 
+            $user->refresh();
             $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
             $user->fcm_token = $request->fcm_token;
             $user->save();
@@ -354,13 +401,22 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            if(!Hash::check($request->old_password, $user->password)){
+            if (empty($user->password)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Password not set. Please set your password first.',
+                    'requires_password_setup' => true,
+                ], 400);
+            }
+
+            if (!$this->verifyRiderPassword($request->old_password, $user)) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Incorrect old password'
                 ]);
             }
 
+            $user->refresh();
             $user->password = Hash::make($request->new_password);
             $user->save();
 

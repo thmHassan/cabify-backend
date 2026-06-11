@@ -17,7 +17,13 @@ class CompanyDriver extends Authenticatable implements JWTSubject
     use HasFactory, SoftDeletes;
 
     protected $table = "drivers";
-    protected $appends = ['rating'];
+    protected $appends = ['rating', 'profile_image_url'];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+        'otp',
+    ];
 
     public function getJWTIdentifier()
     {
@@ -33,5 +39,14 @@ class CompanyDriver extends Authenticatable implements JWTSubject
         $rating = CompanyRating::where("user_type", "driver")->where("user_id", $this->id)->avg("rating");
 
         return $rating;
+    }
+
+    public function getProfileImageUrlAttribute(): ?string
+    {
+        if (!$this->profile_image) {
+            return null;
+        }
+
+        return rtrim(config('app.url'), '/') . '/' . ltrim($this->profile_image, '/');
     }
 }

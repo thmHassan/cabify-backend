@@ -15,6 +15,7 @@ use App\Models\CompanyNotification as CompanyNotificationTable;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use App\Models\CompanyBooking;
+use App\Services\BookingDateClassificationService;
 
 class DispatcherController extends Controller
 {
@@ -168,14 +169,15 @@ class DispatcherController extends Controller
             $totalDispatcher = Dispatcher::count();
             $activeDispatcher = Dispatcher::where('status', 'active')->count();
             $ridesDispatchToday = CompanyBooking::where("booking_date", date("Y-m-d"))->where("booking_status", "completed")->count();
+            $bookingCounts = app(BookingDateClassificationService::class)->dashboardCounts();
 
             return response()->json([
                 'success' => 1,
-                'data' => [
+                'data' => array_merge([
                     'totalDispatcher' => $totalDispatcher,
                     'activeDispatcher' => $activeDispatcher,
-                    'ridesDispatchToday' => $ridesDispatchToday
-                ]
+                    'ridesDispatchToday' => $ridesDispatchToday,
+                ], $bookingCounts),
             ]);
         }
         catch(\Exception $e){

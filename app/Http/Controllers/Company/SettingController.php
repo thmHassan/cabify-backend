@@ -571,41 +571,205 @@ class SettingController extends Controller
         }
     }
 
-    public function sendNotification(Request $request)
+    public function notificationRecipients(Request $request)
     {
         try {
-            if ($request->user_type == "users") {
-                $users = CompanyUser::whereNotNUll("device_token")->get();
-            } else {
-                $query = CompanyDriver::whereNotNUll("device_token");
-                if ($request->user_type == "pending_drivers") {
-                    $query->where("status", "pending");
-                } else if ($request->user_type == "approved_drivers") {
-                    $query->where("status", "accepted");
-                } else if ($request->user_type == "rejected_drivers") {
-                    $query->where("status", "rejected");
-                }
-                if ($request->vehicle_id != NULL) {
-                    $query->where('vehicle_type', $request->vehicle_id);
-                }
-                $users = $query->get();
-            }
-            Artisan::call('app:send-notification', [
-                'title' => $request->title,
-                'body' => $request->body,
-                'users' => $users,
-                'user_type' => $request->user_type
+            $request->validate([
+                'user_type' => 'required|in:all_users,users,all_drivers,drivers,pending_drivers,approved_drivers,rejected_drivers',
             ]);
+
+            $built = $this->buildNotificationRecipientsQuery(
+                $request->user_type,
+                $request->vehicle_id,
+                $request->search
+            );
+
+            if ($built === null) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid user_type',
+                ], 422);
+            }
+
+            $perPage = $request->perPage ?? $request->per_page ?? 10;
+            $paginated = $built['query']->paginate($perPage);
+            $paginated->getCollection()->transform(function ($record) use ($built) {
+                return $this->formatNotificationRecipient($record, $built['entity_type']);
+            });
+
             return response()->json([
                 'success' => 1,
-                'message' => "Notification process started successfully"
+                'recipients' => $paginated,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    public function sendNotification(Request $request)
+    {
+        try {
+            $recipientIds = $this->collectNotificationRecipientIds($request);
+
+            if (empty($recipientIds)) {
+                $users = $this->getBroadcastNotificationRecipients($request);
+            } else {
+                $built = $this->buildNotificationRecipientsQuery(
+                    $request->user_type,
+                    $request->vehicle_id
+                );
+
+                if ($built === null) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Invalid user_type',
+                    ], 422);
+                }
+
+                $users = $built['query']->whereIn('id', $recipientIds)->get();
+
+                if ($users->count() !== count($recipientIds)) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'One or more recipients are invalid or do not match the selected user type.',
+                    ], 422);
+                }
+            }
+
+            $commandUserType = $this->isUserNotificationType($request->user_type) ? 'users' : $request->user_type;
+
+            Artisan::call('app:send-notification', [
+                'title' => $request->title,
+                'body' => $request->body,
+                'users' => $users,
+                'user_type' => $commandUserType,
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Notification process started successfully',
+                'recipient_count' => $users->count(),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function isUserNotificationType(?string $userType): bool
+    {
+        return in_array($userType, ['all_users', 'users'], true);
+    }
+
+    private function isDriverNotificationType(?string $userType): bool
+    {
+        return in_array($userType, [
+            'all_drivers',
+            'drivers',
+            'pending_drivers',
+            'approved_drivers',
+            'rejected_drivers',
+        ], true);
+    }
+
+    private function applyDriverNotificationStatusFilter($query, string $userType): void
+    {
+        if ($userType === 'pending_drivers') {
+            $query->where('status', 'pending');
+        } elseif ($userType === 'approved_drivers') {
+            $query->where('status', 'accepted');
+        } elseif ($userType === 'rejected_drivers') {
+            $query->where('status', 'rejected');
+        }
+    }
+
+    private function buildNotificationRecipientsQuery(?string $userType, $vehicleId = null, ?string $search = null): ?array
+    {
+        if ($this->isUserNotificationType($userType)) {
+            $query = CompanyUser::query()->orderBy('id', 'DESC');
+
+            if (!empty($search)) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'LIKE', '%' . $search . '%')
+                        ->orWhere('email', 'LIKE', '%' . $search . '%')
+                        ->orWhere('phone_no', 'LIKE', '%' . $search . '%');
+                });
+            }
+
+            return ['query' => $query, 'entity_type' => 'user'];
+        }
+
+        if ($this->isDriverNotificationType($userType)) {
+            $query = CompanyDriver::query()->orderBy('id', 'DESC');
+            $this->applyDriverNotificationStatusFilter($query, $userType);
+
+            if ($vehicleId !== null && $vehicleId !== '') {
+                $query->where('vehicle_type', $vehicleId);
+            }
+
+            if (!empty($search)) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'LIKE', '%' . $search . '%')
+                        ->orWhere('email', 'LIKE', '%' . $search . '%')
+                        ->orWhere('phone_no', 'LIKE', '%' . $search . '%');
+                });
+            }
+
+            return ['query' => $query, 'entity_type' => 'driver'];
+        }
+
+        return null;
+    }
+
+    private function formatNotificationRecipient($record, string $entityType): array
+    {
+        return [
+            'id' => $record->id,
+            'name' => $record->name,
+            'email' => $record->email,
+            'phone' => $record->phone_no,
+            'country_code' => $record->country_code,
+            'status' => $record->status,
+            'entity_type' => $entityType,
+        ];
+    }
+
+    private function collectNotificationRecipientIds(Request $request): array
+    {
+        $ids = [];
+
+        if ($request->filled('recipient_id')) {
+            $ids[] = (int) $request->recipient_id;
+        }
+
+        if ($request->filled('recipient_ids')) {
+            foreach ((array) $request->recipient_ids as $id) {
+                $ids[] = (int) $id;
+            }
+        }
+
+        return array_values(array_unique(array_filter($ids, fn ($id) => $id > 0)));
+    }
+
+    private function getBroadcastNotificationRecipients(Request $request)
+    {
+        if ($this->isUserNotificationType($request->user_type)) {
+            return CompanyUser::whereNotNull('device_token')->get();
+        }
+
+        $query = CompanyDriver::whereNotNull('device_token');
+        $this->applyDriverNotificationStatusFilter($query, $request->user_type);
+
+        if ($request->vehicle_id != null) {
+            $query->where('vehicle_type', $request->vehicle_id);
+        }
+
+        return $query->get();
     }
 
     public function saveAppContent(Request $request)

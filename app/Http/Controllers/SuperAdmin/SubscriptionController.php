@@ -210,24 +210,12 @@ class SubscriptionController extends Controller
 
     public function getStripeKeys(){
         try{
-            $data = Setting::orderBy("id","DESC")->first();
-
-            $stripe_secret = NULL;
-            $stripe_key = NULL;
-            $stripe_webhook_secret = NULL;
-
-            if(isset($data) && $data != NULL){
-                $stripe_secret = $data->stripe_secret;
-                $stripe_key = $data->stripe_key;
-                $stripe_webhook_secret = $data->stripe_webhook_secret;
-            }
-
             return response()->json([
                 'success' => 1,
                 'data' => [
-                    'stripe_secret' => $stripe_secret,
-                    'stripe_key' => $stripe_key,
-                    'stripe_webhook_secret' => $stripe_webhook_secret,
+                    'stripe_secret' => Setting::stripeSecret(),
+                    'stripe_key' => Setting::stripeKey(),
+                    'stripe_webhook_secret' => Setting::stripeWebhookSecret(),
                 ]
                 ]);
         }

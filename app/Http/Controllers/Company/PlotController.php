@@ -152,11 +152,28 @@ class PlotController extends Controller
         try {
             $request->validate([
                 'id' => 'required|max:255',
-                'backup_plot_array' => 'required',
+                'backup_plot_array' => 'nullable|array',
             ]);
 
-            $plot = CompanyPlot::where("id", $request->id)->first();
-            $plot->backup_plots = $request->backup_plot_array;
+            $plot = CompanyPlot::where('id', $request->id)->first();
+
+            if (!$plot) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Plot not found',
+                ], 404);
+            }
+
+            $backupPlots = $request->input('backup_plot_array', []);
+            if (is_string($backupPlots)) {
+                $decoded = json_decode($backupPlots, true);
+                $backupPlots = is_array($decoded) ? $decoded : [];
+            }
+
+            $plot->backup_plots = array_values(array_filter(
+                $backupPlots,
+                fn ($id) => $id !== null && $id !== ''
+            ));
             $plot->save();
 
             return response()->json([

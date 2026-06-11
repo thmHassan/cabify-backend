@@ -19,6 +19,7 @@ use App\Http\Controllers\Company\DocumentTypeController;
 use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeController;
 use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use App\Http\Controllers\Company\SettingController;
+use App\Http\Controllers\Company\ContactUsController;
 use App\Http\Controllers\Company\SubCompanyController;
 use App\Http\Controllers\Company\AccountController;
 use App\Http\Controllers\Company\TicketController;
@@ -58,6 +59,10 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 Broadcast::routes([
     'middleware' => ['jwt.auth'], // VERY IMPORTANT
 ]);
+
+Route::get('/test', function () {
+    return response()->json(['message' => 'Hello World']);
+});
 
 Route::get('/test-notification', [CompanyController::class, 'sendNotification']);
 Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
@@ -171,6 +176,13 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::post('/company/create-driver', [DriverController::class, 'createDriver']);
     Route::post('/company/edit-driver', [DriverController::class, 'editDriver']);
     Route::get('/company/edit-driver', [DriverController::class, 'getEditDriver']);
+    
+    Route::get('/company/edit-driver/driver-profile-image-approval-status', [DriverController::class, 'driverProfileImageApprovalStatus']);
+    Route::post('/company/edit-driver/driver-profile-image-approval', [DriverController::class, 'submitDriverProfileImageApproval']);
+    Route::get('/company/edit-driver/driver-profile-image-approval-list', [DriverController::class, 'driverProfileImageApprovalList']);
+    Route::post('/company/edit-driver/approve-driver-profile-image-approval', [DriverController::class, 'approveDriverProfileImageApproval']);
+    Route::post('/company/edit-driver/reject-driver-profile-image-approval', [DriverController::class, 'rejectDriverProfileImageApproval']);
+
     Route::get('/company/list-driver', [DriverController::class, 'listDriver']);
     Route::get('/company/delete-driver', [DriverController::class, 'deleteDriver']);
     Route::get('/company/change-driver-status', [DriverController::class, 'changeDriverStatus']);
@@ -183,6 +195,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/delete-driver-document', [DriverController::class, 'deleteDriverDocument']);
     Route::get('/company/driver-ride-history', [DriverController::class, 'driverRideHistory']);
     Route::post('/company/send-driver-notification', [DriverController::class, 'sendDriverNotification']);
+    Route::post('/company/send-driver-message', [DriverController::class, 'sendDriverMessage']);
+    Route::post('/company/logout-driver', [DriverController::class, 'logoutDriver']);
     Route::get('/company/pending-document-list', [DriverController::class, 'pendingDocumentList']);
     Route::get('/company/driver/total-earnings', [DriverController::class, 'getDriverEarnings']);
 
@@ -229,7 +243,12 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::post('/company/stripe-information', [SettingController::class, 'saveStripeInformation']);
     Route::get('/company/third-party-information', [SettingController::class, 'thirdPartyInformation']);
     Route::post('/company/third-party-information', [SettingController::class, 'saveThirdPartyInformation']);
+    Route::get('/company/notification-recipients', [SettingController::class, 'notificationRecipients']);
     Route::post('/company/send-notification', [SettingController::class, 'sendNotification']);
+    Route::get('/company/contact-us-list', [ContactUsController::class, 'listContactUs']);
+    Route::get('/company/contact-us', [ContactUsController::class, 'getContactUs']);
+    Route::post('/company/create-contact-us', [ContactUsController::class, 'createContactUs']);
+    Route::post('/company/contact-us-response', [ContactUsController::class, 'respondContactUs']);
     Route::post('/company/save-app-content', [SettingController::class, 'saveAppContent']);
     Route::get('/company/get-app-content', [SettingController::class, 'getAppContent']);
     Route::post('/company/set-dispatch-system', [SettingController::class, 'setDispatchSystem']);
@@ -302,7 +321,6 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/notification-list', [DriverSettingController::class, 'notificationList']);
         Route::get('/driver/get-purchase-package', [DriverSettingController::class, 'getPurchasePackage']);
 
-        Route::post('/driver/create-contact-us', [DriverSettingController::class, 'contactUs']);
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
@@ -327,6 +345,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/rate-ride', [DriverBookingController::class, 'rateRide']);
         Route::post('/driver/cancel-confirm-ride', [DriverBookingController::class, 'cancelConfirmRide']);
         Route::post('/driver/accept-ride', [DriverBookingController::class, 'acceptRide']);
+        Route::post('/driver/reject-ride', [DriverBookingController::class, 'rejectRide']);
         Route::get('/driver/current-ride', [DriverBookingController::class, 'currentRide']);
         Route::get('/driver/arrived-status', [DriverBookingController::class, 'arrivedStatus']);
         Route::get('/driver/waiting-time', [DriverBookingController::class, 'waitingTime']);

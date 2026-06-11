@@ -533,6 +533,64 @@ class BookingController extends Controller
         }
     }
 
+    public function rejectRide(Request $request)
+    {
+        try {
+            $request->validate([
+                'ride_id' => 'required',
+            ]);
+
+            $driverId = auth('driver')->user()->id;
+            $booking = CompanyBooking::where('id', $request->ride_id)->first();
+
+            if (!isset($booking) || $booking == null) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found',
+                ], 404);
+            }
+
+            if ($booking->booking_status !== 'pending') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Ride is no longer available',
+                ], 400);
+            }
+
+            if ((string) $booking->driver !== (string) $driverId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'You are not assigned to this ride',
+                ], 400);
+            }
+
+            $response = Http::withHeaders([
+                'database' => $request->header('database'),
+                'Accept' => 'application/json',
+            ])->post(env('NODE_SOCKET_URL') . '/bookings/' . $booking->id . '/auto-dispatch/reject', [
+                'driver_id' => $driverId,
+            ]);
+
+            if (!$response->successful()) {
+                $message = $response->json('message') ?? 'Failed to process ride rejection';
+                return response()->json([
+                    'error' => 1,
+                    'message' => $message,
+                ], $response->status());
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride rejected successfully',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function currentRide(Request $request)
     {
         try {

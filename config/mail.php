@@ -46,6 +46,12 @@ return [
             'local_domain' => env('MAIL_EHLO_DOMAIN'),
         ],
 
+        'zeptomail' => [
+            'transport' => 'zeptomail',
+            'token' => env('ZEPTOMAIL_TOKEN'),
+            'endpoint' => env('ZEPTOMAIL_ENDPOINT', 'https://api.zeptomail.com/v1.1/email'),
+        ],
+
         'ses' => [
             'transport' => 'ses',
         ],

@@ -19,9 +19,16 @@ use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
 use App\Models\CompanyDriver;
 use App\Models\DriverPackage;
+use App\Models\Setting;
+use App\Services\BookingDateClassificationService;
 
 class BookingController extends Controller
 {
+    public function __construct(
+        private readonly BookingDateClassificationService $bookingDateClassification
+    ) {
+    }
+
     public function getPlot(Request $request)
     {
         try {
@@ -158,135 +165,72 @@ class BookingController extends Controller
             }
 
             if (isset($request->multi_booking) && $request->multi_booking == "yes") {
-                $dayArray = array_map('trim', explode(',', $request->multi_days));
-                $startDate = Carbon::parse($request->start_at);
-                $endDate = Carbon::parse($request->end_at);
+                $request->validate([
+                    'start_at' => 'required',
+                    'end_at' => 'required|after_or_equal:start_at',
+                    'multi_days' => 'required',
+                ]);
 
-                if(isset($request->driver) && $request->driver != NULL){
+                $dayArray = $this->bookingDateClassification->normalizeMultiDays($request->multi_days);
+                $occurrenceDates = $this->bookingDateClassification->generateOccurrenceDates(
+                    $request->start_at,
+                    $request->end_at,
+                    $dayArray
+                );
+
+                if (empty($occurrenceDates)) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'No booking dates matched the selected weekdays within the date range.',
+                    ], 422);
+                }
+
+                if (isset($request->driver) && $request->driver != NULL) {
                     $driver = CompanyDriver::where("id", $request->driver)->first();
                     $companySetting = CompanySetting::orderBy("id", "DESC")->first();
                 }
 
-                for ($date = $startDate; $date->lte($endDate); $date->addDay()) {
+                $multiDaysStored = $this->formatMultiDaysForStorage($request->multi_days);
+                $createdBookings = [];
 
-                    if (in_array($date->format('D'), $dayArray)) {
+                foreach ($occurrenceDates as $occurrenceDate) {
+                    if (isset($request->driver) && $request->driver != NULL && $alertMessage == NULL) {
+                        $bookingTime = Carbon::parse($request->pickup_time);
+                        $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
+                        $endTime = $bookingTime->copy()->addHour()->format('H:i:s');
+                        $existingBooking = CompanyBooking::where("driver", $request->driver)
+                            ->whereDate('booking_date', $occurrenceDate)
+                            ->whereBetween('pickup_time', [$startTime, $endTime])
+                            ->first();
 
-                        if (isset($request->driver) && $request->driver != NULL && $alertMessage == NULL) {
-                            $bookingTime = Carbon::parse($request->pickup_time);
-                            $startTime = $bookingTime->copy()->subHour()->format('H:i:s');
-                            $endTime = $bookingTime->copy()->addHour()->format('H:i:s');
-                            $existingBooking = CompanyBooking::where("driver", $request->driver)->whereDate('booking_date', $date)->whereBetween('pickup_time', [$startTime, $endTime])->first();
-
-                            if ($existingBooking && $alertMessage == NULL) {
-                                $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
-                            }
-                        }
-
-                        $existUser = CompanyUser::where("phone_no", $request->phone_no)->first();
-                        if(!isset($existUser) || $existUser == NULL){
-                            $existUser = new CompanyUser;
-                            $existUser->name = $request->name;
-                            $existUser->email = $request->email;
-                            $existUser->phone_no = $request->phone_no;
-                            $existUser->save();                        
-                        }
-
-                        $newBooking = new CompanyBooking;
-                        $newBooking->booking_id = "RD" . strtoupper(uniqid());
-                        $newBooking->sub_company = $request->sub_company;
-                        $newBooking->pickup_time = $request->pickup_time;
-                        $newBooking->booking_date = $date->toDateString();
-                        $newBooking->booking_type = $request->booking_type;
-                        $newBooking->pickup_point = $request->pickup_point;
-                        $newBooking->pickup_location = $request->pickup_location;
-                        $newBooking->destination_point = $request->destination_point;
-                        $newBooking->destination_location = $request->destination_location;
-                        $newBooking->via_point = json_encode($request->via_point);
-                        $newBooking->via_location = json_encode($request->via_location);
-                        $newBooking->user_id = isset($existUser) ? $existUser->id : NULL;
-                        $newBooking->name = $request->name;
-                        $newBooking->email = $request->email;
-                        $newBooking->phone_no = $request->phone_no;
-                        $newBooking->tel_no = $request->tel_no;
-                        $newBooking->journey_type = $request->journey_type;
-                        $newBooking->account = $request->account;
-                        $newBooking->vehicle = $request->vehicle;
-                        $newBooking->driver = $request->driver;
-                        $newBooking->passenger = $request->passenger;
-                        $newBooking->luggage = $request->luggage;
-                        $newBooking->hand_luggage = $request->hand_luggage;
-                        $newBooking->special_request = $request->special_request;
-                        $newBooking->payment_reference = $request->payment_reference;
-                        $newBooking->booking_system = $request->booking_system;
-                        $newBooking->parking_charge = $request->parking_charge; 
-                        $newBooking->waiting_charge = $request->waiting_charge;
-                        $newBooking->ac_fares = $request->ac_fares;
-                        $newBooking->return_ac_fares = $request->return_ac_fares;
-                        $newBooking->ac_parking_charge = $request->ac_parking_charge;
-                        $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
-                        $newBooking->extra_charge = $request->extra_charge;
-                        $newBooking->toll = $request->toll;
-                        $newBooking->booking_status = 'pending';
-                        $newBooking->distance = $distance;
-                        $newBooking->booking_amount = $request->booking_amount;
-                        $newBooking->recommended_amount = $request->booking_amount;
-                        $newBooking->offered_amount = $request->booking_amount;
-                        $newBooking->dispatcher_id = $request->dispatcher_id;
-                        $newBooking->start_at = $request->start_at;
-                        $newBooking->end_at = $request->end_at;
-                        $newBooking->payment_method = $request->payment_method;
-                        $newBooking->save();
-
-                        if(isset($request->driver) && $request->driver != NULL){
-
-                            if ($companySetting->package_type == "ride_count_price") {
-                                $driver->ride_count_price -= 1;
-                                $driver->save();
-                            }
-                            if ($companySetting->package_type == "per_ride_commission_topup") {
-                                $checkAmount = $companySetting->package_amount;
-                                $driver->wallet_balance -= $checkAmount;
-                                $driver->save();
-    
-                                $wallet = new WalletTransaction;
-                                $wallet->user_type = "driver";
-                                $wallet->user_id = $driver->id;
-                                $wallet->type = 'deduct';
-                                $wallet->amount = $checkAmount;
-                                $wallet->comment = "Per ride booking deduction";
-                                $wallet->save();
-                            }
+                        if ($existingBooking && $alertMessage == NULL) {
+                            $alertMessage = 'All bookings are done but Driver already has a booking within 1 hour of this time, Please confirm that';
                         }
                     }
+
+                    $existUser = CompanyUser::where("phone_no", $request->phone_no)->first();
+                    if (!isset($existUser) || $existUser == NULL) {
+                        $existUser = new CompanyUser;
+                        $existUser->name = $request->name;
+                        $existUser->email = $request->email;
+                        $existUser->phone_no = $request->phone_no;
+                        $existUser->save();
+                    }
+
+                    $newBooking = $this->buildBookingFromRequest($request, $occurrenceDate, $existUser, $distance);
+                    $newBooking->multi_booking = 'yes';
+                    $newBooking->multi_days = $multiDaysStored;
+                    $newBooking->save();
+
+                    if (isset($request->driver) && $request->driver != NULL) {
+                        $this->applyDriverBookingDeductions($driver, $companySetting);
+                    }
+
+                    $createdBookings[] = $newBooking;
                 }
 
-                if (isset($newBooking) && isset($request->driver) && $request->driver != NULL) {
-                    Http::withHeaders([
-                        'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                    ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
-                        'drivers' => [$newBooking->driver],
-                        'booking' => [
-                            'id' => $newBooking->id,
-                            'booking_id' => $newBooking->booking_id,
-                            'pickup_point' => $newBooking->pickup_point,
-                            'destination_point' => $newBooking->destination_point,
-                            'offered_amount' => $newBooking->offered_amount,
-                            'distance' => $newBooking->distance,
-                            'user_id' => $newBooking->user_id,
-                            'user_name' => $newBooking->name,
-                            'user_profile' => isset($newBooking->userDetail->profile_image) ? $newBooking->userDetail->profile_image : NULL,
-                            'pickup_location' => $newBooking->pickup_location,
-                            'destination_location' => $newBooking->destination_location,
-                            'note' => $newBooking->note,
-                            'pickup_time' => (isset($request->pickup_time) && $request->pickup_time != NULL) ? $request->pickup_time : NULL,
-                            'booking_date' => (isset($date) && $date != NULL) ? $date : NULL,
-                        ]
-                    ]);
-
-                    $sendRide = new CompanySendNewRide;
-                    $sendRide->booking_id = $newBooking->id;
-                    $sendRide->driver_id = $newBooking->driver;
-                    $sendRide->save();
+                foreach ($createdBookings as $createdBooking) {
+                    $this->notifyBookingCreated($createdBooking, $request, true);
                 }
             } else {
                 if ($request->pickup_time != 'asap' && $request->driver != NULL) {
@@ -326,130 +270,17 @@ class BookingController extends Controller
                     $companySetting = CompanySetting::orderBy("id", "DESC")->first();
                 }
 
-                $newBooking = new CompanyBooking;
-                $newBooking->booking_id = "RD" . strtoupper(uniqid());
-                $newBooking->sub_company = $request->sub_company;
+                $newBooking = $this->buildBookingFromRequest($request, $request->booking_date, $existUser, $distance);
                 $newBooking->multi_booking = $request->multi_booking;
                 $newBooking->multi_days = $request->multi_days;
-                $newBooking->pickup_time = $request->pickup_time;
-                $newBooking->booking_date = $request->booking_date;
-                $newBooking->booking_type = $request->booking_type;
-                $newBooking->pickup_point = $request->pickup_point;
-                $newBooking->pickup_location = $request->pickup_location;
-                $newBooking->pickup_plot_id = $request->pickup_plot_id;
-                $newBooking->destination_point = $request->destination_point;
-                $newBooking->destination_location = $request->destination_location;
-                $newBooking->destination_plot_id = $request->destination_plot_id;
-                $newBooking->via_point = json_encode($request->via_point);
-                $newBooking->via_location = json_encode($request->via_location);
-                $newBooking->user_id = isset($existUser) ? $existUser->id : NULL;
-                $newBooking->name = $request->name;
-                $newBooking->email = $request->email;
-                $newBooking->phone_no = $request->phone_no;
-                $newBooking->tel_no = $request->tel_no;
-                $newBooking->journey_type = $request->journey_type;
-                $newBooking->account = $request->account;
-                $newBooking->vehicle = $request->vehicle;
-                $newBooking->driver = $request->driver;
-                $newBooking->passenger = $request->passenger;
-                $newBooking->luggage = $request->luggage;
-                $newBooking->hand_luggage = $request->hand_luggage;
-                $newBooking->special_request = $request->special_request;
-                $newBooking->payment_reference = $request->payment_reference;
-                $newBooking->booking_system = $request->booking_system;
-                $newBooking->parking_charge = $request->parking_charge;
-                $newBooking->waiting_charge = $request->waiting_charge;
-                $newBooking->ac_fares = $request->ac_fares;
-                $newBooking->return_ac_fares = $request->return_ac_fares;
-                $newBooking->ac_parking_charge = $request->ac_parking_charge;
-                $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
-                $newBooking->extra_charge = $request->extra_charge;
-                $newBooking->toll = $request->toll;
-                $newBooking->booking_status = 'pending';
-                $newBooking->distance = $distance;
-                $newBooking->booking_amount = $request->booking_amount;
-                $newBooking->recommended_amount = $request->booking_amount;
-                $newBooking->offered_amount = $request->booking_amount;
-                $newBooking->dispatcher_id = $request->dispatcher_id;
                 $newBooking->week = $request->week;
-                $newBooking->start_at = $request->start_at;
-                $newBooking->end_at = $request->end_at;
-                $newBooking->payment_method = $request->payment_method;
                 $newBooking->save();
 
                 if(isset($request->driver) && $request->driver != NULL){
-                    if ($companySetting->package_type == "ride_count_price") {
-                        $driver->ride_count_price -= 1;
-                        $driver->save();
-                    }
-                    if ($companySetting->package_type == "per_ride_commission_topup") {
-                        $checkAmount = $companySetting->package_amount;
-                        $driver->wallet_balance -= $checkAmount;
-                        $driver->save();
-
-                        $wallet = new WalletTransaction;
-                        $wallet->user_type = "driver";
-                        $wallet->user_id = $driver->id;
-                        $wallet->type = 'deduct';
-                        $wallet->amount = $checkAmount;
-                        $wallet->comment = "Per ride booking deduction";
-                        $wallet->save();
-                    }
+                    $this->applyDriverBookingDeductions($driver, $companySetting);
                 }
 
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
-                            'booking_id' => $newBooking->id,
-                            'tenantDb' => $request->header('database'),
-                        ]);
-
-                if (!isset($request->driver) || $request->driver == NULL) {
-                    $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
-                    if ($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base") {
-                        // AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                        $url = "https://backend.cabifyit.com/socket-api/bookings/".$newBooking->id."/start-auto-dispatch";
-                        Http::withHeaders([
-                            'database' => $request->header('database'),
-                            'Accept' => 'application/json',
-                        ])->post($url);
-                    } elseif ($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base") {
-                        SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
-                    } elseif ($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver") {
-                        // AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
-                        $url = "https://backend.cabifyit.com/socket-api/bookings/".$newBooking->id."/start-nearest-dispatch";
-                        Http::withHeaders([
-                            'database' => $request->header('database'),
-                            'Accept' => 'application/json',
-                        ])->post($url);
-                    }
-                }
-                else{
-                    Http::withHeaders([
-                        'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                    ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
-                        'drivers' => [$newBooking->driver],
-                        'booking' => [
-                            'id' => $newBooking->id,
-                            'booking_id' => $newBooking->booking_id,
-                            'pickup_point' => $newBooking->pickup_point,
-                            'destination_point' => $newBooking->destination_point,
-                            'offered_amount' => $newBooking->offered_amount,
-                            'distance' => $newBooking->distance,
-                            'user_id' => $newBooking->user_id,
-                            'user_name' => $newBooking->name,
-                            'user_profile' => $newBooking->userDetail->profile_image,
-                            'pickup_location' => $newBooking->pickup_location,
-                            'destination_location' => $newBooking->destination_location,
-                            'note' => $newBooking->note,
-                        ]
-                    ]);
-
-                    $sendRide = new CompanySendNewRide;
-                    $sendRide->booking_id = $newBooking->id;
-                    $sendRide->driver_id = $newBooking->driver;
-                    $sendRide->save();
-                }
+                $this->notifyBookingCreated($newBooking, $request, false);
             }
 
             return response()->json([
@@ -475,24 +306,30 @@ class BookingController extends Controller
             ]);
 
             if (isset(auth('tenant')->user()->id)) {
-                $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
+                $tenantRecord = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
             } else {
-                $data = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+                $tenantRecord = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             }
 
-            $map_api = json_decode($data->data)->maps_api;
-            $map = json_decode($data->data)->map;
+            $tenantData = json_decode($tenantRecord->data);
+            $map_api = $tenantData->maps_api ?? null;
+            $map = $tenantData->map ?? null;
 
-            $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
-            $barikoi_key = $data->barikoi_key;
+            $barikoi_key = Setting::barikoiKey();
 
             if (isset($map) && $map == "enable") {
-                if (isset($map_api) && $map_api != NULL) {
-                    $google_map_key = $data->google_map_key;
-                }
+                $google_map_key = Setting::googleMapKey();
             } else {
-                $data = CompanySetting::orderBy("id", "DESC")->first();
-                $google_map_key = $data->google_api_keys;
+                $companySettings = CompanySetting::orderBy("id", "DESC")->first();
+                $google_map_key = $companySettings?->google_api_keys ?: Setting::googleMapKey();
+            }
+
+            if (in_array($map_api, ['google', 'both'], true) && empty($google_map_key)) {
+                throw new \Exception('Google Maps API key is not configured.');
+            }
+
+            if ($map_api === 'barikoi' && empty($barikoi_key)) {
+                throw new \Exception('Barikoi API key is not configured.');
             }
 
             if (isset($map_api) && $map_api == "barikoi") {
@@ -517,9 +354,12 @@ class BookingController extends Controller
                     $response = curl_exec($ch);
 
                     if (curl_errno($ch)) {
-                        echo 'cURL Error: ' . curl_error($ch);
+                        throw new \Exception('Barikoi route API error: ' . curl_error($ch));
                     } else {
                         $data = json_decode($response, true);
+                        if (empty($data['routes'][0]['distance'])) {
+                            throw new \Exception('Unable to calculate route distance. Please check pickup, destination, and Barikoi API key.');
+                        }
                         $route = $data['routes'][0];
                         $polyline = $route['geometry'];
                         $distance = $route['distance'];
@@ -553,9 +393,12 @@ class BookingController extends Controller
                         $response = curl_exec($ch);
 
                         if (curl_errno($ch)) {
-                            echo 'cURL Error: ' . curl_error($ch);
+                            throw new \Exception('Barikoi route API error: ' . curl_error($ch));
                         } else {
                             $data = json_decode($response, true);
+                            if (empty($data['routes'][0]['distance'])) {
+                                throw new \Exception('Unable to calculate route distance for via points. Please check locations and Barikoi API key.');
+                            }
                             $route = $data['routes'][0];
                             $polyline = $route['geometry'];
                             $api_distance = $route['distance'];
@@ -574,8 +417,17 @@ class BookingController extends Controller
 
                     $response = file_get_contents($url);
                     $data = json_decode($response, true);
-
-                    $distance = $data['rows'][0]['elements'][0]['distance']['value'];
+                    if (($data['status'] ?? '') !== 'OK') {
+                        $status = $data['status'] ?? 'UNKNOWN';
+                        $errorMessage = $data['error_message'] ?? '';
+                        throw new \Exception("Unable to calculate route distance (Google: {$status}). {$errorMessage}");
+                    }
+                    $element = $data['rows'][0]['elements'][0] ?? null;
+                    if (empty($element['distance']['value']) || ($element['status'] ?? '') !== 'OK') {
+                        $status = $element['status'] ?? ($data['status'] ?? 'UNKNOWN');
+                        throw new \Exception("Unable to calculate route distance (Google: {$status}). Please verify locations and API key.");
+                    }
+                    $distance = $element['distance']['value'];
                 } else {
                     $distance = 0;
                     for ($i = 0; $i <= count($request->via_point); $i++) {
@@ -594,15 +446,53 @@ class BookingController extends Controller
 
                         $response = file_get_contents($url);
                         $data = json_decode($response, true);
-                        $cDistance = $data['rows'][0]['elements'][0]['distance']['value'];
+                        if (($data['status'] ?? '') !== 'OK') {
+                            $status = $data['status'] ?? 'UNKNOWN';
+                            $errorMessage = $data['error_message'] ?? '';
+                            throw new \Exception("Unable to calculate route distance (Google: {$status}). {$errorMessage}");
+                        }
+                        $element = $data['rows'][0]['elements'][0] ?? null;
+                        if (empty($element['distance']['value']) || ($element['status'] ?? '') !== 'OK') {
+                            $status = $element['status'] ?? ($data['status'] ?? 'UNKNOWN');
+                            throw new \Exception("Unable to calculate route distance for via points (Google: {$status}).");
+                        }
+                        $cDistance = $element['distance']['value'];
                         $distance += (float) $cDistance;
                     }
                 }
             } else if (isset($map_api) && $map_api == "both") {
+                if (empty($google_map_key)) {
+                    throw new \Exception('Google Maps API key is not configured.');
+                }
+                if (!isset($request->via_point) || count($request->via_point) == 0) {
+                    $origin = "{$request->pickup_point['latitude']},{$request->pickup_point['longitude']}";
+                    $destination = "{$request->destination_point['latitude']},{$request->destination_point['longitude']}";
+                    $url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=$origin&destinations=$destination&mode=driving&units=metric&key=$google_map_key";
+                    $response = file_get_contents($url);
+                    $data = json_decode($response, true);
+                    if (($data['status'] ?? '') !== 'OK') {
+                        $status = $data['status'] ?? 'UNKNOWN';
+                        $errorMessage = $data['error_message'] ?? '';
+                        throw new \Exception("Unable to calculate route distance (Google: {$status}). {$errorMessage}");
+                    }
+                    $element = $data['rows'][0]['elements'][0] ?? null;
+                    if (empty($element['distance']['value']) || ($element['status'] ?? '') !== 'OK') {
+                        $status = $element['status'] ?? ($data['status'] ?? 'UNKNOWN');
+                        throw new \Exception("Unable to calculate route distance (Google: {$status}). Please verify locations and API key.");
+                    }
+                    $distance = $element['distance']['value'];
+                }
+            }
 
+            if (!isset($distance)) {
+                throw new \Exception('Distance could not be calculated. Please check map API configuration.');
             }
 
             $vehicle = CompanyVehicleType::where("id", $request->vehicle_id)->first();
+
+            if (!$vehicle) {
+                throw new \Exception('Vehicle type not found.');
+            }
 
             if (isset(auth('tenant')->user()->id)) {
                 $data = \DB::connection('central')->table('tenants')->where("id", auth('tenant')->user()->id)->first();
@@ -627,6 +517,9 @@ class BookingController extends Controller
                 $fromArray = $vehicle->from_array;
                 $toArray = $vehicle->to_array;
                 $priceArray = $vehicle->price_array;
+                if (empty($fromArray) || empty($toArray) || empty($priceArray)) {
+                    throw new \Exception('Vehicle pricing tiers are not configured for this vehicle type.');
+                }
                 $amount = 0;
                 $remainDistance = $cdistance;
                 for ($i = 0; $i < count($fromArray); $i++) {
@@ -641,7 +534,7 @@ class BookingController extends Controller
                         $remainDistance = 0;
                     }
                 }
-                if ($remainDistance != 0) {
+                if ($remainDistance != 0 && $i > 0 && isset($priceArray[$i - 1])) {
                     $cAmount = (float) $remainDistance * (float) $priceArray[$i - 1];
                     $amount += (float) $cAmount;
                 }
@@ -714,22 +607,37 @@ class BookingController extends Controller
     public function bookingList(Request $request)
     {
         try {
-            $query = CompanyBooking::orderBy("id", "DESC");
+            $query = CompanyBooking::orderBy('booking_date', 'DESC')->orderBy('id', 'DESC');
+
+            if ($request->filled('filter')) {
+                $query = $this->bookingDateClassification->applyFilter($query, $request->filter);
+            }
 
             if (isset($request->status) && $request->status != NULL) {
                 $query->where('booking_status', $request->status);
             }
             if (isset($request->date) && $request->date != NULL) {
-                $query->whereDate("created_at", $request->date);
+                $query->whereDate('booking_date', $request->date);
             }
             if (isset($request->dispatcher_id) && $request->dispatcher_id != NULL) {
                 $query->where("dispatcher_id", $request->dispatcher_id);
             }
-            $rides = $query->with('driverDetail')->paginate(10);
+
+            $perPage = $request->limit ?? $request->perPage ?? 10;
+            $rides = $query->with('driverDetail')->paginate($perPage);
 
             return response()->json([
                 'success' => 1,
-                'rides' => $rides
+                'rides' => $rides,
+                'data' => $rides->items(),
+                'pagination' => [
+                    'total' => $rides->total(),
+                    'page' => $rides->currentPage(),
+                    'limit' => $rides->perPage(),
+                    'total_pages' => $rides->lastPage(),
+                    'hasNext' => $rides->hasMorePages(),
+                    'hasPrev' => $rides->currentPage() > 1,
+                ],
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -778,5 +686,157 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function formatMultiDaysForStorage($multiDays): ?string
+    {
+        if (is_array($multiDays)) {
+            return implode(',', $multiDays);
+        }
+
+        return $multiDays !== null ? (string) $multiDays : null;
+    }
+
+    private function buildBookingFromRequest(Request $request, $bookingDate, CompanyUser $existUser, $distance): CompanyBooking
+    {
+        $newBooking = new CompanyBooking;
+        $newBooking->booking_id = "RD" . strtoupper(uniqid());
+        $newBooking->sub_company = $request->sub_company;
+        $newBooking->pickup_time = $request->pickup_time;
+        $newBooking->booking_date = Carbon::parse($bookingDate)->toDateString();
+        $newBooking->booking_type = $request->booking_type;
+        $newBooking->pickup_point = $request->pickup_point;
+        $newBooking->pickup_location = $request->pickup_location;
+        $newBooking->pickup_plot_id = $request->pickup_plot_id;
+        $newBooking->destination_point = $request->destination_point;
+        $newBooking->destination_location = $request->destination_location;
+        $newBooking->destination_plot_id = $request->destination_plot_id;
+        $newBooking->via_point = json_encode($request->via_point);
+        $newBooking->via_location = json_encode($request->via_location);
+        $newBooking->user_id = $existUser->id;
+        $newBooking->name = $request->name;
+        $newBooking->email = $request->email;
+        $newBooking->phone_no = $request->phone_no;
+        $newBooking->tel_no = $request->tel_no;
+        $newBooking->journey_type = $request->journey_type;
+        $newBooking->account = $request->account;
+        $newBooking->vehicle = $request->vehicle;
+        $newBooking->driver = $request->driver;
+        $newBooking->passenger = $request->passenger;
+        $newBooking->luggage = $request->luggage;
+        $newBooking->hand_luggage = $request->hand_luggage;
+        $newBooking->special_request = $request->special_request;
+        $newBooking->payment_reference = $request->payment_reference;
+        $newBooking->booking_system = $request->booking_system;
+        $newBooking->parking_charge = $request->parking_charge;
+        $newBooking->waiting_charge = $request->waiting_charge;
+        $newBooking->ac_fares = $request->ac_fares;
+        $newBooking->return_ac_fares = $request->return_ac_fares;
+        $newBooking->ac_parking_charge = $request->ac_parking_charge;
+        $newBooking->ac_waiting_charge = $request->ac_waiting_charge;
+        $newBooking->extra_charge = $request->extra_charge;
+        $newBooking->toll = $request->toll;
+        $newBooking->booking_status = 'pending';
+        $newBooking->distance = $distance;
+        $newBooking->booking_amount = $request->booking_amount;
+        $newBooking->recommended_amount = $request->booking_amount;
+        $newBooking->offered_amount = $request->booking_amount;
+        $newBooking->dispatcher_id = $request->dispatcher_id;
+        $newBooking->week = $request->week;
+        $newBooking->start_at = $request->start_at;
+        $newBooking->end_at = $request->end_at;
+        $newBooking->payment_method = $request->payment_method;
+
+        return $newBooking;
+    }
+
+    private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void
+    {
+        if ($companySetting->package_type == "ride_count_price") {
+            $driver->ride_count_price -= 1;
+            $driver->save();
+        }
+
+        if ($companySetting->package_type == "per_ride_commission_topup") {
+            $checkAmount = $companySetting->package_amount;
+            $driver->wallet_balance -= $checkAmount;
+            $driver->save();
+
+            $wallet = new WalletTransaction;
+            $wallet->user_type = "driver";
+            $wallet->user_id = $driver->id;
+            $wallet->type = 'deduct';
+            $wallet->amount = $checkAmount;
+            $wallet->comment = "Per ride booking deduction";
+            $wallet->save();
+        }
+    }
+
+    private function notifyBookingCreated(CompanyBooking $booking, Request $request, bool $alwaysBroadcast = false): void
+    {
+        $hasDriver = isset($booking->driver) && $booking->driver != NULL;
+
+        if (!$hasDriver || $alwaysBroadcast) {
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                'booking_id' => $booking->id,
+                'tenantDb' => $request->header('database'),
+            ]);
+        }
+
+        if (!$hasDriver) {
+            $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
+            if ($dispatch_system->isEmpty()) {
+                return;
+            }
+
+            if ($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base") {
+                $url = "https://backend.cabifyit.com/socket-api/bookings/" . $booking->id . "/start-auto-dispatch";
+                Http::withHeaders([
+                    'database' => $request->header('database'),
+                    'Accept' => 'application/json',
+                ])->post($url);
+            } elseif ($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base") {
+                SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $request->header('database'));
+            } elseif ($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver") {
+                $url = "https://backend.cabifyit.com/socket-api/bookings/" . $booking->id . "/start-nearest-dispatch";
+                Http::withHeaders([
+                    'database' => $request->header('database'),
+                    'Accept' => 'application/json',
+                ])->post($url);
+            }
+
+            return;
+        }
+
+        $booking->loadMissing('userDetail');
+
+        Http::withHeaders([
+            'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+        ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+            'drivers' => [$booking->driver],
+            'booking' => [
+                'id' => $booking->id,
+                'booking_id' => $booking->booking_id,
+                'pickup_point' => $booking->pickup_point,
+                'destination_point' => $booking->destination_point,
+                'offered_amount' => $booking->offered_amount,
+                'distance' => $booking->distance,
+                'user_id' => $booking->user_id,
+                'user_name' => $booking->name,
+                'user_profile' => isset($booking->userDetail->profile_image) ? $booking->userDetail->profile_image : NULL,
+                'pickup_location' => $booking->pickup_location,
+                'destination_location' => $booking->destination_location,
+                'note' => $booking->note,
+                'pickup_time' => $booking->pickup_time,
+                'booking_date' => $booking->booking_date,
+            ],
+        ]);
+
+        $sendRide = new CompanySendNewRide;
+        $sendRide->booking_id = $booking->id;
+        $sendRide->driver_id = $booking->driver;
+        $sendRide->save();
     }
 }

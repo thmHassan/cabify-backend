@@ -9,6 +9,7 @@ class CompanyPlot extends Model
 {
     use HasFactory;
 
+    protected $connection = 'tenant';
     protected $table = "plots";
 
     protected $casts = [

@@ -88,8 +88,6 @@ class CompanyController extends Controller
                 $file->move(public_path('pictures'), $filename);
             }
 
-            $setting = Setting::orderBy("id", "DESC")->first();
-
             $tenant = new Tenant();
             $tenant->id = $tenantId;
             $tenant->company_name = $request->company_name;
@@ -123,8 +121,8 @@ class CompanyController extends Controller
             $tenant->enable_smtp = $request->enable_smtp;
             $tenant->dispatcher = $request->dispatcher;
             $tenant->map = $request->map;
-            $tenant->google_api_key = (isset($request->map) && $request->map == "enable") ? $setting->google_map_key : NULL;
-            $tenant->barikoi_api_key = (isset($request->map) && $request->map == "enable") ? $setting->barikoi_key : NULL;
+            $tenant->google_api_key = (isset($request->map) && $request->map == "enable") ? Setting::googleMapKey() : NULL;
+            $tenant->barikoi_api_key = (isset($request->map) && $request->map == "enable") ? Setting::barikoiKey() : NULL;
             $tenant->push_notification = $request->push_notification;
             $tenant->usage_monitoring = $request->usage_monitoring;
             $tenant->revenue_statements = $request->revenue_statements;
@@ -402,8 +400,7 @@ class CompanyController extends Controller
 
                 if($newSubscription->deduct_type == "cash"){
                     if($existingSubscription->deduct_type == "card"){
-                        $setting = Setting::orderBy("id", "DESC")->first();
-                        Stripe::setApiKey($setting->stripe_secret);
+                        Stripe::setApiKey(Setting::stripeSecret());
 
                         StripeSubscription::update(
                             $tenant->stripe_subscription_id,
@@ -413,8 +410,7 @@ class CompanyController extends Controller
                 }
                 elseif($newSubscription->deduct_type == "card"){
                     if($existingSubscription->deduct_type == "card"){
-                        $setting = Setting::orderBy("id", "DESC")->first();
-                        Stripe::setApiKey($setting->stripe_secret);
+                        Stripe::setApiKey(Setting::stripeSecret());
 
                         StripeSubscription::update(
                             $tenant->stripe_subscription_id,
@@ -854,8 +850,15 @@ class CompanyController extends Controller
 
     public function createStripePaymentUrl(Request $request){
         try{
-            $setting = Setting::orderBy("id", "DESC")->first();
-            Stripe::setApiKey($setting->stripe_secret);
+            $stripeSecret = Setting::stripeSecret();
+            if (!$stripeSecret) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured.',
+                ], 500);
+            }
+
+            Stripe::setApiKey($stripeSecret);
             // $YOUR_DOMAIN = "http://localhost:5173/";
             $YOUR_DOMAIN = env('FRONTEND_URL');
             
@@ -941,13 +944,11 @@ class CompanyController extends Controller
 
     public function stripeWebhook(Request $request){
         try{
-            $setting = Setting::orderBy("id", "DESC")->first();
-            Stripe::setApiKey($setting->stripe_secret);
+            Stripe::setApiKey(Setting::stripeSecret());
             
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
-            $setting = Setting::orderBy("id", "DESC")->first();
-            $endpoint_secret = env("STRIPE_WEBHOOK_SECRET");
+            $endpoint_secret = Setting::stripeWebhookSecret();
 
             \Log::info("enter to webhook");
 
@@ -1495,14 +1496,11 @@ class CompanyController extends Controller
 
     public function subscriptionUpdateWebhook(Request $request){
         try{
-            
-            $setting = Setting::orderBy("id", "DESC")->first();
-            Stripe::setApiKey($setting->stripe_secret);
+            Stripe::setApiKey(Setting::stripeSecret());
             
             $payload = $request->getContent();
             $sig_header = $request->header('Stripe-Signature');
-            $setting = Setting::orderBy("id", "DESC")->first();
-            $endpoint_secret = "whsec_dzD6zqZgGUu7BP7FDqxvq0kD8sGgRqBY";
+            $endpoint_secret = Setting::stripeWebhookSecret();
 
             \Log::info("enter to webhook");
 

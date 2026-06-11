@@ -35,6 +35,7 @@ class SettingController extends Controller
             $new->user_type = 'user';
             $new->user_id = auth('rider')->user()->id;
             $new->message = $request->message;
+            $new->status = 'pending';
             $new->save();
 
             return response()->json([

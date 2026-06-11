@@ -3,18 +3,18 @@ const path = require('path');
 require('dotenv').config();
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
-// Create transporter using environment variables
+const mailPort = parseInt(process.env.MAIL_PORT, 10) || 587;
+
+// Uses same MAIL_* values as Laravel config/mail.php (ZeptoMail SMTP)
 const transporter = nodemailer.createTransport({
     host: process.env.MAIL_HOST,
-    port: parseInt(process.env.MAIL_PORT),
-    secure: false, // true for 465, false for other ports
+    port: mailPort,
+    secure: mailPort === 465,
+    requireTLS: mailPort === 587,
     auth: {
         user: process.env.MAIL_USERNAME,
-        pass: process.env.MAIL_PASSWORD
+        pass: process.env.MAIL_PASSWORD,
     },
-    tls: {
-        rejectUnauthorized: false
-    }
 });
 
 // Verify transporter configuration

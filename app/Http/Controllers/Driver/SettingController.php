@@ -132,6 +132,7 @@ class SettingController extends Controller
             $newRequest->user_type = "driver";
             $newRequest->user_id = auth('driver')->user()->id;
             $newRequest->message = $request->message;
+            $newRequest->status = 'pending';
             $newRequest->save();
             
             return response()->json([

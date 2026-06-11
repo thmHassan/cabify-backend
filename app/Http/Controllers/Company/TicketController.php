@@ -32,6 +32,20 @@ class TicketController extends Controller
             }
             $list = $query->paginate(10);
 
+            $list->getCollection()->transform(function ($ticket) {
+                $user = null;
+
+                if ($ticket->user_type === "driver") {
+                    $user = CompanyDriver::find($ticket->user_id);
+                } else {
+                    $user = CompanyUser::find($ticket->user_id);
+                }
+
+                $ticket->customer = $user?->name ?? "Unknown";
+
+                return $ticket;
+            });
+
             return response()->json([
                 'success' => 1,
                 'list' => $list
