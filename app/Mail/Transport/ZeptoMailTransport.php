@@ -21,6 +21,12 @@ class ZeptoMailTransport extends AbstractTransport
 
     protected function doSend(SentMessage $message): void
     {
+        if ($this->token === '') {
+            throw new TransportException(
+                'ZeptoMail token is not configured. Set ZEPTOMAIL_TOKEN in .env.'
+            );
+        }
+
         $email = MessageConverter::toEmail($message->getOriginalMessage());
         $payload = $this->buildPayload($email);
 
@@ -58,7 +64,9 @@ class ZeptoMailTransport extends AbstractTransport
         if ($email->getHtmlBody()) {
             $payload['htmlbody'] = $email->getHtmlBody();
         } elseif ($email->getTextBody()) {
-            $payload['htmlbody'] = nl2br(e($email->getTextBody()));
+            $payload['textbody'] = $email->getTextBody();
+        } else {
+            throw new TransportException('ZeptoMail requires email body content.');
         }
 
         if ($email->getCc()) {

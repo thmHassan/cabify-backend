@@ -612,6 +612,16 @@ class SettingController extends Controller
     public function sendNotification(Request $request)
     {
         try {
+            $request->validate([
+                'user_type' => 'required|in:all_users,users,all_drivers,drivers,pending_drivers,approved_drivers,rejected_drivers',
+                'title' => 'required|string|max:255',
+                'body' => 'required|string|max:1000',
+                'vehicle_id' => 'nullable',
+                'recipient_id' => 'nullable|integer|min:1',
+                'recipient_ids' => 'nullable|array',
+                'recipient_ids.*' => 'integer|min:1',
+            ]);
+
             $recipientIds = $this->collectNotificationRecipientIds($request);
 
             if (empty($recipientIds)) {
@@ -630,13 +640,23 @@ class SettingController extends Controller
                 }
 
                 $users = $built['query']->whereIn('id', $recipientIds)->get();
+                $foundIds = $users->pluck('id')->map(fn ($id) => (int) $id)->all();
+                $invalidIds = array_values(array_diff($recipientIds, $foundIds));
 
-                if ($users->count() !== count($recipientIds)) {
+                if (!empty($invalidIds)) {
                     return response()->json([
                         'error' => 1,
-                        'message' => 'One or more recipients are invalid or do not match the selected user type.',
+                        'message' => 'One or more recipient IDs are invalid or do not match the selected user type.',
+                        'invalid_recipient_ids' => $invalidIds,
                     ], 422);
                 }
+            }
+
+            if ($users->isEmpty()) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'No recipients found for this notification.',
+                ], 422);
             }
 
             $commandUserType = $this->isUserNotificationType($request->user_type) ? 'users' : $request->user_type;
@@ -644,7 +664,7 @@ class SettingController extends Controller
             Artisan::call('app:send-notification', [
                 'title' => $request->title,
                 'body' => $request->body,
-                'users' => $users,
+                'users' => $users->pluck('id')->implode(','),
                 'user_type' => $commandUserType,
             ]);
 
@@ -652,12 +672,15 @@ class SettingController extends Controller
                 'success' => 1,
                 'message' => 'Notification process started successfully',
                 'recipient_count' => $users->count(),
+                'recipient_ids' => $users->pluck('id')->values()->all(),
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage(),
-            ]);
+            ], 500);
         }
     }
 

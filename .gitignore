@@ -29,6 +29,6 @@ Homestead.json
 .env.production
 .phpactor.json
 auth.json
-
+*.md
 firebase.json
 socket-server/firebase/firebase.json

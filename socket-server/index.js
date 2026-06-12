@@ -11,6 +11,7 @@ const PDFDocument = require('pdfkit');
 const axios = require("axios");
 const { getConnection } = require("./db")
 const transporter = require("./utils/Emailconfig");
+const { getMailFrom } = require("./utils/Emailconfig");
 const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 
@@ -3281,10 +3282,7 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
         const emailHtml = getBookingConfirmationEmail(formattedBooking);
 
         const mailOptions = {
-            from: {
-                name: 'Cabifyit',
-                address: process.env.MAIL_FROM_ADDRESS || 'support@cabifyit.com'
-            },
+            from: getMailFrom(),
             to: booking.email,
             subject: `Booking Confirmation - ${booking.booking_id}`,
             html: emailHtml
@@ -4468,7 +4466,7 @@ app.post("/account/collect-and-email", async (req, res) => {
         `;
 
         const mailOptions = {
-            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+            from: getMailFrom(),
             to: account.email,
             subject: 'Invoice & Ride Collection Summary',
             html: htmlContent
@@ -4527,7 +4525,7 @@ app.post('/driver/send-invoice', async (req, res) => {
                 let pdfData = Buffer.concat(buffers);
 
                 const mailOptions = {
-                    from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                    from: getMailFrom(),
                     to: driver.email,
                     subject: 'Your Driver Invoice',
                     text: 'Please find attached your invoice details and completed rides.',
@@ -4610,7 +4608,7 @@ app.post('/user/send-invoice', async (req, res) => {
                 let pdfData = Buffer.concat(buffers);
 
                 const mailOptions = {
-                    from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                    from: getMailFrom(),
                     to: user.email,
                     subject: 'Your User Invoice',
                     text: 'Please find attached your invoice details and completed rides.',
@@ -4715,7 +4713,7 @@ app.post('/account/send-invoice', async (req, res) => {
                 if (account.email) {
                     try {
                         const mailOptions = {
-                            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                            from: getMailFrom(),
                             to: account.email,
                             subject: `Invoice for Account - ${account.name || account.company}`,
                             text: 'Please find attached your invoice with all booking details.',
@@ -4853,7 +4851,7 @@ app.post('/sub-company/send-invoice', async (req, res) => {
                 if (subCompany.email) {
                     try {
                         const mailOptions = {
-                            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+                            from: getMailFrom(),
                             to: subCompany.email,
                             subject: `Invoice for Sub Company - ${subCompany.name || 'N/A'}`,
                             text: 'Please find attached your invoice with all booking details.',
@@ -5003,7 +5001,7 @@ app.post('/driver/send-package-history', async (req, res) => {
         `;
 
         const mailOptions = {
-            from: process.env.MAIL_FROM_ADDRESS || 'noreply@cabifyit.com',
+            from: getMailFrom(),
             to: driver.email,
             subject: 'Your Driver Package History',
             html: htmlContent
