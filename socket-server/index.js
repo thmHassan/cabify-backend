@@ -3712,6 +3712,8 @@ app.post("/driver-force-logout", async (req, res) => {
                 driver_id: driverId,
                 message: "You have been logged out by dispatch.",
                 reason: "dispatcher_logout",
+                token_revoked: true,
+                auth_version: req.body.auth_version ?? null,
             });
         }
 

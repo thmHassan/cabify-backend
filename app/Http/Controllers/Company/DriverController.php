@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Models\CompanyVehicleType;
+use App\Services\DriverSessionService;
 use Hash;
 
 class DriverController extends Controller
@@ -1077,8 +1078,7 @@ class DriverController extends Controller
                 ], 404);
             }
 
-            $driver->online_status = 'offline';
-            $driver->save();
+            DriverSessionService::invalidate($driver);
 
             try {
                 Http::withHeaders([
@@ -1086,6 +1086,7 @@ class DriverController extends Controller
                     'database' => $request->header('database'),
                 ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/driver-force-logout', [
                     'driverId' => $request->driver_id,
+                    'auth_version' => $driver->auth_version,
                 ]);
             } catch (\Exception $socketException) {
                 \Log::warning('Driver force logout socket call failed', [

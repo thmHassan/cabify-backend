@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanySetting;
 use App\Models\Setting;
+use App\Services\DriverSessionService;
 use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
@@ -346,7 +347,17 @@ class AuthController extends Controller
 
     public function logout()
     {
-        auth('driver')->logout();
+        $driver = auth('driver')->user();
+        if ($driver) {
+            DriverSessionService::invalidate($driver);
+        }
+
+        try {
+            auth('driver')->logout();
+        } catch (\Exception $e) {
+            // Token may already be invalid after auth_version bump.
+        }
+
         return response()->json(['success' => 1, 'message' => 'Successfully logged out']);
     }
 

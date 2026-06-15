@@ -1197,11 +1197,33 @@ class CompanyController extends Controller
             $tenant->save();
             $token = JWTAuth::fromUser($tenant);
 
+            $tenantData = $tenant->data;
+            $timezone = $tenantData['time_zone'] ?? null;
+
+            $centralTenant = Tenant::find($tenant->id);
+            if ($centralTenant) {
+                try {
+                    $centralTenant->run(function () use (&$timezone) {
+                        $settings = CompanySetting::orderBy('id', 'DESC')->first();
+                        if ($settings?->company_timezone) {
+                            $timezone = $settings->company_timezone;
+                        }
+                    });
+                } catch (\Exception $e) {
+                    \Log::warning('Could not load company timezone on login: ' . $e->getMessage());
+                }
+            }
+
+            if ($timezone) {
+                $tenantData['time_zone'] = $timezone;
+                $tenantData['company_timezone'] = $timezone;
+            }
+
             return response()->json([
                 'message' => 'Tenant login successful',
                 'token' => $token,
                 'tenant_id' => $tenant->id,
-                'tenant_data' => $tenant->data,
+                'tenant_data' => $tenantData,
             ]);
         }
         catch(\Exception $e){

@@ -21,10 +21,16 @@ class DriverAuthenticate
                 return response()->json(['message' => 'Token not provided'], 401);
             }
 
-            $driver = auth('driver')->setToken($request->bearerToken())->userOrFail();
+            auth('driver')->setToken($request->bearerToken());
+            $driver = auth('driver')->userOrFail();
 
             if (!$driver) {
                 return response()->json(['message' => 'Unauthenticated'], 401);
+            }
+
+            $tokenAuthVersion = (int) auth('driver')->payload()->get('auth_version', 0);
+            if ($tokenAuthVersion !== (int) ($driver->auth_version ?? 0)) {
+                return response()->json(['message' => 'Token revoked'], 401);
             }
 
             $request->attributes->set('driver', $driver);
