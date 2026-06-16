@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PreBookingService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -10,6 +11,19 @@ class CompanyBooking extends Model
     use HasFactory;
 
     protected $table = "bookings";
+
+    protected $appends = ['pre_booking'];
+
+    protected $casts = [
+        'is_scheduled' => 'boolean',
+        'dispatch_released' => 'boolean',
+        'reminder_minutes' => 'integer',
+    ];
+
+    public function getPreBookingAttribute(): bool
+    {
+        return app(PreBookingService::class)->bookingQualifiesAsPreBooking($this);
+    }
 
     public function userDetail(){
         return $this->hasOne(CompanyUser::class, "id", "user_id");

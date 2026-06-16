@@ -277,6 +277,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
 
     Route::post('/company/get-plot', [BookingController::class, 'getPlot']);
     Route::post('/company/create-booking', [BookingController::class, 'createBooking']);
+    Route::post('/company/edit-booking', [BookingController::class, 'editBooking']);
     Route::post('/company/calculate-fares', [BookingController::class, 'calculateFares']);
     Route::get('/company/cancelled-booking', [BookingController::class, 'cancelledBooking']);
     Route::get('/company/booking-list', [BookingController::class, 'bookingList']);
@@ -297,6 +298,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
 });
 
 Route::group(['middleware' => ['tenant.db']], function () {
+
+    Route::post('/internal/edit-booking', [BookingController::class, 'editBooking']);
 
     Route::post('/dispatcher/login', [CompanyController::class, 'dispatcherLogin']);
     Route::post('/dispatcher/logout', [CompanyController::class, 'dispatcherLogout']);

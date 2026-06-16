@@ -8,24 +8,27 @@ use App\Models\CompanyPlot;
 use App\Models\CompanyBooking;
 use App\Models\CompanyVehicleType;
 use App\Models\CompanySetting;
-use App\Models\CompanyDispatchSystem;
 use Carbon\Carbon;
-use App\Jobs\AutoDispatchPlotJob;
-use App\Jobs\SendBiddingFixedFareNotificationJob;
-use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
-use App\Models\CompanySendNewRide;
 use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
 use App\Models\CompanyDriver;
 use App\Models\DriverPackage;
 use App\Models\Setting;
 use App\Services\BookingDateClassificationService;
+use App\Services\BookingDispatchService;
+use App\Services\BookingReminderService;
+use App\Services\BookingUpdateService;
+use App\Services\PreBookingService;
 
 class BookingController extends Controller
 {
     public function __construct(
-        private readonly BookingDateClassificationService $bookingDateClassification
+        private readonly BookingDateClassificationService $bookingDateClassification,
+        private readonly BookingReminderService $bookingReminderService,
+        private readonly PreBookingService $preBookingService,
+        private readonly BookingDispatchService $bookingDispatchService,
+        private readonly BookingUpdateService $bookingUpdateService
     ) {
     }
 
@@ -123,13 +126,20 @@ class BookingController extends Controller
                 'payment_method' => 'required',
                 'driver' => 'required_without:booking_system',
                 'booking_system' => 'required_without:driver',
+                'pickup_time_type' => 'nullable|in:asap,time',
             ]);
+
+            $this->bookingReminderService->validateReminderRequest($request);
+
+            $isScheduled = $this->preBookingService->isScheduledRequest($request);
+            $pickupTimeType = $this->preBookingService->resolvePickupTimeType($request);
 
             $distance = $request->distance;
             $nearBooking = 0;
             $alertMessage = NULL;
+            $createdBookingSummaries = [];
 
-            if(isset($request->driver) && $request->driver != NULL){
+            if (!$isScheduled && isset($request->driver) && $request->driver != NULL){
                 $driver = CompanyDriver::where("id", $request->driver)->first();
                 $companySetting = CompanySetting::orderBy("id", "DESC")->first();
                 if ($companySetting->package_type == "per_ride_commission_topup") {
@@ -222,15 +232,40 @@ class BookingController extends Controller
                     $newBooking->multi_days = $multiDaysStored;
                     $newBooking->save();
 
-                    if (isset($request->driver) && $request->driver != NULL) {
+                    if (!$isScheduled && isset($request->driver) && $request->driver != NULL) {
                         $this->applyDriverBookingDeductions($driver, $companySetting);
                     }
+
+                    $this->bookingReminderService->scheduleReminder(
+                        $newBooking,
+                        (string) $request->header('database')
+                    );
+
+                    if ($isScheduled) {
+                        $this->preBookingService->scheduleDispatchRelease(
+                            $newBooking,
+                            (string) $request->header('database')
+                        );
+                    }
+
+                    $createdBookingSummaries[] = $this->formatCreatedBookingSummary($newBooking);
 
                     $createdBookings[] = $newBooking;
                 }
 
                 foreach ($createdBookings as $createdBooking) {
-                    $this->notifyBookingCreated($createdBooking, $request, true);
+                    if ($isScheduled) {
+                        $this->bookingDispatchService->notifyPreBookingCreated(
+                            $createdBooking,
+                            (string) $request->header('database')
+                        );
+                    } else {
+                        $this->bookingDispatchService->notifyImmediateBookingCreated(
+                            $createdBooking,
+                            (string) $request->header('database'),
+                            true
+                        );
+                    }
                 }
             } else {
                 if ($request->pickup_time != 'asap' && $request->driver != NULL) {
@@ -276,24 +311,110 @@ class BookingController extends Controller
                 $newBooking->week = $request->week;
                 $newBooking->save();
 
-                if(isset($request->driver) && $request->driver != NULL){
+                if (!$isScheduled && isset($request->driver) && $request->driver != NULL){
                     $this->applyDriverBookingDeductions($driver, $companySetting);
                 }
 
-                $this->notifyBookingCreated($newBooking, $request, false);
+                $this->bookingReminderService->scheduleReminder(
+                    $newBooking,
+                    (string) $request->header('database')
+                );
+
+                if ($isScheduled) {
+                    $this->preBookingService->scheduleDispatchRelease(
+                        $newBooking,
+                        (string) $request->header('database')
+                    );
+                    $this->bookingDispatchService->notifyPreBookingCreated(
+                        $newBooking,
+                        (string) $request->header('database')
+                    );
+                } else {
+                    $this->bookingDispatchService->notifyImmediateBookingCreated(
+                        $newBooking,
+                        (string) $request->header('database'),
+                        false
+                    );
+                }
+
+                $createdBookingSummaries[] = $this->formatCreatedBookingSummary($newBooking);
             }
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Booking created successfully',
-                'alertMessage' => $alertMessage
+                'alertMessage' => $alertMessage,
+                'is_scheduled' => $isScheduled,
+                'pickup_time_type' => $pickupTimeType,
+                'pre_booking' => $isScheduled,
+                'bookings' => $createdBookingSummaries,
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    public function editBooking(Request $request)
+    {
+        try {
+            if (!$this->canEditBooking($request)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'id' => 'required|integer',
+                'phone_no' => 'sometimes|required|string|max:255',
+                'passenger' => 'sometimes|required',
+                'booking_date' => 'sometimes|required|date',
+                'pickup_time' => 'sometimes|required|string|max:255',
+                'pickup_time_type' => 'sometimes|required|in:time',
+                'reminder_minutes' => 'nullable|integer|in:5,15,30,50',
+            ]);
+
+            $booking = CompanyBooking::where('id', $request->id)->first();
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found',
+                ], 404);
+            }
+
+            $updatedBooking = $this->bookingUpdateService->update(
+                $booking,
+                $request,
+                (string) $request->header('database')
+            );
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Booking updated successfully',
+                'booking' => $this->bookingUpdateService->formatBookingPayload($updatedBooking),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function canEditBooking(Request $request): bool
+    {
+        if ($request->bearerToken() === env('NODE_INTERNAL_SECRET')) {
+            return true;
+        }
+
+        return auth('tenant')->check();
     }
 
     public function calculateFares(Request $request)
@@ -697,12 +818,26 @@ class BookingController extends Controller
         return $multiDays !== null ? (string) $multiDays : null;
     }
 
+    private function resolveAccountFromRequest(Request $request): ?string
+    {
+        $account = $request->input('account') ?? $request->input('account_id');
+
+        return filled($account) ? (string) $account : null;
+    }
+
     private function buildBookingFromRequest(Request $request, $bookingDate, CompanyUser $existUser, $distance): CompanyBooking
     {
+        $pickupTimeType = $this->preBookingService->resolvePickupTimeType($request);
+        $isScheduled = $pickupTimeType === 'time';
+
         $newBooking = new CompanyBooking;
         $newBooking->booking_id = "RD" . strtoupper(uniqid());
         $newBooking->sub_company = $request->sub_company;
         $newBooking->pickup_time = $request->pickup_time;
+        $newBooking->pickup_time_type = $pickupTimeType;
+        $newBooking->is_scheduled = $isScheduled;
+        $newBooking->dispatch_released = false;
+        $newBooking->reminder_minutes = $this->bookingReminderService->resolveReminderMinutes($request);
         $newBooking->booking_date = Carbon::parse($bookingDate)->toDateString();
         $newBooking->booking_type = $request->booking_type;
         $newBooking->pickup_point = $request->pickup_point;
@@ -719,9 +854,15 @@ class BookingController extends Controller
         $newBooking->phone_no = $request->phone_no;
         $newBooking->tel_no = $request->tel_no;
         $newBooking->journey_type = $request->journey_type;
-        $newBooking->account = $request->account;
+        $newBooking->account = $this->resolveAccountFromRequest($request);
         $newBooking->vehicle = $request->vehicle;
-        $newBooking->driver = $request->driver;
+        if ($isScheduled && $request->filled('driver')) {
+            $newBooking->pending_driver_id = $request->driver;
+            $newBooking->driver = null;
+        } else {
+            $newBooking->driver = $request->driver;
+            $newBooking->pending_driver_id = null;
+        }
         $newBooking->passenger = $request->passenger;
         $newBooking->luggage = $request->luggage;
         $newBooking->hand_luggage = $request->hand_luggage;
@@ -750,6 +891,21 @@ class BookingController extends Controller
         return $newBooking;
     }
 
+    private function formatCreatedBookingSummary(CompanyBooking $booking): array
+    {
+        return [
+            'id' => $booking->id,
+            'booking_id' => $booking->booking_id,
+            'is_scheduled' => (bool) $booking->is_scheduled,
+            'pickup_time_type' => $booking->pickup_time_type,
+            'pre_booking' => (bool) $booking->is_scheduled && !$booking->dispatch_released,
+            'booking_date' => $booking->booking_date,
+            'pickup_time' => $booking->pickup_time,
+            'reminder_minutes' => $booking->reminder_minutes,
+            'pending_driver_id' => $booking->pending_driver_id,
+        ];
+    }
+
     private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void
     {
         if ($companySetting->package_type == "ride_count_price") {
@@ -770,73 +926,5 @@ class BookingController extends Controller
             $wallet->comment = "Per ride booking deduction";
             $wallet->save();
         }
-    }
-
-    private function notifyBookingCreated(CompanyBooking $booking, Request $request, bool $alwaysBroadcast = false): void
-    {
-        $hasDriver = isset($booking->driver) && $booking->driver != NULL;
-
-        if (!$hasDriver || $alwaysBroadcast) {
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
-                'booking_id' => $booking->id,
-                'tenantDb' => $request->header('database'),
-            ]);
-        }
-
-        if (!$hasDriver) {
-            $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
-            if ($dispatch_system->isEmpty()) {
-                return;
-            }
-
-            if ($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base") {
-                $url = "https://backend.cabifyit.com/socket-api/bookings/" . $booking->id . "/start-auto-dispatch";
-                Http::withHeaders([
-                    'database' => $request->header('database'),
-                    'Accept' => 'application/json',
-                ])->post($url);
-            } elseif ($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base") {
-                SendBiddingFixedFareNotificationJob::dispatch($booking->id, NULL, 0, $request->header('database'));
-            } elseif ($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver") {
-                $url = "https://backend.cabifyit.com/socket-api/bookings/" . $booking->id . "/start-nearest-dispatch";
-                Http::withHeaders([
-                    'database' => $request->header('database'),
-                    'Accept' => 'application/json',
-                ])->post($url);
-            }
-
-            return;
-        }
-
-        $booking->loadMissing('userDetail');
-
-        Http::withHeaders([
-            'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-        ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
-            'drivers' => [$booking->driver],
-            'booking' => [
-                'id' => $booking->id,
-                'booking_id' => $booking->booking_id,
-                'pickup_point' => $booking->pickup_point,
-                'destination_point' => $booking->destination_point,
-                'offered_amount' => $booking->offered_amount,
-                'distance' => $booking->distance,
-                'user_id' => $booking->user_id,
-                'user_name' => $booking->name,
-                'user_profile' => isset($booking->userDetail->profile_image) ? $booking->userDetail->profile_image : NULL,
-                'pickup_location' => $booking->pickup_location,
-                'destination_location' => $booking->destination_location,
-                'note' => $booking->note,
-                'pickup_time' => $booking->pickup_time,
-                'booking_date' => $booking->booking_date,
-            ],
-        ]);
-
-        $sendRide = new CompanySendNewRide;
-        $sendRide->booking_id = $booking->id;
-        $sendRide->driver_id = $booking->driver;
-        $sendRide->save();
     }
 }

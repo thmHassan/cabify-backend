@@ -71,7 +71,7 @@ class BookingDateClassificationService
             case 'todays_booking':
                 return $query->whereDate('booking_date', Carbon::today());
             case 'pre_bookings':
-                return $query->whereDate('booking_date', '>', Carbon::today());
+                return app(PreBookingService::class)->applyPreBookingsFilter($query);
             case 'completed':
                 return $query->where('booking_status', 'completed');
             case 'no_show':
@@ -92,7 +92,7 @@ class BookingDateClassificationService
 
         return [
             'todaysBooking' => (clone $query)->whereDate('booking_date', $today)->count(),
-            'preBookings' => (clone $query)->whereDate('booking_date', '>', $today)->count(),
+            'preBookings' => app(PreBookingService::class)->applyPreBookingsFilter(clone $query)->count(),
             'completed' => (clone $query)->where('booking_status', 'completed')->count(),
             'noShow' => (clone $query)->whereIn('booking_status', ['no_show', 'arrived', 'ongoing'])->count(),
             'cancelled' => (clone $query)->where('booking_status', 'cancelled')->count(),

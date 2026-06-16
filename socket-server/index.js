@@ -18,6 +18,17 @@ const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 console.log("Loaded VIP Token:", process.env.VIP_WEBHOOK_TOKEN);
 
 const app = express();
+
+const SOCKET_API_CORS = {
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'database'],
+    optionsSuccessStatus: 204,
+};
+
+app.use(cors(SOCKET_API_CORS));
+app.options(/.*/, cors(SOCKET_API_CORS));
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -31,6 +42,40 @@ const userSockets = new Map();
 const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
+
+const preBookingsCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+
+    return `
+    ${column('is_scheduled')} = 1
+    AND ${column('pickup_time_type')} = 'time'
+    AND ${column('dispatch_released')} = 0
+    AND ${column('booking_status')} = 'pending'
+    AND (
+        DATE(${column('booking_date')}) > CURDATE()
+        OR (
+            DATE(${column('booking_date')}) = CURDATE()
+            AND ${column('pickup_time')} != 'asap'
+            AND TIMESTAMP(${column('booking_date')}, ${column('pickup_time')}) > NOW()
+        )
+    )
+`;
+};
+
+const isPreBookingRow = (booking) => {
+    if (!booking || booking.is_scheduled != 1 || booking.pickup_time_type !== 'time' || booking.dispatch_released == 1) {
+        return false;
+    }
+
+    if (booking.booking_status !== 'pending' || !booking.booking_date || booking.pickup_time === 'asap') {
+        return false;
+    }
+
+    const bookingDateStr = new Date(booking.booking_date).toISOString().split('T')[0];
+    const pickupAt = new Date(`${bookingDateStr}T${booking.pickup_time}`);
+
+    return pickupAt.getTime() > Date.now();
+};
 
 const plotDriverQueues = new Map();
 const driverLastLocationTime = new Map();
@@ -301,7 +346,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS todays_booking,
 
                 COUNT(CASE 
-                    WHEN DATE(booking_date) > CURDATE() 
+                    WHEN ${preBookingsCondition()}
                     THEN 1 
                 END) AS pre_bookings,
 
@@ -1497,20 +1542,6 @@ app.use(async (req, res, next) => {
     next();
 });
 
-app.use(cors({
-    origin: [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "https://clientadmin.cabifyit.com",
-        "https://admin.cabifyit.com",
-        "https://dispatcher.cabifyit.com"
-    ],
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ['Content-Type', 'Authorization', 'database', 'subdomain'],
-}));
-
 async function calculatePostPaidEntries(driver, settings, db) {
     const packageDays = parseInt(settings.package_days);
     const packageAmount = parseFloat(settings.package_amount);
@@ -2078,7 +2109,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS todays_booking,
 
                 COUNT(CASE 
-                    WHEN DATE(booking_date) > CURDATE() 
+                    WHEN ${preBookingsCondition()}
                     THEN 1 
                 END) AS pre_bookings,
 
@@ -2152,7 +2183,7 @@ app.get("/bookings", async (req, res) => {
                     baseQuery += ` AND DATE(b.booking_date) = CURDATE()`;
                     break;
                 case 'pre_bookings':
-                    baseQuery += ` AND DATE(b.booking_date) > CURDATE()`;
+                    baseQuery += ` AND ${preBookingsCondition('b')}`;
                     break;
                 case 'completed':
                     baseQuery += ` AND b.booking_status = 'completed'`;
@@ -2204,6 +2235,7 @@ app.get("/bookings", async (req, res) => {
 
             return {
                 ...bookingData,
+                pre_booking: isPreBookingRow(bookingData),
                 driverDetail: driver_id ? { id: driver_id, name: driver_name, email: driver_email, phone_no: driver_phone, profile_image: driver_profile_image } : null,
                 vehicleDetail: vehicle_type_id ? { id: vehicle_type_id, vehicle_type_name, vehicle_type_service } : null,
                 subCompanyDetail: sub_company_id ? { id: sub_company_id, name: sub_company_name, email: sub_company_email } : null
@@ -2227,6 +2259,54 @@ app.get("/bookings", async (req, res) => {
     } catch (error) {
         console.error("Error fetching bookings:", error);
         return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.put("/bookings/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const databaseHeader = req.headers["database"];
+
+        if (!databaseHeader) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const laravelApi = process.env.LARAVEL_API || `https://${process.env.APP_URL || "127.0.0.1:8000"}/api`;
+        const response = await axios.post(
+            `${laravelApi}/internal/edit-booking`,
+            {
+                id: parseInt(id, 10),
+                ...req.body,
+            },
+            {
+                headers: {
+                    database: databaseHeader,
+                    Authorization: `Bearer ${process.env.NODE_INTERNAL_SECRET}`,
+                    Accept: "application/json",
+                },
+                timeout: 10000,
+            }
+        );
+
+        const booking = response.data?.booking;
+        const dbName = databaseHeader.toString();
+        const finalDb = `tenant${dbName}`;
+
+        if (booking) {
+            io.to(`dispatcher_${dbName}`).emit("booking-updated-event", booking);
+            io.to(`admin_${dbName}`).emit("booking-updated-event", booking);
+            io.to(`client_${dbName}`).emit("booking-updated-event", booking);
+            dispatcherSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
+            adminSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
+            clientSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
+            await broadcastDashboardCardsUpdate(finalDb);
+        }
+
+        return res.json(response.data);
+    } catch (error) {
+        const status = error.response?.status || 500;
+        const payload = error.response?.data || { success: false, message: error.message };
+        return res.status(status).json(payload);
     }
 });
 
@@ -3311,10 +3391,11 @@ app.post("/bookings/:id/send-confirmation-email", async (req, res) => {
 
 app.post("/bookings/broadcast", async (req, res) => {
     try {
-        const { booking_id, tenantDb } = req.body;
+        const { booking_id, tenantDb, pre_booking } = req.body;
         const DB_PREFIX = "tenant";
 
         const finalDb = `${DB_PREFIX}${tenantDb}`;
+        const dbName = tenantDb;
 
         console.log("Using DB:", finalDb);
 
@@ -3347,23 +3428,27 @@ app.post("/bookings/broadcast", async (req, res) => {
             sentCount++;
         });
 
-        // driverSockets.forEach((socketId) => {
-        //     io.to(socketId).emit("new-ride", booking);
-        //     sentCount++;
-        // });
+        if (dbName) {
+            io.to(`dispatcher_${dbName}`).emit("new-booking-event", booking);
+            io.to(`admin_${dbName}`).emit("new-booking-event", booking);
+            io.to(`client_${dbName}`).emit("new-booking-event", booking);
+            sentCount += 3;
+        }
 
         await broadcastDashboardCardsUpdate(finalDb);
 
-        try {
-            const plotId = await waitingQueue.resolvePlotIdFromBooking(db, booking);
-            if (plotId && !booking.pickup_plot_id) {
-                await db.query('UPDATE bookings SET pickup_plot_id = ? WHERE id = ?', [plotId, booking.id]);
-                booking.pickup_plot_id = plotId;
-            }
+        if (!pre_booking) {
+            try {
+                const plotId = await waitingQueue.resolvePlotIdFromBooking(db, booking);
+                if (plotId && !booking.pickup_plot_id) {
+                    await db.query('UPDATE bookings SET pickup_plot_id = ? WHERE id = ?', [plotId, booking.id]);
+                    booking.pickup_plot_id = plotId;
+                }
 
-            await waitingQueue.refreshPlotWaitingQueueForBooking(finalDb, booking, booking.id);
-        } catch (queueError) {
-            console.error('[WaitingQueue] Failed to refresh queue for new booking:', queueError.message);
+                await waitingQueue.refreshPlotWaitingQueueForBooking(finalDb, booking, booking.id);
+            } catch (queueError) {
+                console.error('[WaitingQueue] Failed to refresh queue for new booking:', queueError.message);
+            }
         }
 
         return res.json({
@@ -3976,11 +4061,55 @@ app.post("/waiting-driver", async (req, res) => {
 });
 
 app.post("/send-reminder", (req, res) => {
-    const { clientId, title, description } = req.body;
-    const socketId = clientSockets.get(clientId.toString());
-    if (socketId) {
-        io.to(socketId).emit("send-reminder", { title, description });
+    const {
+        clientId,
+        tenantDb,
+        database,
+        title,
+        description,
+        message,
+        booking_id,
+        booking_reference,
+        pickup_location,
+        pickup_time,
+        booking_date,
+        reminder_minutes,
+        driver_id,
+    } = req.body;
+
+    const dbName = (tenantDb || database || clientId || "").toString();
+    const payload = {
+        title,
+        description: description || message,
+        message: message || description,
+        booking_id,
+        booking_reference,
+        pickup_location,
+        pickup_time,
+        booking_date,
+        reminder_minutes,
+    };
+
+    if (clientId) {
+        const socketId = clientSockets.get(clientId.toString());
+        if (socketId) {
+            io.to(socketId).emit("send-reminder", payload);
+        }
     }
+
+    if (dbName) {
+        io.to(`dispatcher_${dbName}`).emit("send-reminder", payload);
+        io.to(`admin_${dbName}`).emit("send-reminder", payload);
+        io.to(`client_${dbName}`).emit("send-reminder", payload);
+    }
+
+    if (driver_id) {
+        const driverSocketId = driverSockets.get(driver_id.toString());
+        if (driverSocketId) {
+            io.to(driverSocketId).emit("send-reminder", payload);
+        }
+    }
+
     return res.json({ success: true });
 });
 
@@ -4171,6 +4300,34 @@ app.get("/driver/:id/riding-details", async (req, res) => {
 
         const revenue = revenueSummary[0];
 
+        const [accountCounts] = await db.query(
+            `SELECT
+                b.account AS account_id,
+                a.name AS account_name,
+                a.company AS account_company,
+                a.email AS account_email,
+                COUNT(*) AS job_count,
+                COUNT(CASE WHEN b.booking_status = 'completed' THEN 1 END) AS completed,
+                COUNT(CASE WHEN b.booking_status = 'cancelled' THEN 1 END) AS cancelled,
+                COUNT(CASE WHEN b.booking_status = 'pending' THEN 1 END) AS pending,
+                COUNT(CASE WHEN b.booking_status = 'ongoing' THEN 1 END) AS ongoing,
+                COUNT(CASE WHEN b.booking_status = 'arrived' THEN 1 END) AS arrived,
+                COUNT(CASE WHEN b.booking_status = 'no_show' THEN 1 END) AS no_show
+             FROM bookings b
+             LEFT JOIN accounts a ON a.id = b.account
+             WHERE (b.driver = ? OR b.pending_driver_id = ?)
+               AND b.account IS NOT NULL
+               AND TRIM(b.account) != ''
+             GROUP BY b.account, a.name, a.company, a.email
+             ORDER BY job_count DESC, b.account ASC`,
+            [id, id]
+        );
+
+        const accountJobCount = accountCounts.reduce(
+            (sum, row) => sum + Number(row.job_count || 0),
+            0
+        );
+
         const [todayStats] = await db.query(
             `SELECT
                 COUNT(*) AS today_total_rides,
@@ -4339,6 +4496,21 @@ app.get("/driver/:id/riding-details", async (req, res) => {
                     arrived: revenue.arrived_rides,
                     no_show: revenue.no_show_rides,
                     pending: revenue.pending_rides,
+                    account_job_count: accountJobCount,
+                    account_counts: accountCounts.map((row) => ({
+                        account_id: row.account_id,
+                        account: row.account_id,
+                        name: row.account_name,
+                        company: row.account_company,
+                        email: row.account_email,
+                        job_count: row.job_count,
+                        completed: row.completed,
+                        cancelled: row.cancelled,
+                        pending: row.pending,
+                        ongoing: row.ongoing,
+                        arrived: row.arrived,
+                        no_show: row.no_show,
+                    })),
                     completion_rate: revenue.total_rides > 0
                         ? ((revenue.completed_rides / revenue.total_rides) * 100).toFixed(1) + "%"
                         : "0.0%"
