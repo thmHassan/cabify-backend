@@ -3463,6 +3463,107 @@ app.post("/bookings/broadcast", async (req, res) => {
     }
 });
 
+app.post("/bookings/notify-updated", async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        const { booking_id, tenantDb } = req.body;
+        if (!booking_id || !tenantDb) {
+            return res.status(400).json({ success: false, message: "booking_id and tenantDb are required" });
+        }
+
+        const finalDb = `tenant${tenantDb}`;
+        const db = getConnection(finalDb);
+
+        const [bookings] = await db.query(`
+            SELECT
+                b.*,
+                d.id as driver_id,
+                d.name as driver_name,
+                d.email as driver_email,
+                d.phone_no as driver_phone,
+                d.profile_image as driver_profile_image,
+                vt.id as vehicle_type_id,
+                vt.vehicle_type_name,
+                vt.vehicle_type_service,
+                sc.id as sub_company_id,
+                sc.name as sub_company_name,
+                sc.email as sub_company_email,
+                a.id as account_row_id,
+                a.name as account_name,
+                a.email as account_email,
+                a.company as account_company
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver = d.id
+            LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
+            LEFT JOIN sub_companies sc ON b.sub_company = sc.id
+            LEFT JOIN accounts a ON a.id = b.account
+            WHERE b.id = ?
+        `, [booking_id]);
+
+        if (!bookings.length) {
+            return res.status(404).json({ success: false, message: "Booking not found" });
+        }
+
+        const booking = bookings[0];
+        const {
+            driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
+            vehicle_type_id, vehicle_type_name, vehicle_type_service,
+            sub_company_id, sub_company_name, sub_company_email,
+            account_row_id, account_name, account_email, account_company,
+            ...bookingData
+        } = booking;
+
+        const formattedBooking = {
+            ...bookingData,
+            pre_booking: isPreBookingRow(bookingData),
+            account_id: bookingData.account,
+            driverDetail: driver_id ? {
+                id: driver_id,
+                name: driver_name,
+                email: driver_email,
+                phone_no: driver_phone,
+                profile_image: driver_profile_image,
+            } : null,
+            vehicleDetail: vehicle_type_id ? {
+                id: vehicle_type_id,
+                vehicle_type_name,
+                vehicle_type_service,
+            } : null,
+            subCompanyDetail: sub_company_id ? {
+                id: sub_company_id,
+                name: sub_company_name,
+                email: sub_company_email,
+            } : null,
+            accountDetail: account_row_id ? {
+                id: account_row_id,
+                name: account_name,
+                email: account_email,
+                company: account_company,
+            } : null,
+        };
+
+        const dbName = tenantDb.toString();
+        io.to(`dispatcher_${dbName}`).emit("booking-updated-event", formattedBooking);
+        io.to(`admin_${dbName}`).emit("booking-updated-event", formattedBooking);
+        io.to(`client_${dbName}`).emit("booking-updated-event", formattedBooking);
+        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
+        adminSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
+        clientSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
+
+        await broadcastDashboardCardsUpdate(finalDb);
+
+        return res.json({ success: true, booking: formattedBooking });
+    } catch (error) {
+        console.error("Booking notify-updated error:", error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.post("/send-new-ride", async (req, res) => {
     try {
         const { drivers, booking, tenantDb } = req.body;

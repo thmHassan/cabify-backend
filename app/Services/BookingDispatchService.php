@@ -60,6 +60,24 @@ class BookingDispatchService
         ]);
     }
 
+    public function notifyBookingUpdated(CompanyBooking $booking, string $tenantDatabase): void
+    {
+        try {
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/notify-updated', [
+                'booking_id' => $booking->id,
+                'tenantDb' => $tenantDatabase,
+            ]);
+        } catch (\Exception $e) {
+            \Log::warning('Booking updated socket call failed', [
+                'booking_id' => $booking->id,
+                'tenant' => $tenantDatabase,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function notifyImmediateBookingCreated(CompanyBooking $booking, string $tenantDatabase, bool $alwaysBroadcast = false): void
     {
         $hasDriver = !empty($booking->driver);

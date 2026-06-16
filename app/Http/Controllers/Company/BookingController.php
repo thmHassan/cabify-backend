@@ -371,13 +371,26 @@ class BookingController extends Controller
 
             $request->validate([
                 'id' => 'required|integer',
-                'phone_no' => 'sometimes|required|string|max:255',
-                'passenger' => 'sometimes|required',
+                'multi_booking' => 'sometimes|required',
+                'pickup_time' => 'sometimes|required',
                 'booking_date' => 'sometimes|required|date',
-                'pickup_time' => 'sometimes|required|string|max:255',
-                'pickup_time_type' => 'sometimes|required|in:time',
+                'booking_type' => 'sometimes|required',
+                'pickup_point' => 'sometimes|required',
+                'pickup_location' => 'sometimes|required',
+                'destination_point' => 'sometimes|required',
+                'destination_location' => 'sometimes|required',
+                'name' => 'sometimes|required',
+                'phone_no' => 'sometimes|required',
+                'journey_type' => 'sometimes|required',
+                'vehicle' => 'sometimes|required',
+                'passenger' => 'sometimes|required',
+                'booking_amount' => 'sometimes|required',
+                'payment_method' => 'sometimes|required',
+                'pickup_time_type' => 'nullable|in:asap,time',
                 'reminder_minutes' => 'nullable|integer|in:5,15,30,50',
             ]);
+
+            $this->bookingReminderService->validateReminderRequest($request);
 
             $booking = CompanyBooking::where('id', $request->id)->first();
             if (!$booking) {
@@ -387,11 +400,60 @@ class BookingController extends Controller
                 ], 404);
             }
 
+            $isScheduled = $request->has('pickup_time_type')
+                ? $this->preBookingService->isScheduledRequest($request)
+                : $this->preBookingService->isScheduledBooking($booking);
+
+            if (!$isScheduled && $request->filled('driver')) {
+                $driver = CompanyDriver::where('id', $request->driver)->first();
+                if (!$driver) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Driver not found',
+                    ], 404);
+                }
+
+                $companySetting = CompanySetting::orderBy('id', 'DESC')->first();
+                if ($companySetting->package_type == 'per_ride_commission_topup') {
+                    if ($companySetting->package_amount > $driver->wallet_balance) {
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver wallet balance is not sufficient',
+                        ], 400);
+                    }
+                }
+                if ($companySetting->package_type == 'ride_count_price') {
+                    if ($driver->ride_count_price <= 0) {
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver ride count is not sufficient',
+                        ], 400);
+                    }
+                }
+                if ($companySetting->package_type == 'packages_topup') {
+                    $package = DriverPackage::where('driver_id', $driver->id)
+                        ->where('package_type', 'packages_postpaid')
+                        ->orderBy('id', 'DESC')
+                        ->first();
+
+                    if (!isset($package) || $package->expire_date < date('Y-m-d')) {
+                        return response()->json([
+                            'error' => 1,
+                            'message' => 'Driver wallet balance is not sufficient',
+                        ], 400);
+                    }
+                }
+            }
+
+            $tenantDatabase = (string) $request->header('database');
+
             $updatedBooking = $this->bookingUpdateService->update(
                 $booking,
                 $request,
-                (string) $request->header('database')
+                $tenantDatabase
             );
+
+            $this->bookingDispatchService->notifyBookingUpdated($updatedBooking, $tenantDatabase);
 
             return response()->json([
                 'success' => 1,
