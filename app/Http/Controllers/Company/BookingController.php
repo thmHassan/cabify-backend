@@ -480,7 +480,12 @@ class BookingController extends Controller
             return true;
         }
 
-        return auth('tenant')->check();
+        $routeMiddleware = $request->route()?->gatherMiddleware() ?? [];
+        if (in_array('auth.tenant.jwt', $routeMiddleware, true)) {
+            return true;
+        }
+
+        return false;
     }
 
     public function getEditBooking(Request $request)

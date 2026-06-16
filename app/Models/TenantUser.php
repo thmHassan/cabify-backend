@@ -14,6 +14,8 @@ class TenantUser extends Authenticatable implements JWTSubject
 {
     use HasFactory, Notifiable;
 
+    protected $connection = 'central';
+
     protected $table = 'tenants';
 
     protected $hidden = ['password'];
