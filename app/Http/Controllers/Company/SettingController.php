@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyBooking;
 use App\Models\PackageRideCountSetting;
+use App\Models\Setting;
 use Carbon\Carbon;
 
 class SettingController extends Controller
@@ -539,6 +540,53 @@ class SettingController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function mapInformation(Request $request)
+    {
+        try {
+            $googleMapKey = $this->resolveGoogleMapKey($request);
+            $usesGoogleMap = filled($googleMapKey);
+
+            return response()->json([
+                'success' => 1,
+                'map_type' => $usesGoogleMap ? 'google' : 'default',
+                'uses_google_map' => $usesGoogleMap,
+                'google_api_key_configured' => $usesGoogleMap,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function resolveGoogleMapKey(Request $request): ?string
+    {
+        $companySettings = CompanySetting::orderBy('id', 'DESC')->first();
+        $googleMapKey = $companySettings?->google_api_keys;
+
+        if (filled($googleMapKey)) {
+            return trim((string) $googleMapKey);
+        }
+
+        $centralSetting = Setting::on('central')->orderBy('id', 'DESC')->first();
+        if (filled($centralSetting?->google_map_key)) {
+            return trim((string) $centralSetting->google_map_key);
+        }
+
+        $tenant = Tenant::on('central')->find($request->header('database'));
+        if (filled($tenant?->google_api_key)) {
+            return trim((string) $tenant->google_api_key);
+        }
+
+        $tenantData = $tenant?->data ?? [];
+        if (filled($tenantData['google_api_key'] ?? null)) {
+            return trim((string) $tenantData['google_api_key']);
+        }
+
+        return null;
     }
 
     public function saveThirdPartyInformation(Request $request)
