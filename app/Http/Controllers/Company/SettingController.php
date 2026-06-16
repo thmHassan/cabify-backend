@@ -18,7 +18,6 @@ use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyBooking;
 use App\Models\PackageRideCountSetting;
-use App\Models\Setting;
 use Carbon\Carbon;
 
 class SettingController extends Controller
@@ -528,16 +527,34 @@ class SettingController extends Controller
     public function thirdPartyInformation(Request $request)
     {
         try {
-            $settings = CompanySetting::orderBy("id", "DESC")->first();
+            $settings = CompanySetting::orderBy('id', 'DESC')->first();
+            $mapProvider = $this->resolveMapProvider($settings);
+
+            if (!$mapProvider['uses_google_map'] && !$mapProvider['mapify_available']) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'No map provider is configured. Add a Google Maps API key or configure Mapify on the server.',
+                ], 503);
+            }
 
             return response()->json([
                 'success' => 1,
-                'settings' => $settings
+                'settings' => $settings,
+                'map_type' => $mapProvider['map_type'],
+                'map_provider' => $mapProvider['map_provider'],
+                'uses_google_map' => $mapProvider['uses_google_map'],
+                'uses_mapify' => $mapProvider['uses_mapify'],
+                'google_api_key_configured' => $mapProvider['uses_google_map'],
+                'google_api_keys' => $mapProvider['uses_google_map'] ? $mapProvider['google_api_key'] : null,
+                'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
+                    ? url('/api/company/mapify-tiles/bright')
+                    : null,
             ]);
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage()
+                'message' => 'Unable to load third party information.',
+                'details' => $e->getMessage(),
             ], 500);
         }
     }
@@ -545,61 +562,86 @@ class SettingController extends Controller
     public function mapInformation(Request $request)
     {
         try {
-            $googleMapKey = $this->resolveGoogleMapKey($request);
-            $usesGoogleMap = filled($googleMapKey);
+            $settings = CompanySetting::orderBy('id', 'DESC')->first();
+            $mapProvider = $this->resolveMapProvider($settings);
+
+            if (!$mapProvider['uses_google_map'] && !$mapProvider['mapify_available']) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'No map provider is configured. Add a Google Maps API key or configure Mapify on the server.',
+                ], 503);
+            }
 
             return response()->json([
                 'success' => 1,
-                'map_type' => $usesGoogleMap ? 'google' : 'default',
-                'uses_google_map' => $usesGoogleMap,
-                'google_api_key_configured' => $usesGoogleMap,
+                'map_type' => $mapProvider['map_type'],
+                'map_provider' => $mapProvider['map_provider'],
+                'uses_google_map' => $mapProvider['uses_google_map'],
+                'uses_mapify' => $mapProvider['uses_mapify'],
+                'google_api_key_configured' => $mapProvider['uses_google_map'],
+                'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
+                    ? url('/api/company/mapify-tiles/bright')
+                    : null,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage(),
+                'message' => 'Unable to resolve map configuration.',
+                'details' => $e->getMessage(),
             ], 500);
         }
     }
 
-    private function resolveGoogleMapKey(Request $request): ?string
+    private function resolveGoogleMapKeyFromSettings(?CompanySetting $settings): ?string
     {
-        $companySettings = CompanySetting::orderBy('id', 'DESC')->first();
-        $googleMapKey = $companySettings?->google_api_keys;
+        $googleMapKey = $settings?->google_api_keys;
 
-        if (filled($googleMapKey)) {
-            return trim((string) $googleMapKey);
-        }
+        return filled($googleMapKey) ? trim((string) $googleMapKey) : null;
+    }
 
-        $centralSetting = Setting::on('central')->orderBy('id', 'DESC')->first();
-        if (filled($centralSetting?->google_map_key)) {
-            return trim((string) $centralSetting->google_map_key);
-        }
+    private function resolveMapProvider(?CompanySetting $settings): array
+    {
+        $googleApiKey = $this->resolveGoogleMapKeyFromSettings($settings);
+        $usesGoogleMap = filled($googleApiKey);
+        $mapifyAvailable = filled(config('services.mapify.api_token'));
 
-        $tenant = Tenant::on('central')->find($request->header('database'));
-        if (filled($tenant?->google_api_key)) {
-            return trim((string) $tenant->google_api_key);
-        }
-
-        $tenantData = $tenant?->data ?? [];
-        if (filled($tenantData['google_api_key'] ?? null)) {
-            return trim((string) $tenantData['google_api_key']);
-        }
-
-        return null;
+        return [
+            'map_type' => $usesGoogleMap ? 'google' : 'default',
+            'map_provider' => $usesGoogleMap ? 'google' : 'mapify',
+            'uses_google_map' => $usesGoogleMap,
+            'uses_mapify' => !$usesGoogleMap,
+            'google_api_key' => $googleApiKey,
+            'mapify_available' => $mapifyAvailable,
+        ];
     }
 
     public function saveThirdPartyInformation(Request $request)
     {
         try {
-            $settings = CompanySetting::orderBy("id", "DESC")->first();
+            $request->validate([
+                'google_api_keys' => 'nullable|string|max:500',
+                'barikoi_api_keys' => 'nullable|string|max:500',
+                'map_settings' => 'nullable|in:default,custom',
+                'mail_server' => 'nullable|string|max:255',
+                'mail_from' => 'nullable|string|max:255',
+                'mail_user_name' => 'nullable|string|max:255',
+                'mail_password' => 'nullable|string|max:255',
+                'mail_port' => 'nullable',
+            ]);
 
-            if (!isset($settings) || $settings == NULL) {
+            $settings = CompanySetting::orderBy('id', 'DESC')->first();
+
+            if (!$settings) {
                 $settings = new CompanySetting;
             }
-            $settings->google_api_keys = $request->google_api_keys;
+
+            $googleApiKey = $request->filled('google_api_keys')
+                ? trim((string) $request->google_api_keys)
+                : null;
+
+            $settings->google_api_keys = $googleApiKey;
             $settings->barikoi_api_keys = $request->barikoi_api_keys;
-            $settings->map_settings = $request->map_settings;
+            $settings->map_settings = filled($googleApiKey) ? 'custom' : ($request->map_settings ?? 'default');
             $settings->mail_server = $request->mail_server;
             $settings->mail_from = $request->mail_from;
             $settings->mail_user_name = $request->mail_user_name;
@@ -607,14 +649,30 @@ class SettingController extends Controller
             $settings->mail_port = $request->mail_port;
             $settings->save();
 
+            $mapProvider = $this->resolveMapProvider($settings);
+
+            if (!$mapProvider['uses_google_map'] && !$mapProvider['mapify_available']) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Settings saved, but no map provider is available. Add a Google Maps API key or configure Mapify on the server.',
+                ], 422);
+            }
+
             return response()->json([
                 'success' => 1,
-                'message' => 'Third party information saved successfully'
+                'message' => 'Third party information saved successfully',
+                'map_type' => $mapProvider['map_type'],
+                'map_provider' => $mapProvider['map_provider'],
+                'uses_google_map' => $mapProvider['uses_google_map'],
+                'uses_mapify' => $mapProvider['uses_mapify'],
             ]);
-        } catch (Exception $e) {
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
             return response()->json([
                 'error' => 1,
-                'message' => $e->getMessage()
+                'message' => 'Unable to save third party information.',
+                'details' => $e->getMessage(),
             ], 500);
         }
     }

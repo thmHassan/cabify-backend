@@ -45,4 +45,9 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
+    'mapify' => [
+        'base_url' => env('MAPIFY_BASE_URL', 'https://client.mapifyit.com'),
+        'api_token' => env('MAPIFY_API_TOKEN'),
+    ],
+
 ];

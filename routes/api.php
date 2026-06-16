@@ -19,6 +19,7 @@ use App\Http\Controllers\Company\DocumentTypeController;
 use App\Http\Controllers\Company\VehicleTypeController as CompanyVehicleTypeController;
 use App\Http\Controllers\Company\PlotController as CompanyPlotController;
 use App\Http\Controllers\Company\SettingController;
+use App\Http\Controllers\Company\MapifyMapController;
 use App\Http\Controllers\Company\ContactUsController;
 use App\Http\Controllers\Company\SubCompanyController;
 use App\Http\Controllers\Company\AccountController;
@@ -243,6 +244,9 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::post('/company/stripe-information', [SettingController::class, 'saveStripeInformation']);
     Route::get('/company/third-party-information', [SettingController::class, 'thirdPartyInformation']);
     Route::get('/company/map-information', [SettingController::class, 'mapInformation']);
+    Route::get('/company/mapify-tiles/bright', [MapifyMapController::class, 'brightTiles']);
+    Route::get('/company/mapify-tiles/bright/{z}/{x}/{y}', [MapifyMapController::class, 'brightTiles']);
+    Route::get('/company/mapify-search', [MapifyMapController::class, 'search']);
     Route::post('/company/third-party-information', [SettingController::class, 'saveThirdPartyInformation']);
     Route::get('/company/notification-recipients', [SettingController::class, 'notificationRecipients']);
     Route::post('/company/send-notification', [SettingController::class, 'sendNotification']);
