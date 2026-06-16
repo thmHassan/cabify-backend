@@ -369,6 +369,10 @@ class BookingController extends Controller
                 ], 401);
             }
 
+            if (!$request->filled('id') && $request->route('id')) {
+                $request->merge(['id' => (int) $request->route('id')]);
+            }
+
             $request->validate([
                 'id' => 'required|integer',
                 'multi_booking' => 'sometimes|required',
@@ -477,6 +481,42 @@ class BookingController extends Controller
         }
 
         return auth('tenant')->check();
+    }
+
+    public function getEditBooking(Request $request)
+    {
+        try {
+            $request->validate([
+                'id' => 'required_without:ride_id|integer',
+                'ride_id' => 'required_without:id|integer',
+            ]);
+
+            $bookingId = $request->input('id', $request->ride_id);
+
+            $booking = CompanyBooking::where('id', $bookingId)
+                ->with(['driverDetail', 'vehicleDetail', 'subCompanyDetail', 'accountDetail'])
+                ->first();
+
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found',
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => 1,
+                'detail' => $booking,
+                'booking' => $this->bookingUpdateService->formatBookingPayload($booking),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function calculateFares(Request $request)

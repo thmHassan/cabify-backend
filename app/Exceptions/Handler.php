@@ -47,6 +47,13 @@ class Handler extends ExceptionHandler
                 ], 404);
             }
 
+            if ($e instanceof \Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException) {
+                return response()->json([
+                    'message' => 'HTTP method not allowed for this API route',
+                    'allowed_methods' => $e->getHeaders()['Allow'] ?? null,
+                ], 405);
+            }
+
             if ($e->getMessage() == 'Unauthenticated.' || $e->getMessage() == 'unauthenticated.') {
                 return response()->json([
                     'message' => 'Unauthenticated.'
