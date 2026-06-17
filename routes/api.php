@@ -247,6 +247,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/mapify-tiles/bright', [MapifyMapController::class, 'brightTiles']);
     Route::get('/company/mapify-tiles/bright/{z}/{x}/{y}', [MapifyMapController::class, 'brightTiles']);
     Route::get('/company/mapify-search', [MapifyMapController::class, 'search']);
+    Route::get('/company/mapify-geocoding', [MapifyMapController::class, 'geocoding']);
     Route::post('/company/third-party-information', [SettingController::class, 'saveThirdPartyInformation']);
     Route::get('/company/notification-recipients', [SettingController::class, 'notificationRecipients']);
     Route::post('/company/send-notification', [SettingController::class, 'sendNotification']);

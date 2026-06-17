@@ -114,4 +114,48 @@ class MapifyMapController extends Controller
             ], 500);
         }
     }
+
+    public function geocoding(Request $request)
+    {
+        try {
+            $request->validate([
+                'q' => 'required|string|max:255',
+                'lat' => 'required|numeric',
+                'lon' => 'required|numeric',
+                'boundary_country' => 'nullable|string|size:2',
+            ]);
+
+            $baseRequest = $this->mapifyBaseRequest();
+            if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
+                return $baseRequest;
+            }
+            ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
+
+            $response = Http::withToken($token)
+                ->acceptJson()
+                ->timeout(30)
+                ->get($baseUrl . '/api/v1/proxy/geocoding', $request->only(['q', 'lat', 'lon', 'boundary_country']));
+
+            if ($response->failed()) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Failed to fetch Mapify geocoding results.',
+                    'status' => $response->status(),
+                    'details' => $response->json() ?? $response->body(),
+                ], $response->status());
+            }
+
+            return response()->json([
+                'success' => 1,
+                'data' => $response->json(),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }
