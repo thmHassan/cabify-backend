@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Http;
 use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
 use App\Models\WalletTransaction;
+use App\Services\SocketApiUrlResolver;
 
 class BookingController extends Controller
 {
@@ -421,9 +422,11 @@ class BookingController extends Controller
             $newBooking->otp = rand(1000,9999);
             $newBooking->save();
 
+            $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
+
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                 ])->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                 ])->post(SocketApiUrlResolver::endpoint($request, 'bookings/broadcast'), [
                     'booking_id' => $newBooking->id,
                     'tenantDb'   => $request->header('database'),
                  ]);
@@ -435,7 +438,7 @@ class BookingController extends Controller
                 Http::withHeaders([
                     'database' => $request->header('database'),
                     'Accept' => 'application/json',
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/' . $newBooking->id . '/start-auto-dispatch');
+                ])->timeout(5)->post($socketApiBaseUrl . '/bookings/' . $newBooking->id . '/start-auto-dispatch');
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
@@ -445,7 +448,7 @@ class BookingController extends Controller
                 Http::withHeaders([
                     'database' => $request->header('database'),
                     'Accept' => 'application/json',
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/' . $newBooking->id . '/start-nearest-dispatch');
+                ])->timeout(5)->post($socketApiBaseUrl . '/bookings/' . $newBooking->id . '/start-nearest-dispatch');
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);

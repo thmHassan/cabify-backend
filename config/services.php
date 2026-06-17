@@ -50,4 +50,9 @@ return [
         'api_token' => env('MAPIFY_API_TOKEN'),
     ],
 
+    'node_socket' => [
+        'url' => env('NODE_SOCKET_URL', 'http://127.0.0.1:8000/socket-api'),
+        'internal_secret' => env('NODE_INTERNAL_SECRET'),
+    ],
+
 ];

@@ -20,6 +20,7 @@ use App\Services\BookingDispatchService;
 use App\Services\BookingReminderService;
 use App\Services\BookingUpdateService;
 use App\Services\PreBookingService;
+use App\Services\SocketApiUrlResolver;
 
 class BookingController extends Controller
 {
@@ -130,6 +131,8 @@ class BookingController extends Controller
             ]);
 
             $this->bookingReminderService->validateReminderRequest($request);
+
+            $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
 
             $isScheduled = $this->preBookingService->isScheduledRequest($request);
             $pickupTimeType = $this->preBookingService->resolvePickupTimeType($request);
@@ -257,13 +260,15 @@ class BookingController extends Controller
                     if ($isScheduled) {
                         $this->bookingDispatchService->notifyPreBookingCreated(
                             $createdBooking,
-                            (string) $request->header('database')
+                            (string) $request->header('database'),
+                            $socketApiBaseUrl
                         );
                     } else {
                         $this->bookingDispatchService->notifyImmediateBookingCreated(
                             $createdBooking,
                             (string) $request->header('database'),
-                            true
+                            true,
+                            $socketApiBaseUrl
                         );
                     }
                 }
@@ -327,13 +332,15 @@ class BookingController extends Controller
                     );
                     $this->bookingDispatchService->notifyPreBookingCreated(
                         $newBooking,
-                        (string) $request->header('database')
+                        (string) $request->header('database'),
+                        $socketApiBaseUrl
                     );
                 } else {
                     $this->bookingDispatchService->notifyImmediateBookingCreated(
                         $newBooking,
                         (string) $request->header('database'),
-                        false
+                        false,
+                        $socketApiBaseUrl
                     );
                 }
 
@@ -450,6 +457,7 @@ class BookingController extends Controller
             }
 
             $tenantDatabase = (string) $request->header('database');
+            $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
 
             $updatedBooking = $this->bookingUpdateService->update(
                 $booking,
@@ -457,7 +465,7 @@ class BookingController extends Controller
                 $tenantDatabase
             );
 
-            $this->bookingDispatchService->notifyBookingUpdated($updatedBooking, $tenantDatabase);
+            $this->bookingDispatchService->notifyBookingUpdated($updatedBooking, $tenantDatabase, $socketApiBaseUrl);
 
             return response()->json([
                 'success' => 1,

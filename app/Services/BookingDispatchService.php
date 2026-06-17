@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Http;
 
 class BookingDispatchService
 {
-    public function releaseForDispatch(CompanyBooking $booking, string $tenantDatabase): void
+    public function releaseForDispatch(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         if ($booking->dispatch_released) {
             return;
@@ -41,31 +41,31 @@ class BookingDispatchService
                 $this->applyDriverBookingDeductions($driver, $companySetting);
             }
 
-            $this->notifyAssignedDriver($booking);
+            $this->notifyAssignedDriver($booking, $socketApiBaseUrl);
 
             return;
         }
 
-        $this->startAutomaticDispatch($booking, $tenantDatabase);
+        $this->startAutomaticDispatch($booking, $tenantDatabase, $socketApiBaseUrl);
     }
 
-    public function notifyPreBookingCreated(CompanyBooking $booking, string $tenantDatabase): void
+    public function notifyPreBookingCreated(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         Http::withHeaders([
-            'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-        ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+            'Authorization' => 'Bearer ' . $this->internalSecret(),
+        ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/broadcast'), [
             'booking_id' => $booking->id,
             'tenantDb' => $tenantDatabase,
             'pre_booking' => true,
         ]);
     }
 
-    public function notifyBookingUpdated(CompanyBooking $booking, string $tenantDatabase): void
+    public function notifyBookingUpdated(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         try {
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/notify-updated', [
+                'Authorization' => 'Bearer ' . $this->internalSecret(),
+            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/notify-updated'), [
                 'booking_id' => $booking->id,
                 'tenantDb' => $tenantDatabase,
             ]);
@@ -78,35 +78,39 @@ class BookingDispatchService
         }
     }
 
-    public function notifyImmediateBookingCreated(CompanyBooking $booking, string $tenantDatabase, bool $alwaysBroadcast = false): void
-    {
+    public function notifyImmediateBookingCreated(
+        CompanyBooking $booking,
+        string $tenantDatabase,
+        bool $alwaysBroadcast = false,
+        ?string $socketApiBaseUrl = null
+    ): void {
         $hasDriver = !empty($booking->driver);
 
         if (!$hasDriver || $alwaysBroadcast) {
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/broadcast', [
+                'Authorization' => 'Bearer ' . $this->internalSecret(),
+            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/broadcast'), [
                 'booking_id' => $booking->id,
                 'tenantDb' => $tenantDatabase,
             ]);
         }
 
         if (!$hasDriver) {
-            $this->startAutomaticDispatch($booking, $tenantDatabase);
+            $this->startAutomaticDispatch($booking, $tenantDatabase, $socketApiBaseUrl);
 
             return;
         }
 
-        $this->notifyAssignedDriver($booking);
+        $this->notifyAssignedDriver($booking, $socketApiBaseUrl);
     }
 
-    private function notifyAssignedDriver(CompanyBooking $booking): void
+    private function notifyAssignedDriver(CompanyBooking $booking, ?string $socketApiBaseUrl = null): void
     {
         $booking->loadMissing('userDetail');
 
         Http::withHeaders([
-            'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-        ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+            'Authorization' => 'Bearer ' . $this->internalSecret(),
+        ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'send-new-ride'), [
             'drivers' => [$booking->driver],
             'booking' => [
                 'id' => $booking->id,
@@ -132,7 +136,7 @@ class BookingDispatchService
         $sendRide->save();
     }
 
-    private function startAutomaticDispatch(CompanyBooking $booking, string $tenantDatabase): void
+    private function startAutomaticDispatch(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
         if ($dispatchSystems->isEmpty()) {
@@ -145,15 +149,29 @@ class BookingDispatchService
             Http::withHeaders([
                 'database' => $tenantDatabase,
                 'Accept' => 'application/json',
-            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/' . $booking->id . '/start-auto-dispatch');
+            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-auto-dispatch'));
         } elseif ($dispatchSystem === 'bidding_fixed_fare_plot_base') {
             SendBiddingFixedFareNotificationJob::dispatch($booking->id, null, 0, $tenantDatabase);
         } elseif ($dispatchSystem === 'auto_dispatch_nearest_driver') {
             Http::withHeaders([
                 'database' => $tenantDatabase,
                 'Accept' => 'application/json',
-            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/' . $booking->id . '/start-nearest-dispatch');
+            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-nearest-dispatch'));
         }
+    }
+
+    private function socketEndpoint(?string $socketApiBaseUrl, string $path): string
+    {
+        $baseUrl = $socketApiBaseUrl
+            ? rtrim($socketApiBaseUrl, '/')
+            : SocketApiUrlResolver::resolve();
+
+        return $baseUrl . '/' . ltrim($path, '/');
+    }
+
+    private function internalSecret(): ?string
+    {
+        return config('services.node_socket.internal_secret');
     }
 
     private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void
