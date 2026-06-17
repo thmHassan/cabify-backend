@@ -432,22 +432,20 @@ class BookingController extends Controller
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                 // AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                $url = "https://backend.cabifyit.com/socket-api/bookings/".$newBooking->id."/start-auto-dispatch";
                 Http::withHeaders([
                     'database' => $request->header('database'),
                     'Accept' => 'application/json',
-                ])->post($url);
+                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/' . $newBooking->id . '/start-auto-dispatch');
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
                 SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
             }
             elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
                 // AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
-                $url = "https://backend.cabifyit.com/socket-api/bookings/".$newBooking->id."/start-nearest-dispatch";
                 Http::withHeaders([
                     'database' => $request->header('database'),
                     'Accept' => 'application/json',
-                ])->post($url);
+                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/bookings/' . $newBooking->id . '/start-nearest-dispatch');
             }
             elseif($dispatch_system->first()->dispatch_system == "bidding"){
                 SendBiddingNotificationJob::dispatch($newBooking->id);

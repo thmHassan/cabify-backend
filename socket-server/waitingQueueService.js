@@ -1,4 +1,4 @@
-const DEFAULT_SEARCH_RADIUS_KM = 6;
+const DEFAULT_SEARCH_RADIUS_KM = 1;
 
 const pointInPolygon = (lat, lng, polygon) => {
     if (!Array.isArray(polygon) || polygon.length === 0) {

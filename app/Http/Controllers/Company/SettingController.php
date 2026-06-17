@@ -41,7 +41,10 @@ class SettingController extends Controller
                 $data['company_business_address'] = $settings->data['address'];
                 $data['company_timezone'] = $settings->data['time_zone'];
                 $data['company_description'] = "";
+                $data['search_radius'] = CompanySetting::resolveSearchRadiusKm();
                 $data = (object) $data;
+            } else {
+                $data->search_radius = CompanySetting::resolveSearchRadiusKm($settings);
             }
             return response()->json([
                 'success' => 1,
@@ -92,7 +95,9 @@ class SettingController extends Controller
     public function saveCompanyProfile(Request $request)
     {
         try {
-            $request->validate([
+            $nearestDriverDispatchEnabled = CompanySetting::isNearestDriverDispatchEnabled();
+
+            $rules = [
                 'company_name' => 'required|max:255',
                 'company_email' => 'required|max:255',
                 'company_phone_no' => 'required|max:255',
@@ -102,7 +107,20 @@ class SettingController extends Controller
                 'support_contact_no' => 'required|max:255',
                 'support_emergency_no' => 'required|max:255',
                 'support_rescue_number' => 'required|max:255',
-            ]);
+            ];
+
+            if ($request->has('search_radius') && $request->search_radius !== null && $request->search_radius !== '') {
+                if (!$nearestDriverDispatchEnabled) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'search_radius can only be updated when auto dispatch nearest driver is enabled',
+                    ], 422);
+                }
+
+                $rules['search_radius'] = 'required|numeric|min:1';
+            }
+
+            $request->validate($rules);
 
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
@@ -120,7 +138,11 @@ class SettingController extends Controller
             $settings->support_contact_no = $request->support_contact_no;
             $settings->support_emergency_no = $request->support_emergency_no;
             $settings->support_rescue_number = $request->support_rescue_number;
-            $settings->search_radius = $request->search_radius;
+
+            if ($nearestDriverDispatchEnabled && $request->has('search_radius') && $request->search_radius !== null && $request->search_radius !== '') {
+                $settings->search_radius = $request->search_radius;
+            }
+
             $settings->save();
 
             return response()->json([

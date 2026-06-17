@@ -86,7 +86,10 @@ const LOCATION_TIMEOUT_MS = 15 * 60 * 1000;
 const RECONNECTING_THRESHOLD_MS = 10 * 1000;
 
 const AUTO_DISPATCH_TIMEOUT_MS = 30000;
+const NEAREST_DISPATCH_TIMEOUT_MS = 59000;
+const DEFAULT_NEAREST_SEARCH_RADIUS_KM = 1;
 const autoDispatchSessions = new Map();
+const nearestDispatchSessions = new Map();
 let autoDispatchOfferToken = 0;
 
 const clearAutoDispatchSession = (bookingIdInt) => {
@@ -98,8 +101,66 @@ const clearAutoDispatchSession = (bookingIdInt) => {
     autoDispatchSessions.delete(key);
 };
 
+const clearNearestDispatchSession = (bookingIdInt) => {
+    const key = String(bookingIdInt);
+    const session = nearestDispatchSessions.get(key);
+    if (session?.timeoutId) {
+        clearTimeout(session.timeoutId);
+    }
+    nearestDispatchSessions.delete(key);
+};
+
+const getNearestSearchRadiusKm = async (db) => {
+    let searchRadius = DEFAULT_NEAREST_SEARCH_RADIUS_KM;
+
+    try {
+        const [settingsRows] = await db.query(
+            'SELECT search_radius FROM settings ORDER BY id DESC LIMIT 1'
+        );
+        if (settingsRows.length && settingsRows[0].search_radius) {
+            const radius = parseFloat(settingsRows[0].search_radius);
+            if (!Number.isNaN(radius) && radius > 0) {
+                searchRadius = radius;
+            }
+        }
+    } catch (e) {
+        console.error(`[NearestDispatch] Settings fetch error (using default ${searchRadius}km):`, e.message);
+    }
+
+    return searchRadius;
+};
+
+const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverIds = []) => {
+    let excludeClause = '';
+    let queryParams = [lat, lng, lat];
+
+    if (excludeDriverIds.length > 0) {
+        excludeClause = `AND id NOT IN (${excludeDriverIds.map(() => '?').join(',')})`;
+        queryParams = [lat, lng, lat, ...excludeDriverIds];
+    }
+
+    const [nearestDrivers] = await db.query(`
+        SELECT *,
+            (6371 * acos(
+                cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?))
+                + sin(radians(?)) * sin(radians(latitude))
+            )) AS distance
+        FROM drivers
+        WHERE driving_status = 'idle'
+        AND online_status = 'online'
+        AND latitude IS NOT NULL
+        AND longitude IS NOT NULL
+        ${excludeClause}
+        HAVING distance IS NOT NULL AND distance <= ?
+        ORDER BY distance ASC
+    `, [...queryParams, searchRadius]);
+
+    return nearestDrivers;
+};
+
 const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName }) => {
     clearAutoDispatchSession(bookingIdInt);
+    clearNearestDispatchSession(bookingIdInt);
 
     const message = 'Auto dispatch completed — no driver accepted. Booking is available for manual dispatch.';
 
@@ -814,227 +875,331 @@ const tryNextBackupPlot = async ({ bookingIdInt, tenantDb, db, dbName, plotIdInt
     await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName });
 };
 
+const advanceNearestDispatchAfterDriverSkip = async ({
+    bookingIdInt,
+    tenantDb,
+    db,
+    driverIndex,
+    drivers,
+    triedDriverIds,
+    lat,
+    lng,
+    searchRadius,
+    driverId,
+    reason,
+}) => {
+    const actionMessage = reason === 'timeout'
+        ? `Nearest dispatch — driver #${driverId} did not respond within ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s`
+        : `Nearest dispatch — driver #${driverId} skipped`;
+
+    try {
+        await db.query(
+            `UPDATE bookings SET driver = NULL, booking_status = 'pending', dispatcher_action = ? WHERE id = ?`,
+            [actionMessage, bookingIdInt]
+        );
+    } catch (e) {
+        console.error('[NearestDispatch] Skip update error:', e.message);
+        return;
+    }
+
+    return nearestDriverDispatch({
+        bookingId: bookingIdInt,
+        tenantDb,
+        driverIndex: driverIndex + 1,
+        triedDriverIds: [...triedDriverIds, driverId],
+        cachedDrivers: drivers,
+        lat,
+        lng,
+        searchRadius,
+    });
+};
+
+const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) => {
+    const session = nearestDispatchSessions.get(String(bookingIdInt));
+    if (!session) {
+        return { handled: false };
+    }
+
+    const db = getConnection(tenantDb);
+
+    if (String(session.currentDriverId) !== String(driverId)) {
+        return {
+            handled: true,
+            status: 400,
+            body: { success: false, message: 'Driver is not the current nearest-dispatch assignee' },
+        };
+    }
+
+    const [rows] = await db.query(
+        'SELECT booking_status, driver FROM bookings WHERE id = ?',
+        [bookingIdInt]
+    );
+    if (!rows.length) {
+        clearNearestDispatchSession(bookingIdInt);
+        return {
+            handled: true,
+            status: 404,
+            body: { success: false, message: 'Booking not found' },
+        };
+    }
+
+    const { booking_status, driver } = rows[0];
+
+    if (booking_status !== 'pending') {
+        clearNearestDispatchSession(bookingIdInt);
+        return {
+            handled: true,
+            status: 200,
+            body: { success: true, message: 'Booking no longer pending', skipped: true },
+        };
+    }
+
+    if (driver && String(driver) !== String(driverId)) {
+        return {
+            handled: true,
+            status: 400,
+            body: { success: false, message: 'Ride already accepted by another driver' },
+        };
+    }
+
+    clearNearestDispatchSession(bookingIdInt);
+
+    const rejectEvent = {
+        booking_id: bookingIdInt,
+        driver_id: driverId,
+        message: `Driver #${driverId} rejected the ride`,
+    };
+    dispatcherSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
+    adminSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
+    clientSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
+
+    console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → manual fallback`);
+
+    await fallbackToManualDispatch({
+        bookingIdInt,
+        tenantDb,
+        db,
+        dbName: session.dbName,
+    });
+
+    return {
+        handled: true,
+        status: 200,
+        body: { success: true, message: 'Driver rejected — moved to manual dispatch list' },
+    };
+};
+
 const nearestDriverDispatch = async ({
     bookingId,
     tenantDb,
     driverIndex = 0,
-    triedDriverIds = []
+    triedDriverIds = [],
+    cachedDrivers = null,
+    lat = null,
+    lng = null,
+    searchRadius = null,
 }) => {
     try {
         const db = getConnection(tenantDb);
-        const dbName = tenantDb.startsWith("tenant") ? tenantDb.slice("tenant".length) : tenantDb;
-        const bookingIdInt = parseInt(bookingId);
+        const dbName = tenantDb.startsWith('tenant') ? tenantDb.slice('tenant'.length) : tenantDb;
+        const bookingIdInt = parseInt(bookingId, 10);
+        const isFreshStart = driverIndex === 0 && triedDriverIds.length === 0 && !cachedDrivers;
 
-        console.log(`[NearestDispatch] bookingId=${bookingIdInt} index=${driverIndex} tried=${JSON.stringify(triedDriverIds)}`);
+        console.log(
+            `[NearestDispatch] bookingId=${bookingIdInt} index=${driverIndex} tried=${JSON.stringify(triedDriverIds)}`
+        );
 
-        // 1. Load booking
-        const [bookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
-        if (!bookingRows.length) { console.log(`[NearestDispatch] Booking not found`); return; }
+        if (isFreshStart) {
+            clearNearestDispatchSession(bookingIdInt);
+        }
+
+        const [bookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        if (!bookingRows.length) {
+            console.log('[NearestDispatch] Booking not found');
+            return;
+        }
         const booking = bookingRows[0];
 
-        if (["cancelled", "completed"].includes(booking.booking_status)) {
-            console.log(`[NearestDispatch] Status=${booking.booking_status}. Stop.`); return;
+        if (['cancelled', 'completed'].includes(booking.booking_status)) {
+            console.log(`[NearestDispatch] Status=${booking.booking_status}. Stop.`);
+            return;
         }
-        if (booking.booking_status === "ongoing" && booking.driver) {
-            console.log(`[NearestDispatch] Already ongoing.`); return;
+        if (booking.booking_status === 'ongoing' && booking.driver) {
+            console.log('[NearestDispatch] Already ongoing.');
+            return;
         }
 
-        // 2. pickup_point check
         if (!booking.pickup_point || !booking.pickup_point.includes(',')) {
-            console.log(`[NearestDispatch] No valid pickup_point on booking`);
-            io.to(`dispatcher_${dbName}`).emit("nearest-dispatch-failed", {
+            console.log('[NearestDispatch] No valid pickup_point on booking');
+            io.to(`dispatcher_${dbName}`).emit('nearest-dispatch-failed', {
                 booking_id: bookingIdInt,
-                message: "No pickup coordinates on booking"
+                message: 'No pickup coordinates on booking',
             });
             return;
         }
 
-        const [latStr, lngStr] = booking.pickup_point.split(",");
-        const lat = parseFloat(latStr.trim());
-        const lng = parseFloat(lngStr.trim());
-        console.log(`[NearestDispatch] Pickup: lat=${lat} lng=${lng}`);
-
-        let searchRadius = 10; // default 10km
-        try {
-            const [settingsRows] = await db.query(
-                "SELECT search_radius FROM settings ORDER BY id DESC LIMIT 1"
-            );
-            if (settingsRows.length && settingsRows[0].search_radius) {
-                const radius = parseFloat(settingsRows[0].search_radius);
-                if (!isNaN(radius) && radius > 0) {
-                    searchRadius = radius;
-                }
-            }
-            console.log(`[NearestDispatch] Search radius: ${searchRadius}km`);
-        } catch (e) {
-            console.error(`[NearestDispatch] Settings fetch error (using default ${searchRadius}km):`, e.message);
+        if (lat === null || lng === null) {
+            const [latStr, lngStr] = booking.pickup_point.split(',');
+            lat = parseFloat(latStr.trim());
+            lng = parseFloat(lngStr.trim());
         }
 
-        // 4. Nearest idle drivers — exclude already tried
-        let excludeClause = "";
-        let queryParams = [lat, lng, lat];
-
-        if (triedDriverIds.length > 0) {
-            excludeClause = `AND id NOT IN (${triedDriverIds.map(() => '?').join(',')})`;
-            queryParams = [lat, lng, lat, ...triedDriverIds];
+        if (searchRadius === null) {
+            searchRadius = await getNearestSearchRadiusKm(db);
         }
 
-        // searchRadius dynamic use
-        const [nearestDrivers] = await db.query(`
-            SELECT *,
-                (6371 * acos(
-                    cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?))
-                    + sin(radians(?)) * sin(radians(latitude))
-                )) AS distance
-            FROM drivers
-            WHERE driving_status = 'idle'
-            AND online_status = 'online'
-            AND latitude IS NOT NULL
-            AND longitude IS NOT NULL
-            ${excludeClause}
-            HAVING distance IS NOT NULL AND distance <= ?
-            ORDER BY distance ASC
-            LIMIT 20
-        `, [...queryParams, searchRadius]);
+        let nearestDrivers = cachedDrivers;
+        if (!nearestDrivers) {
+            nearestDrivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius, triedDriverIds);
+        }
 
-        console.log(`[NearestDispatch] Found ${nearestDrivers.length} drivers within ${searchRadius}km`);
+        console.log(`[NearestDispatch] Pickup: lat=${lat} lng=${lng} radius=${searchRadius}km`);
+        console.log(`[NearestDispatch] Eligible drivers within radius: ${nearestDrivers.length}`);
         if (nearestDrivers.length) {
-            console.log(`[NearestDispatch] Drivers:`, nearestDrivers.map(d => `#${d.id} ${d.name} (${Number(d.distance).toFixed(2)}km)`));
+            console.log(
+                '[NearestDispatch] Drivers:',
+                nearestDrivers.map((d) => `#${d.id} ${d.name} (${Number(d.distance).toFixed(2)}km)`)
+            );
         }
 
-        if (!nearestDrivers.length) {
-            console.log(`[NearestDispatch] No idle drivers within ${searchRadius}km`);
-
-            await db.query(
-                `UPDATE bookings SET dispatcher_action = ? WHERE id = ?`,
-                [`No nearby drivers available within ${searchRadius}km radius.`, bookingIdInt]
-            );
-
-            io.to(`dispatcher_${dbName}`).emit("nearest-dispatch-failed", {
-                booking_id: bookingIdInt,
-                message: `No nearby idle drivers available within ${searchRadius}km.`,
-                search_radius: searchRadius
-            });
-            io.to(`admin_${dbName}`).emit("nearest-dispatch-failed", {
-                booking_id: bookingIdInt,
-                message: `No nearby idle drivers available within ${searchRadius}km.`,
-                search_radius: searchRadius
-            });
-            return;
-        }
-
-        // 5. Select driver at current index
-        if (driverIndex >= nearestDrivers.length) {
-            console.log(`[NearestDispatch] All ${nearestDrivers.length} nearby drivers exhausted`);
-
-            await db.query(
-                `UPDATE bookings SET dispatcher_action = ? WHERE id = ?`,
-                [`All nearby drivers within ${searchRadius}km did not respond. Please assign manually.`, bookingIdInt]
-            );
-
-            io.to(`dispatcher_${dbName}`).emit("nearest-dispatch-failed", {
-                booking_id: bookingIdInt,
-                message: `All nearby drivers within ${searchRadius}km did not respond.`,
-                search_radius: searchRadius
-            });
-            io.to(`admin_${dbName}`).emit("nearest-dispatch-failed", {
-                booking_id: bookingIdInt,
-                message: `All nearby drivers within ${searchRadius}km did not respond.`,
-                search_radius: searchRadius
-            });
+        if (!nearestDrivers.length || driverIndex >= nearestDrivers.length) {
+            const reason = !nearestDrivers.length
+                ? `no idle drivers within ${searchRadius}km`
+                : `all ${nearestDrivers.length} nearby driver(s) exhausted`;
+            console.log(`[NearestDispatch] ${reason} → manual fallback`);
+            await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName });
             return;
         }
 
         const driver = nearestDrivers[driverIndex];
         const distanceKm = parseFloat(driver.distance || 0).toFixed(2);
-        console.log(`[NearestDispatch] Selected driver #${driver.id} "${driver.name}" (${distanceKm}km away, radius=${searchRadius}km)`);
+        console.log(
+            `[NearestDispatch] Offering to driver #${driver.id} "${driver.name}" (${distanceKm}km away, index=${driverIndex})`
+        );
 
-        // 6. Update booking
         const dispatchAmount = (
             booking.booking_amount === null || booking.booking_amount === undefined || booking.booking_amount == 0
         ) ? (booking.offered_amount ?? null) : booking.booking_amount;
 
         await db.query(
-            `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending',
-             dispatcher_action = ? WHERE id = ?`,
+            `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending', dispatcher_action = ? WHERE id = ?`,
             [
                 driver.id,
                 dispatchAmount,
                 `Nearest dispatch — request sent to driver #${driver.id} (${distanceKm}km away, radius=${searchRadius}km)`,
-                bookingIdInt
+                bookingIdInt,
             ]
         );
 
-        const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
+        const [updatedRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
         const updatedBooking = updatedRows[0];
 
-        // 7. Socket emit to driver
         const driverSocketId = driverSockets.get(String(driver.id).trim());
         if (driverSocketId) {
-            io.to(driverSocketId).emit("new-ride-request", {
+            io.to(driverSocketId).emit('new-ride-request', {
                 booking_id: updatedBooking.id,
-                assignment_type: "nearest_dispatch",
+                assignment_type: 'nearest_dispatch',
                 message: `You have a new ride request (${distanceKm}km from your location)`,
                 booking: updatedBooking,
                 distance_km: distanceKm,
-                search_radius: searchRadius
+                search_radius: searchRadius,
+                expires_in_seconds: NEAREST_DISPATCH_TIMEOUT_MS / 1000,
             });
             console.log(`[NearestDispatch] Socket sent to driver #${driver.id}`);
         } else {
             console.log(`[NearestDispatch] Driver #${driver.id} not in socket map — FCM only`);
         }
 
-        dispatcherSockets.forEach(sid => io.to(sid).emit("notification-ride", updatedBooking));
-        adminSockets.forEach(sid => io.to(sid).emit("notification-ride", updatedBooking));
+        dispatcherSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
+        adminSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
 
-        // 8. FCM
         try {
-            await sendNotificationToDriver(db, driver.id, "New Ride Nearby", `You have a new ride request (${distanceKm}km away)`, {
-                booking_id: String(updatedBooking.id), type: "new_ride"
-            });
+            await sendNotificationToDriver(
+                db,
+                driver.id,
+                'New Ride Nearby',
+                `You have a new ride request (${distanceKm}km away)`,
+                { booking_id: String(updatedBooking.id), type: 'new_ride' }
+            );
         } catch (e) {
-            console.error(`[NearestDispatch] FCM error:`, e.message);
+            console.error(`[NearestDispatch] FCM error for driver #${driver.id}:`, e.message);
         }
 
-        // 9. 30s timeout
-        console.log(`[NearestDispatch] 30s timeout for driver #${driver.id}`);
-        setTimeout(async () => {
+        try {
+            await db.query(
+                'INSERT INTO send_new_rides (booking_id, driver_id, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
+                [bookingIdInt, driver.id]
+            );
+        } catch (e) {
+            console.error(`[NearestDispatch] send_new_rides insert error for driver #${driver.id}:`, e.message);
+        }
+
+        clearNearestDispatchSession(bookingIdInt);
+        const offerToken = ++autoDispatchOfferToken;
+        const sessionState = {
+            offerToken,
+            tenantDb,
+            dbName,
+            lat,
+            lng,
+            searchRadius,
+            driverIndex,
+            triedDriverIds: [...triedDriverIds],
+            drivers: nearestDrivers,
+            currentDriverId: driver.id,
+        };
+
+        console.log(`[NearestDispatch] ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s timeout for driver #${driver.id}`);
+
+        const timeoutId = setTimeout(async () => {
             try {
+                const session = nearestDispatchSessions.get(String(bookingIdInt));
+                if (!session || session.offerToken !== offerToken) {
+                    return;
+                }
+                nearestDispatchSessions.delete(String(bookingIdInt));
+
                 const [checkRows] = await db.query(
-                    "SELECT booking_status, driver FROM bookings WHERE id = ?",
+                    'SELECT booking_status, driver FROM bookings WHERE id = ?',
                     [bookingIdInt]
                 );
                 if (!checkRows.length) return;
 
-                const { booking_status: cs, driver: cd } = checkRows[0];
-                console.log(`[NearestDispatch] Timeout check: status=${cs} driver=${cd}`);
+                const { booking_status: status, driver: assignedDriver } = checkRows[0];
+                console.log(`[NearestDispatch] Timeout check: status=${status} driver=${assignedDriver}`);
 
-                if (cs === "ongoing") { console.log(`[NearestDispatch] ✅ Accepted by driver #${driver.id}`); return; }
-                if (["cancelled", "completed"].includes(cs)) { return; }
+                if (status === 'ongoing') {
+                    console.log(`[NearestDispatch] Accepted by driver #${driver.id}`);
+                    return;
+                }
+                if (['cancelled', 'completed'].includes(status)) {
+                    return;
+                }
 
-                if (cs === "pending" && String(cd) === String(driver.id)) {
+                if (status === 'pending' && String(assignedDriver) === String(driver.id)) {
                     console.log(`[NearestDispatch] No response from #${driver.id} → next nearest driver`);
-
-                    await db.query(
-                        `UPDATE bookings SET driver = NULL, booking_status = 'pending',
-                         dispatcher_action = ? WHERE id = ?`,
-                        [`Nearest dispatch — driver #${driver.id} did not respond, trying next within ${searchRadius}km`, bookingIdInt]
-                    );
-
-                    nearestDriverDispatch({
-                        bookingId: bookingIdInt,
+                    await advanceNearestDispatchAfterDriverSkip({
+                        bookingIdInt,
                         tenantDb,
-                        driverIndex: 0,
-                        triedDriverIds: [...triedDriverIds, driver.id]
+                        db,
+                        driverIndex,
+                        drivers: sessionState.drivers,
+                        triedDriverIds: sessionState.triedDriverIds,
+                        lat: sessionState.lat,
+                        lng: sessionState.lng,
+                        searchRadius: sessionState.searchRadius,
+                        driverId: driver.id,
+                        reason: 'timeout',
                     });
                 }
             } catch (e) {
-                console.error(`[NearestDispatch] Timeout error:`, e.message);
+                console.error('[NearestDispatch] Timeout error:', e.message);
             }
-        }, 30000);
+        }, NEAREST_DISPATCH_TIMEOUT_MS);
 
+        nearestDispatchSessions.set(String(bookingIdInt), { ...sessionState, timeoutId });
     } catch (error) {
-        console.error(`[NearestDispatch] FATAL:`, error.message);
+        console.error('[NearestDispatch] FATAL:', error.message);
         console.error(error.stack);
     }
 };
@@ -2503,6 +2668,15 @@ app.post("/bookings/:id/auto-dispatch/reject", async (req, res) => {
             });
         }
 
+        const nearestResult = await handleNearestDispatchReject({
+            bookingIdInt,
+            tenantDb: req.tenantDb,
+            driverId,
+        });
+        if (nearestResult.handled) {
+            return res.status(nearestResult.status).json(nearestResult.body);
+        }
+
         const result = await handleAutoDispatchReject({
             bookingIdInt,
             tenantDb: req.tenantDb,
@@ -2531,6 +2705,15 @@ app.post("/driver/reject-ride", async (req, res) => {
             return res.status(400).json({ success: false, message: "driver_id is required" });
         }
 
+        const nearestResult = await handleNearestDispatchReject({
+            bookingIdInt: parseInt(rideId, 10),
+            tenantDb: req.tenantDb,
+            driverId,
+        });
+        if (nearestResult.handled) {
+            return res.status(nearestResult.status).json(nearestResult.body);
+        }
+
         const result = await handleAutoDispatchReject({
             bookingIdInt: parseInt(rideId, 10),
             tenantDb: req.tenantDb,
@@ -2547,7 +2730,10 @@ app.post("/driver/reject-ride", async (req, res) => {
 app.post("/driver/accept-ride", async (req, res) => {
     try {
         const rideId = req.body.ride_id ?? req.body.booking_id;
+        const driverId = req.body.driver_id ?? req.body.driverId;
+
         if (rideId) {
+            clearNearestDispatchSession(parseInt(rideId, 10));
             clearAutoDispatchSession(parseInt(rideId, 10));
         }
         return res.json({ success: true, message: "Accept acknowledged" });

@@ -22,6 +22,7 @@ use App\Models\Setting;
 use App\Models\TenantUser;
 use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
+use App\Models\CompanySendNewRide;
 
 class BookingController extends Controller
 {
@@ -386,6 +387,15 @@ class BookingController extends Controller
                 ], 400);
             }
 
+            $driverId = auth('driver')->user()->id;
+
+            if ($booking->driver && (string) $booking->driver !== (string) $driverId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Ride already accepted by another driver',
+                ], 400);
+            }
+
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
             if ($companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = $companySetting->package_amount;
@@ -471,6 +481,7 @@ class BookingController extends Controller
                 'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/driver/accept-ride', [
                 'ride_id' => $booking->id,
+                'driver_id' => $driverId,
             ]);
 
             Http::withHeaders([
@@ -557,7 +568,11 @@ class BookingController extends Controller
                 ], 400);
             }
 
-            if ((string) $booking->driver !== (string) $driverId) {
+            $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
+                ->where('driver_id', $driverId)
+                ->exists();
+
+            if ((string) $booking->driver !== (string) $driverId && !$wasNotified) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'You are not assigned to this ride',
