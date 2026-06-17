@@ -442,20 +442,7 @@ class BookingController extends Controller
                 ? $booking->offered_amount
                 : $booking->booking_amount;
 
-            $newStatus = 'pending';
-            if ($isNearestDispatchOffer) {
-                $newStatus = 'started';
-            } else {
-                $bookingDateTime = Carbon::parse(
-                    $booking->booking_date . ' ' . $booking->pickup_time
-                );
-                $startWindow = now()->subMinutes(30);
-                $endWindow = now()->addMinutes(30);
-
-                if ($bookingDateTime->between($startWindow, $endWindow)) {
-                    $newStatus = 'ongoing';
-                }
-            }
+            $newStatus = $this->resolveStatusAfterDriverAccept($booking, $isNearestDispatchOffer);
 
             $updateQuery = CompanyBooking::where('id', $booking->id)
                 ->where('booking_status', 'pending')
@@ -576,7 +563,8 @@ class BookingController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Ride accepted successfully'
+                'message' => 'Ride accepted successfully',
+                'booking_status' => $booking->booking_status,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -584,6 +572,28 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function resolveStatusAfterDriverAccept(CompanyBooking $booking, bool $isNearestDispatchOffer): string
+    {
+        if ($isNearestDispatchOffer) {
+            return 'started';
+        }
+
+        if ($booking->pickup_time === 'asap' || ($booking->pickup_time_type ?? null) === 'asap') {
+            return 'ongoing';
+        }
+
+        try {
+            $bookingDateTime = Carbon::parse($booking->booking_date . ' ' . $booking->pickup_time);
+            if ($bookingDateTime->between(now()->subMinutes(30), now()->addMinutes(30))) {
+                return 'ongoing';
+            }
+        } catch (\Exception $e) {
+            return 'ongoing';
+        }
+
+        return 'started';
     }
 
     public function rejectRide(Request $request)
