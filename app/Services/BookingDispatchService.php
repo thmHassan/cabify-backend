@@ -85,8 +85,9 @@ class BookingDispatchService
         ?string $socketApiBaseUrl = null
     ): void {
         $hasDriver = !empty($booking->driver);
+        $nearestDriverDispatch = !$hasDriver && $this->isNearestDriverDispatchEnabled();
 
-        if (!$hasDriver || $alwaysBroadcast) {
+        if ((!$hasDriver || $alwaysBroadcast) && !$nearestDriverDispatch) {
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . $this->internalSecret(),
             ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/broadcast'), [
@@ -172,6 +173,16 @@ class BookingDispatchService
     private function internalSecret(): ?string
     {
         return config('services.node_socket.internal_secret');
+    }
+
+    private function isNearestDriverDispatchEnabled(): bool
+    {
+        $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
+        if ($dispatchSystems->isEmpty()) {
+            return false;
+        }
+
+        return $dispatchSystems->first()->dispatch_system === 'auto_dispatch_nearest_driver';
     }
 
     private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void

@@ -424,14 +424,18 @@ class BookingController extends Controller
 
             $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
 
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-                 ])->post(SocketApiUrlResolver::endpoint($request, 'bookings/broadcast'), [
+            $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
+            $isNearestDriverDispatch = $dispatch_system->isNotEmpty()
+                && $dispatch_system->first()->dispatch_system === 'auto_dispatch_nearest_driver';
+
+            if (!$isNearestDriverDispatch) {
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                ])->post(SocketApiUrlResolver::endpoint($request, 'bookings/broadcast'), [
                     'booking_id' => $newBooking->id,
                     'tenantDb'   => $request->header('database'),
-                 ]);
-
-            $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
+                ]);
+            }
                 
             if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
                 // AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
