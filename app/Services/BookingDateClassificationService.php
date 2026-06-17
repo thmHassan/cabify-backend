@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CompanyBooking;
+use App\Support\NearestDispatch;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -73,7 +74,7 @@ class BookingDateClassificationService
                     ->whereDate('booking_date', Carbon::today())
                     ->where(function (Builder $inner) {
                         $inner->whereNull('dispatcher_action')
-                            ->orWhere('dispatcher_action', 'not like', 'NEAREST_DISPATCH_ACTIVE|%');
+                            ->orWhere('dispatcher_action', 'not like', NearestDispatch::ACTIVE_PREFIX . '%');
                     });
             case 'pre_bookings':
                 return app(PreBookingService::class)->applyPreBookingsFilter($query);

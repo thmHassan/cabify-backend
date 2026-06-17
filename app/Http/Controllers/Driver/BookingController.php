@@ -23,6 +23,8 @@ use App\Models\TenantUser;
 use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
 use App\Models\CompanySendNewRide;
+use App\Services\SocketApiUrlResolver;
+use App\Support\NearestDispatch;
 
 class BookingController extends Controller
 {
@@ -380,6 +382,13 @@ class BookingController extends Controller
         try {
             $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
 
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found',
+                ], 404);
+            }
+
             if ($booking->booking_status !== 'pending') {
                 return response()->json([
                     'error' => 1,
@@ -388,8 +397,9 @@ class BookingController extends Controller
             }
 
             $driverId = auth('driver')->user()->id;
+            $isNearestDispatchOffer = NearestDispatch::isActiveOffer($booking->dispatcher_action);
 
-            if ($booking->driver && (string) $booking->driver !== (string) $driverId) {
+            if (!$isNearestDispatchOffer && $booking->driver && (string) $booking->driver !== (string) $driverId) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Ride already accepted by another driver',
@@ -428,30 +438,57 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $bookingAmount = (is_null($booking->booking_amount) || $booking->booking_amount == 0)
+                ? $booking->offered_amount
+                : $booking->booking_amount;
+
+            $newStatus = 'pending';
+            if ($isNearestDispatchOffer) {
+                $newStatus = 'started';
+            } else {
+                $bookingDateTime = Carbon::parse(
+                    $booking->booking_date . ' ' . $booking->pickup_time
+                );
+                $startWindow = now()->subMinutes(30);
+                $endWindow = now()->addMinutes(30);
+
+                if ($bookingDateTime->between($startWindow, $endWindow)) {
+                    $newStatus = 'ongoing';
+                }
+            }
+
+            $updateQuery = CompanyBooking::where('id', $booking->id)
+                ->where('booking_status', 'pending')
+                ->where(function ($query) use ($driverId) {
+                    $query->whereNull('driver')->orWhere('driver', $driverId);
+                });
+
+            $claimed = $updateQuery->update([
+                'driver' => $driverId,
+                'booking_amount' => $bookingAmount,
+                'booking_status' => $newStatus,
+                'dispatcher_action' => $isNearestDispatchOffer
+                    ? "Nearest dispatch — accepted by driver #{$driverId}"
+                    : $booking->dispatcher_action,
+            ]);
+
+            if (!$claimed) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Ride already accepted by another driver',
+                ], 409);
+            }
+
+            $booking->refresh();
+            $driver = CompanyDriver::where("id", $driverId)->first();
+
             if ($companySetting->package_type == "ride_count_price") {
                 $driver->ride_count_price -= 1;
-                $driver->save();
             }
 
-            $bookingDateTime = \Carbon\Carbon::parse(
-                $booking->booking_date . ' ' . $booking->pickup_time
-            );
-
-            $startWindow = now()->subMinutes(30);
-            $endWindow = now()->addMinutes(30);
-            
-            if ($bookingDateTime->between($startWindow, $endWindow)) {
-                $booking->booking_status = "ongoing";
+            if (in_array($newStatus, ['ongoing', 'started'], true)) {
                 $driver->driving_status = "busy";
             }
-
-            // booking_amount null or 0 hoy to j offered_amount set karo, otherwise existing rakhvo
-            if (is_null($booking->booking_amount) || $booking->booking_amount == 0) {
-                $booking->booking_amount = $booking->offered_amount;
-            }
-            $booking->driver = $driver->id;
-            $booking->save();
 
             if ($companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = $companySetting->package_amount;
@@ -476,30 +513,35 @@ class BookingController extends Controller
                 $user->save();
             }
 
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            $socketHeaders = [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/driver/accept-ride', [
-                'ride_id' => $booking->id,
-                'driver_id' => $driverId,
-            ]);
+            ];
 
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
-                'userId' => $booking->user_id,
-                'status' => "accept_ride",
-                'booking' => [
-                    'id' => $booking->id,
-                    'booking_id' => $booking->booking_id,
-                    'pickup_point' => $booking->pickup_point,
-                    'destination_point' => $booking->destination_point,
-                    'offered_amount' => $booking->offered_amount,
-                    'distance' => $booking->distance,
-                    'booking_status' => $booking->booking_status
+            Http::withHeaders($socketHeaders)->post(
+                SocketApiUrlResolver::endpoint(null, 'driver/accept-ride'),
+                [
+                    'ride_id' => $booking->id,
+                    'driver_id' => $driverId,
                 ]
-            ]);
+            );
+
+            Http::withHeaders($socketHeaders)->post(
+                SocketApiUrlResolver::endpoint(null, 'change-ride-status'),
+                [
+                    'userId' => $booking->user_id,
+                    'status' => "accept_ride",
+                    'booking' => [
+                        'id' => $booking->id,
+                        'booking_id' => $booking->booking_id,
+                        'pickup_point' => $booking->pickup_point,
+                        'destination_point' => $booking->destination_point,
+                        'offered_amount' => $booking->offered_amount,
+                        'distance' => $booking->distance,
+                        'booking_status' => $booking->booking_status
+                    ]
+                ]
+            );
 
             $dataCheck = (new TenantUser)
                 ->setConnection('central')
@@ -582,7 +624,7 @@ class BookingController extends Controller
             $response = Http::withHeaders([
                 'database' => $request->header('database'),
                 'Accept' => 'application/json',
-            ])->post(env('NODE_SOCKET_URL') . '/bookings/' . $booking->id . '/auto-dispatch/reject', [
+            ])->post(SocketApiUrlResolver::endpoint(null, 'bookings/' . $booking->id . '/auto-dispatch/reject'), [
                 'driver_id' => $driverId,
             ]);
 

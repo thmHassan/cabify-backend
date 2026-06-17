@@ -900,12 +900,35 @@ const tryNextBackupPlot = async ({ bookingIdInt, tenantDb, db, dbName, plotIdInt
 };
 
 const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) => {
-    const session = nearestDispatchSessions.get(String(bookingIdInt));
+    let session = nearestDispatchSessions.get(String(bookingIdInt));
+    const db = getConnection(tenantDb);
+    let dbName = tenantDb.startsWith('tenant') ? tenantDb.slice('tenant'.length) : tenantDb;
+
     if (!session) {
-        return { handled: false };
+        const [rows] = await db.query(
+            'SELECT booking_status, driver, dispatcher_action FROM bookings WHERE id = ?',
+            [bookingIdInt]
+        );
+        if (!rows.length) {
+            return { handled: false };
+        }
+
+        const { booking_status, dispatcher_action } = rows[0];
+        if (booking_status !== 'pending' || !isNearestDispatchActive(dispatcher_action)) {
+            return { handled: false };
+        }
+
+        const [notifiedRows] = await db.query(
+            'SELECT 1 FROM send_new_rides WHERE booking_id = ? AND driver_id = ? LIMIT 1',
+            [bookingIdInt, driverId]
+        );
+        if (!notifiedRows.length) {
+            return { handled: false };
+        }
+
+        session = { dbName, notifiedDriverIds: [driverId] };
     }
 
-    const db = getConnection(tenantDb);
     const notifiedIds = session.notifiedDriverIds.map(String);
 
     if (!notifiedIds.includes(String(driverId))) {
@@ -996,8 +1019,12 @@ const nearestDriverDispatch = async ({ bookingId, tenantDb }) => {
             console.log(`[NearestDispatch] Status=${booking.booking_status}. Stop.`);
             return;
         }
-        if (booking.booking_status === 'ongoing' && booking.driver) {
-            console.log('[NearestDispatch] Already ongoing.');
+        if (['ongoing', 'started'].includes(booking.booking_status) && booking.driver) {
+            console.log(`[NearestDispatch] Already assigned (status=${booking.booking_status}).`);
+            return;
+        }
+        if (isNearestDispatchActive(booking.dispatcher_action)) {
+            console.log(`[NearestDispatch] Dispatch already active for booking #${bookingIdInt}.`);
             return;
         }
 
@@ -1112,7 +1139,7 @@ const nearestDriverDispatch = async ({ bookingId, tenantDb }) => {
                 const { booking_status: status, driver: assignedDriver, dispatcher_action } = checkRows[0];
                 console.log(`[NearestDispatch] Timeout check: status=${status} driver=${assignedDriver}`);
 
-                if (['cancelled', 'completed', 'ongoing'].includes(status)) {
+                if (['cancelled', 'completed', 'ongoing', 'started'].includes(status)) {
                     return;
                 }
                 if (assignedDriver) {
@@ -2685,20 +2712,31 @@ app.post("/driver/accept-ride", async (req, res) => {
                     driverId,
                     bookingIdInt
                 );
-
-                try {
-                    const db = getConnection(session.tenantDb);
-                    await db.query(
-                        'UPDATE bookings SET dispatcher_action = ? WHERE id = ?',
-                        [`Nearest dispatch — accepted by driver #${driverId}`, bookingIdInt]
-                    );
-                } catch (e) {
-                    console.error('[NearestDispatch] Accept action update error:', e.message);
-                }
             }
 
             clearNearestDispatchSession(bookingIdInt);
             clearAutoDispatchSession(bookingIdInt);
+
+            if (req.tenantDb) {
+                try {
+                    const db = getConnection(req.tenantDb);
+                    const dbName = req.tenantDb.startsWith('tenant')
+                        ? req.tenantDb.slice('tenant'.length)
+                        : req.tenantDb;
+                    const [updatedRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+
+                    if (updatedRows.length) {
+                        const updatedBooking = updatedRows[0];
+                        dispatcherSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
+                        adminSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
+                        io.to(`dispatcher_${dbName}`).emit('booking-updated-event', updatedBooking);
+                        io.to(`admin_${dbName}`).emit('booking-updated-event', updatedBooking);
+                        await broadcastDashboardCardsUpdate(req.tenantDb);
+                    }
+                } catch (e) {
+                    console.error('[NearestDispatch] Accept broadcast error:', e.message);
+                }
+            }
         }
         return res.json({ success: true, message: "Accept acknowledged" });
     } catch (error) {
