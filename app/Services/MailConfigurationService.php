@@ -71,8 +71,8 @@ class MailConfigurationService
             'mail.mailers.smtp.port' => $port,
             'mail.mailers.smtp.username' => $username,
             'mail.mailers.smtp.password' => $password,
-            'mail.from.address' => $fromAddress ?: config('mail.from.address'),
-            'mail.from.name' => $fromName ?: config('mail.from.name'),
+            'mail.from.address' => $fromAddress ?: config('mail.from.address', 'noreply@cabifyit.com'),
+            'mail.from.name' => $fromName ?: config('mail.from.name', 'CabifyIT'),
         ]);
     }
 }

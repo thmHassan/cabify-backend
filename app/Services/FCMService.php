@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\CompanyDriver;
+use App\Models\CompanyToken;
 use Google\Auth\Credentials\ServiceAccountCredentials;
 use Illuminate\Support\Facades\Http;
 
@@ -56,5 +58,22 @@ class FCMService
             'status' => $response->status(),
             'body' => $response->body(),
         ]);
+    }
+
+    public static function sendToDriver(int $driverId, string $title, string $body, array $data = []): void
+    {
+        $driver = CompanyDriver::find($driverId);
+
+        $tokens = CompanyToken::where('user_id', $driverId)
+            ->where('user_type', 'driver')
+            ->pluck('fcm_token');
+
+        if ($driver?->fcm_token) {
+            $tokens->prepend($driver->fcm_token);
+        }
+
+        foreach ($tokens->unique()->filter() as $token) {
+            self::sendToDevice($token, $title, $body, $data);
+        }
     }
 }

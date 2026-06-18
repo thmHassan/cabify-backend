@@ -488,7 +488,31 @@ class SettingController extends Controller
             $wallet->amount = $request->package_type == "ride_count_price" ? $packageData->package_amount : $request->post_paid_amount;
             $wallet->comment = "Package purchase";
             $wallet->save();
-            
+
+            $dataCheck = (new TenantUser)
+                ->setConnection('central')
+                ->where('id', $request->header('database'))
+                ->first();
+
+            $pushEnabled = !isset($dataCheck) || ($dataCheck->data['push_notification'] ?? 'enable') === 'enable';
+
+            if ($pushEnabled) {
+                $packageLabel = $request->package_type === 'ride_count_price'
+                    ? 'Ride count package'
+                    : ($request->package_top_up_name ?? 'Package');
+
+                FCMService::sendToDriver(
+                    $driverId,
+                    'Package Purchased',
+                    "{$packageLabel} purchased successfully.",
+                    [
+                        'type' => 'package_purchase',
+                        'package_type' => (string) ($request->package_type ?? 'packages_postpaid'),
+                        'package_top_up_id' => (string) $request->package_top_up_id,
+                    ]
+                );
+            }
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Package purchased successfully'

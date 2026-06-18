@@ -14,7 +14,6 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanySetting;
-use App\Models\Setting;
 use App\Services\DriverSessionService;
 use Illuminate\Support\Facades\Hash;
 
@@ -28,6 +27,8 @@ class AuthController extends Controller
                 'name' => 'required',
                 'country_code' => 'required',
                 'password' => 'required',
+                'fcm_token' => 'nullable',
+                'device_token' => 'nullable',
             ]);
 
             $dataCheck = (new TenantUser)
@@ -67,6 +68,12 @@ class AuthController extends Controller
             $user->name = $request->name;
             $user->country_code = $request->country_code;
             $user->password = Hash::make($request->password);
+            if ($request->filled('fcm_token')) {
+                $user->fcm_token = $request->fcm_token;
+            }
+            if ($request->filled('device_token')) {
+                $user->device_token = $request->device_token;
+            }
             $user->save();
 
             $otp = rand(1000, 9999);
@@ -75,8 +82,20 @@ class AuthController extends Controller
             $user->otp_expires_at = $expiresAt;
             $user->save();
 
-            $settingData = CompanySetting::orderBy("id", "DESC")->first();
-            if(isset($user->email) && $user->email != NULL){
+            if ($request->filled('fcm_token') && $request->filled('device_token')) {
+                $tokenRecord = CompanyToken::where('device_token', $request->device_token)->first();
+                if (!$tokenRecord) {
+                    $tokenRecord = new CompanyToken;
+                    $tokenRecord->device_token = $request->device_token;
+                }
+                $tokenRecord->user_id = $user->id;
+                $tokenRecord->user_type = 'driver';
+                $tokenRecord->fcm_token = $request->fcm_token;
+                $tokenRecord->save();
+            }
+
+            $settingData = CompanySetting::orderBy('id', 'DESC')->first();
+            if (isset($user->email) && $user->email != null) {
                 $mailer = \App\Services\MailConfigurationService::resolveMailer($settingData);
 
                 Mail::mailer($mailer)->send('emails.send-otp', [
@@ -90,7 +109,7 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => "User sign up successfully and OTP sent",
+                'message' => 'User sign up successfully and OTP sent',
             ], 200);
         }
         catch(\Exception $e){

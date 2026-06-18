@@ -26,6 +26,14 @@ const parseJsonArray = (raw) => {
     return [];
 };
 
+const summarizeDriver = (driver) => ({
+    id: driver.id,
+    name: driver.name ?? null,
+    profile_image: driver.profile_image ?? null,
+    priority_plot: driver.priority_plot ?? null,
+    plot_id: driver.plot_id ?? null,
+});
+
 const createPlotDispatchService = ({
     io,
     driverSockets,
@@ -98,14 +106,34 @@ const createPlotDispatchService = ({
         return chain;
     };
 
+    const fetchPlotNameMap = async (db, plotIds) => {
+        const uniqueIds = [...new Set(plotIds.map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id)))];
+        if (!uniqueIds.length) {
+            return new Map();
+        }
+
+        try {
+            const placeholders = uniqueIds.map(() => '?').join(', ');
+            const [rows] = await db.query(
+                `SELECT id, name FROM plots WHERE id IN (${placeholders})`,
+                uniqueIds
+            );
+            return new Map(rows.map((row) => [String(row.id), row.name ?? null]));
+        } catch (e) {
+            console.error('[PlotDispatch] Plot name fetch error:', e.message);
+            return new Map();
+        }
+    };
+
     const fetchIdleDriversInPlot = async (db, plotIdInt, dbName) => {
         const plotIdStr = String(plotIdInt);
         const [idleRows] = await db.query(
-            `SELECT * FROM drivers
+            `SELECT id, name, profile_image, plot_id, priority_plot, driving_status, online_status
+             FROM drivers
              WHERE driving_status = 'idle'
              AND online_status = 'online'
              AND (plot_id = ? OR plot_id = ?)
-             ORDER BY id ASC`,
+             ORDER BY CAST(COALESCE(priority_plot, '9999') AS UNSIGNED) ASC, id ASC`,
             [plotIdStr, plotIdInt]
         );
 
@@ -122,6 +150,70 @@ const createPlotDispatchService = ({
         }
 
         return drivers;
+    };
+
+    const buildPlotChainSummary = (plotChain, visitedPlots, plotNameMap, primaryPlotId) => (
+        plotChain.map((plotId, index) => ({
+            plot_id: parseInt(plotId, 10),
+            plot_name: plotNameMap.get(String(plotId)) ?? null,
+            is_primary: String(plotId) === String(primaryPlotId),
+            is_backup: index > 0,
+            visited: visitedPlots.includes(String(plotId)),
+        }))
+    );
+
+    const buildDispatchStatusPayload = async ({
+        db,
+        bookingIdInt,
+        cycleId,
+        plotIdInt,
+        plotChain,
+        visitedPlots,
+        drivers,
+        rejectedDriverIds = [],
+        timeoutMs,
+        isBackupPlot,
+        phase,
+        booking,
+        primaryPlotId,
+    }) => {
+        const plotNameMap = await fetchPlotNameMap(db, plotChain);
+        const currentPlotName = plotNameMap.get(String(plotIdInt)) ?? null;
+        const driverSummaries = drivers.map(summarizeDriver);
+        const rejectedSummaries = driverSummaries.filter((driver) =>
+            rejectedDriverIds.includes(String(driver.id))
+        );
+        const pendingSummaries = driverSummaries.filter((driver) =>
+            !rejectedDriverIds.includes(String(driver.id))
+        );
+
+        return {
+            booking_id: bookingIdInt,
+            dispatch_cycle_id: cycleId,
+            dispatch_type: 'auto_dispatch_plot_base',
+            phase,
+            current_plot_id: plotIdInt,
+            current_plot_name: currentPlotName,
+            is_backup_plot: isBackupPlot,
+            primary_plot_id: primaryPlotId,
+            plot_chain: buildPlotChainSummary(plotChain, visitedPlots, plotNameMap, primaryPlotId),
+            visited_plot_ids: visitedPlots,
+            driver_count: drivers.length,
+            driver_ids: drivers.map((driver) => String(driver.id)),
+            drivers: driverSummaries,
+            pending_driver_ids: pendingSummaries.map((driver) => String(driver.id)),
+            pending_drivers: pendingSummaries,
+            rejected_driver_ids: rejectedDriverIds,
+            rejected_drivers: rejectedSummaries,
+            expires_in_seconds: timeoutMs ? Math.round(timeoutMs / 1000) : null,
+            dispatcher_action: booking?.dispatcher_action ?? null,
+            booking,
+        };
+    };
+
+    const emitPlotDispatchStatus = async (dbName, eventName, payload) => {
+        emitToCompanyRooms(dbName, eventName, payload);
+        emitToCompanyRooms(dbName, 'plot-dispatch-status', payload);
     };
 
     const emitToCompanyRooms = (dbName, event, payload) => {
@@ -184,6 +276,23 @@ const createPlotDispatchService = ({
             return;
         }
 
+        let plotChain = [];
+        let visitedPlots = [];
+        let primaryPlotId = updatedBooking.pickup_plot_id ? parseInt(updatedBooking.pickup_plot_id, 10) : null;
+        try {
+            const [cycleRows] = await db.query(
+                'SELECT primary_plot_id, visited_plot_ids FROM booking_dispatch_cycles WHERE id = ?',
+                [cycleId]
+            );
+            if (cycleRows[0]?.primary_plot_id) {
+                primaryPlotId = parseInt(cycleRows[0].primary_plot_id, 10);
+                plotChain = await loadBackupPlotChain(db, primaryPlotId);
+                visitedPlots = parseJsonArray(cycleRows[0].visited_plot_ids);
+            }
+        } catch (e) {
+            console.error('[PlotDispatch] Exhausted status cycle fetch error:', e.message);
+        }
+
         const payload = {
             booking_id: bookingIdInt,
             dispatch_cycle_id: cycleId,
@@ -194,11 +303,89 @@ const createPlotDispatchService = ({
 
         emitToCompanyRooms(dbName, 'plot-dispatch-failed', payload);
         emitToCompanyRooms(dbName, 'auto-dispatch-failed', payload);
+        emitToCompanyRooms(dbName, 'manual-dispatch-required', {
+            ...payload,
+            fallback: 'manual_dispatch_only',
+        });
+
+        const exhaustedStatus = await buildDispatchStatusPayload({
+            db,
+            bookingIdInt,
+            cycleId,
+            plotIdInt: primaryPlotId,
+            plotChain,
+            visitedPlots,
+            drivers: [],
+            phase: 'exhausted',
+            booking: updatedBooking,
+            primaryPlotId,
+            isBackupPlot: false,
+            timeoutMs: null,
+        });
+        await emitPlotDispatchStatus(dbName, 'plot-dispatch-exhausted', exhaustedStatus);
 
         await broadcastDashboardCardsUpdate(tenantDb);
         await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
 
         console.log(`[PlotDispatch] Exhausted all plots for booking #${bookingIdInt}`);
+    };
+
+    const advancePlotRoundOrExhaust = async ({
+        bookingIdInt,
+        tenantDb,
+        db,
+        dbName,
+        cycleId,
+        plotIdInt,
+        plotChain,
+        visitedPlots,
+        timeoutMs,
+        reason,
+    }) => {
+        const visited = visitedPlots;
+        const nextPlot = plotChain.find((plotId) => !visited.includes(String(plotId)));
+
+        if (reason === 'timeout') {
+            console.log(`[PlotDispatch] Timeout — no acceptance in plot ${plotIdInt}`);
+        } else if (reason === 'no_drivers') {
+            console.log(`[PlotDispatch] No drivers in plot ${plotIdInt}`);
+        } else if (reason === 'all_rejected') {
+            console.log(`[PlotDispatch] All drivers rejected in plot ${plotIdInt}`);
+        }
+
+        if (nextPlot) {
+            const previousPlotId = plotIdInt;
+            console.log(`[PlotDispatch] Advancing to backup plot ${nextPlot}`);
+
+            const plotNameMap = await fetchPlotNameMap(db, [previousPlotId, nextPlot]);
+            emitToCompanyRooms(dbName, 'plot-dispatch-backup-advanced', {
+                booking_id: bookingIdInt,
+                dispatch_cycle_id: cycleId,
+                from_plot_id: previousPlotId,
+                from_plot_name: plotNameMap.get(String(previousPlotId)) ?? null,
+                to_plot_id: parseInt(nextPlot, 10),
+                to_plot_name: plotNameMap.get(String(nextPlot)) ?? null,
+                reason,
+                visited_plot_ids: visited,
+            });
+
+            await broadcastPlotRound({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                cycleId,
+                plotIdInt: parseInt(nextPlot, 10),
+                plotChain,
+                visitedPlots: visited,
+                timeoutMs,
+                isBackupPlot: String(nextPlot) !== String(plotChain[0]),
+                primaryPlotId: parseInt(plotChain[0], 10),
+            });
+            return;
+        }
+
+        await markCycleExhausted({ bookingIdInt, tenantDb, db, dbName, cycleId });
     };
 
     const broadcastPlotRound = async ({
@@ -213,8 +400,10 @@ const createPlotDispatchService = ({
         timeoutMs,
         isFreshCycle = false,
         isBackupPlot = false,
+        primaryPlotId = null,
     }) => {
         const plotIdStr = String(plotIdInt);
+        const resolvedPrimaryPlotId = primaryPlotId ?? parseInt(plotChain[0], 10);
         const visited = visitedPlots.includes(plotIdStr)
             ? [...visitedPlots]
             : [...visitedPlots, plotIdStr];
@@ -278,10 +467,11 @@ const createPlotDispatchService = ({
                 io.to(driverSocketId).emit('new-ride-request', {
                     booking_id: updatedBooking.id,
                     assignment_type: 'plot_dispatch',
-                    message: 'You have a new ride request in your plot',
+                    message: `You have a new ride request in ${isBackupPlot ? 'backup plot' : 'your plot'}`,
                     booking: updatedBooking,
                     plot_id: plotIdInt,
                     expires_in_seconds: timeoutMs / 1000,
+                    driver: summarizeDriver(driver),
                 });
             }
 
@@ -307,18 +497,28 @@ const createPlotDispatchService = ({
             }
         }
 
-        const pendingPayload = {
-            booking_id: bookingIdInt,
-            dispatch_cycle_id: cycleId,
-            current_plot_id: plotIdInt,
-            driver_count: drivers.length,
-            driver_ids: notifiedDriverIds,
-            expires_in_seconds: timeoutMs / 1000,
-            dispatcher_action: actionMessage,
+        const statusPayload = await buildDispatchStatusPayload({
+            db,
+            bookingIdInt,
+            cycleId,
+            plotIdInt,
+            plotChain,
+            visitedPlots: visited,
+            drivers,
+            rejectedDriverIds: [],
+            timeoutMs,
+            isBackupPlot,
+            phase: isBackupPlot ? 'backup' : 'primary',
             booking: updatedBooking,
-        };
+            primaryPlotId: resolvedPrimaryPlotId,
+        });
 
-        emitToCompanyRooms(dbName, 'driver-assignment-pending', pendingPayload);
+        emitToCompanyRooms(dbName, 'driver-assignment-pending', statusPayload);
+        await emitPlotDispatchStatus(
+            dbName,
+            isFreshCycle ? 'plot-dispatch-started' : (isBackupPlot ? 'plot-dispatch-backup-round' : 'plot-dispatch-round'),
+            statusPayload
+        );
         emitBookingUpdated(dbName, updatedBooking);
 
         if (isFreshCycle) {
@@ -337,7 +537,9 @@ const createPlotDispatchService = ({
             plotChain,
             visitedPlots: visited,
             notifiedDriverIds,
+            rejectedDriverIds: [],
             timeoutMs,
+            primaryPlotId: resolvedPrimaryPlotId,
         };
 
         const timeoutId = setTimeout(async () => {
@@ -369,32 +571,18 @@ const createPlotDispatchService = ({
                     return;
                 }
 
-                const nextPlot = plotChain.find((plotId) => !visited.includes(String(plotId)));
-
-                if (!drivers.length) {
-                    console.log(`[PlotDispatch] No drivers in plot ${plotIdInt}`);
-                } else {
-                    console.log(`[PlotDispatch] Timeout — no acceptance in plot ${plotIdInt}`);
-                }
-
-                if (nextPlot) {
-                    console.log(`[PlotDispatch] Advancing to backup plot ${nextPlot}`);
-                    await broadcastPlotRound({
-                        bookingIdInt,
-                        tenantDb,
-                        db,
-                        dbName,
-                        cycleId,
-                        plotIdInt: parseInt(nextPlot, 10),
-                        plotChain,
-                        visitedPlots: visited,
-                        timeoutMs,
-                        isBackupPlot: String(nextPlot) !== String(plotChain[0]),
-                    });
-                    return;
-                }
-
-                await markCycleExhausted({ bookingIdInt, tenantDb, db, dbName, cycleId });
+                await advancePlotRoundOrExhaust({
+                    bookingIdInt,
+                    tenantDb,
+                    db,
+                    dbName,
+                    cycleId,
+                    plotIdInt,
+                    plotChain,
+                    visitedPlots: visited,
+                    timeoutMs,
+                    reason: drivers.length ? 'timeout' : 'no_drivers',
+                });
             } catch (e) {
                 console.error(`[PlotDispatch] Timeout handler error:`, e.message);
             }
@@ -402,25 +590,18 @@ const createPlotDispatchService = ({
 
         if (!drivers.length) {
             clearPlotDispatchSession(bookingIdInt);
-            const nextPlot = plotChain.find((plotId) => !visited.includes(String(plotId)));
-            if (nextPlot) {
-                console.log(`[PlotDispatch] No drivers in plot ${plotIdInt} — advancing to plot ${nextPlot}`);
-                await broadcastPlotRound({
-                    bookingIdInt,
-                    tenantDb,
-                    db,
-                    dbName,
-                    cycleId,
-                    plotIdInt: parseInt(nextPlot, 10),
-                    plotChain,
-                    visitedPlots: visited,
-                    timeoutMs,
-                    isBackupPlot: String(nextPlot) !== String(plotChain[0]),
-                });
-                return;
-            }
-
-            await markCycleExhausted({ bookingIdInt, tenantDb, db, dbName, cycleId });
+            await advancePlotRoundOrExhaust({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                cycleId,
+                plotIdInt,
+                plotChain,
+                visitedPlots: visited,
+                timeoutMs,
+                reason: 'no_drivers',
+            });
             return;
         }
 
@@ -544,6 +725,7 @@ const createPlotDispatchService = ({
                 timeoutMs,
                 isFreshCycle: true,
                 isBackupPlot: false,
+                primaryPlotId,
             });
 
             return { started: true, dispatch_cycle_id: cycleId, primary_plot_id: primaryPlotId };
@@ -610,6 +792,31 @@ const createPlotDispatchService = ({
             emitToCompanyRooms(dbName, 'job-accepted-by-driver', eventData);
             emitBookingUpdated(dbName, booking);
 
+            const [cycleRows] = await db.query(
+                'SELECT id, primary_plot_id, current_plot_id, visited_plot_ids FROM booking_dispatch_cycles WHERE booking_id = ?',
+                [bookingIdInt]
+            );
+            const cycle = cycleRows[0];
+            if (cycle) {
+                const visitedPlots = parseJsonArray(cycle.visited_plot_ids);
+                const plotChain = await loadBackupPlotChain(db, cycle.primary_plot_id);
+                const acceptedStatus = await buildDispatchStatusPayload({
+                    db,
+                    bookingIdInt,
+                    cycleId: cycle.id,
+                    plotIdInt: cycle.current_plot_id ? parseInt(cycle.current_plot_id, 10) : null,
+                    plotChain,
+                    visitedPlots,
+                    drivers: [{ id: driverId, name: driver.name, profile_image: driver.profile_image }],
+                    phase: 'accepted',
+                    booking,
+                    primaryPlotId: cycle.primary_plot_id ? parseInt(cycle.primary_plot_id, 10) : null,
+                    isBackupPlot: String(cycle.current_plot_id) !== String(cycle.primary_plot_id),
+                    timeoutMs: null,
+                });
+                await emitPlotDispatchStatus(dbName, 'plot-dispatch-accepted', acceptedStatus);
+            }
+
             await broadcastDashboardCardsUpdate(tenantDb);
             await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
         } catch (e) {
@@ -618,7 +825,7 @@ const createPlotDispatchService = ({
     };
 
     const handlePlotDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) => {
-        const session = plotDispatchSessions.get(String(bookingIdInt));
+        let session = plotDispatchSessions.get(String(bookingIdInt));
 
         if (!session && tenantDb) {
             try {
@@ -637,7 +844,108 @@ const createPlotDispatchService = ({
             return { handled: false };
         }
 
-        console.log(`[PlotDispatch] Driver #${driverId} rejected booking #${bookingIdInt} — round continues until timeout`);
+        const db = getConnection(tenantDb);
+        const dbName = tenantDb.startsWith('tenant') ? tenantDb.slice('tenant'.length) : tenantDb;
+
+        if (!session) {
+            const [cycleRows] = await db.query(
+                'SELECT id, primary_plot_id, current_plot_id, visited_plot_ids, notified_driver_ids, offer_token FROM booking_dispatch_cycles WHERE booking_id = ? AND status = ?',
+                [bookingIdInt, 'in_progress']
+            );
+            if (!cycleRows.length) {
+                return { handled: false };
+            }
+
+            const cycle = cycleRows[0];
+            session = {
+                cycleId: cycle.id,
+                plotIdInt: cycle.current_plot_id ? parseInt(cycle.current_plot_id, 10) : null,
+                plotChain: await loadBackupPlotChain(db, cycle.primary_plot_id),
+                visitedPlots: parseJsonArray(cycle.visited_plot_ids),
+                notifiedDriverIds: parseJsonArray(cycle.notified_driver_ids).map(String),
+                rejectedDriverIds: [],
+                timeoutMs: await getDispatchTimeoutMs(db),
+                primaryPlotId: cycle.primary_plot_id ? parseInt(cycle.primary_plot_id, 10) : null,
+                offerToken: cycle.offer_token,
+                tenantDb,
+                dbName,
+            };
+        }
+
+        if (!session.notifiedDriverIds.includes(String(driverId))) {
+            const [notifiedRows] = await db.query(
+                'SELECT driver_id FROM send_new_rides WHERE booking_id = ? AND driver_id = ?',
+                [bookingIdInt, driverId]
+            );
+            if (!notifiedRows.length) {
+                return {
+                    handled: true,
+                    status: 400,
+                    body: { success: false, message: 'Driver was not notified for this plot dispatch round' },
+                };
+            }
+        }
+
+        const rejectedDriverIds = [...new Set([...(session.rejectedDriverIds ?? []), String(driverId)])];
+        session.rejectedDriverIds = rejectedDriverIds;
+
+        const rejectEvent = {
+            booking_id: bookingIdInt,
+            driver_id: driverId,
+            message: `Driver #${driverId} rejected the ride`,
+            rejected_driver_ids: rejectedDriverIds,
+            pending_driver_ids: session.notifiedDriverIds.filter((id) => !rejectedDriverIds.includes(String(id))),
+        };
+        emitToCompanyRooms(dbName, 'job-rejected-by-driver', rejectEvent);
+        emitToCompanyRooms(dbName, 'plot-dispatch-driver-rejected', rejectEvent);
+
+        const allRejected = session.notifiedDriverIds.length > 0
+            && session.notifiedDriverIds.every((id) => rejectedDriverIds.includes(String(id)));
+
+        if (allRejected) {
+            console.log(`[PlotDispatch] All drivers rejected in plot ${session.plotIdInt} — advancing`);
+            if (session.timeoutId) {
+                clearTimeout(session.timeoutId);
+            }
+            plotDispatchSessions.delete(String(bookingIdInt));
+
+            const [checkRows] = await db.query(
+                'SELECT booking_status, driver FROM bookings WHERE id = ?',
+                [bookingIdInt]
+            );
+            if (checkRows.length) {
+                const { booking_status: status, driver: assignedDriver } = checkRows[0];
+                if (!assignedDriver && status === 'pending') {
+                    await advancePlotRoundOrExhaust({
+                        bookingIdInt,
+                        tenantDb,
+                        db,
+                        dbName,
+                        cycleId: session.cycleId,
+                        plotIdInt: session.plotIdInt,
+                        plotChain: session.plotChain,
+                        visitedPlots: session.visitedPlots,
+                        timeoutMs: session.timeoutMs,
+                        reason: 'all_rejected',
+                    });
+                }
+            }
+
+            return {
+                handled: true,
+                status: 200,
+                body: {
+                    success: true,
+                    message: 'All drivers in this plot rejected — advancing to the next plot if available',
+                },
+            };
+        }
+
+        if (plotDispatchSessions.has(String(bookingIdInt))) {
+            plotDispatchSessions.set(String(bookingIdInt), session);
+        }
+
+        console.log(`[PlotDispatch] Driver #${driverId} rejected booking #${bookingIdInt} — waiting for other drivers`);
 
         return {
             handled: true,
@@ -645,7 +953,79 @@ const createPlotDispatchService = ({
             body: {
                 success: true,
                 message: 'Reject noted — other drivers in this plot may still accept until the timer expires',
+                rejected_driver_ids: rejectedDriverIds,
             },
+        };
+    };
+
+    const getPlotDispatchStatus = async ({ bookingId, tenantDb }) => {
+        const db = getConnection(tenantDb);
+        const dbName = tenantDb.startsWith('tenant') ? tenantDb.slice('tenant'.length) : tenantDb;
+        const bookingIdInt = parseInt(bookingId, 10);
+
+        const [bookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        if (!bookingRows.length) {
+            return { found: false };
+        }
+
+        const booking = bookingRows[0];
+        const [cycleRows] = await db.query(
+            'SELECT * FROM booking_dispatch_cycles WHERE booking_id = ?',
+            [bookingIdInt]
+        );
+        const cycle = cycleRows[0] ?? null;
+        const session = plotDispatchSessions.get(String(bookingIdInt));
+
+        if (!cycle) {
+            return {
+                found: true,
+                active: false,
+                booking,
+                dispatch_type: 'auto_dispatch_plot_base',
+            };
+        }
+
+        const plotChain = cycle.primary_plot_id
+            ? await loadBackupPlotChain(db, cycle.primary_plot_id)
+            : [];
+        const visitedPlots = parseJsonArray(cycle.visited_plot_ids);
+        const notifiedIds = parseJsonArray(cycle.notified_driver_ids).map(String);
+        const rejectedDriverIds = session?.rejectedDriverIds ?? [];
+
+        let drivers = [];
+        if (cycle.current_plot_id) {
+            drivers = await fetchIdleDriversInPlot(db, parseInt(cycle.current_plot_id, 10), dbName);
+            if (notifiedIds.length) {
+                drivers = drivers.filter((driver) => notifiedIds.includes(String(driver.id)));
+            }
+        }
+
+        const isBackupPlot = cycle.primary_plot_id
+            && String(cycle.current_plot_id) !== String(cycle.primary_plot_id);
+        const phase = cycle.status === 'accepted'
+            ? 'accepted'
+            : (cycle.status === 'exhausted' ? 'exhausted' : (isBackupPlot ? 'backup' : 'primary'));
+
+        const status = await buildDispatchStatusPayload({
+            db,
+            bookingIdInt,
+            cycleId: cycle.id,
+            plotIdInt: cycle.current_plot_id ? parseInt(cycle.current_plot_id, 10) : null,
+            plotChain,
+            visitedPlots,
+            drivers,
+            rejectedDriverIds,
+            timeoutMs: session?.timeoutMs ?? await getDispatchTimeoutMs(db),
+            isBackupPlot,
+            phase,
+            booking,
+            primaryPlotId: cycle.primary_plot_id ? parseInt(cycle.primary_plot_id, 10) : null,
+        });
+
+        return {
+            found: true,
+            active: cycle.status === 'in_progress',
+            ...status,
         };
     };
 
@@ -656,6 +1036,7 @@ const createPlotDispatchService = ({
         startPlotDispatchCycle,
         handlePlotDispatchAccept,
         handlePlotDispatchReject,
+        getPlotDispatchStatus,
         plotDispatchSessions,
     };
 };

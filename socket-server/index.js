@@ -2568,6 +2568,33 @@ app.post("/bookings/:id/start-auto-dispatch", async (req, res) => {
     }
 });
 
+app.get("/bookings/:id/plot-dispatch-status", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!req.tenantDb) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing 'database' header in request",
+            });
+        }
+
+        const status = await plotDispatch.getPlotDispatchStatus({
+            bookingId: id,
+            tenantDb: req.tenantDb,
+        });
+
+        if (!status.found) {
+            return res.status(404).json({ success: false, message: "Booking not found" });
+        }
+
+        return res.json({ success: true, ...status });
+    } catch (error) {
+        console.error("[API] /plot-dispatch-status error:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 app.post("/bookings/:id/auto-dispatch/reject", async (req, res) => {
     try {
         const bookingIdInt = parseInt(req.params.id, 10);
