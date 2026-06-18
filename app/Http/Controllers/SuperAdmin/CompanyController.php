@@ -1312,7 +1312,8 @@ class CompanyController extends Controller
             ], 500);
         }
         
-        $token = JWTAuth::fromUser($user);
+        $dispatcherTtlMinutes = 36 * 60; // 36 hours
+        $token = auth('dispatcher')->setTTL($dispatcherTtlMinutes)->login($user);
 
         $record = new CompanyDispatcherLog;
         $record->dispatcher_id = $user->id;
@@ -1328,6 +1329,7 @@ class CompanyController extends Controller
        return response()->json([
            'message' => 'Dispatcher login successful',
            'token' => $token,
+           'expires_in' => $dispatcherTtlMinutes * 60,
            'user' => $user,
            'tenant_id' => $company?->id,
             'company_data' => $company,  

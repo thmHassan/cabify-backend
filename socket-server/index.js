@@ -4082,6 +4082,40 @@ app.post("/driver-force-logout", async (req, res) => {
     }
 });
 
+app.post("/dispatcher-force-logout-all", async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        if (!req.tenantDb) {
+            const dbHeader = req.headers['database'] || req.headers['x-database'];
+            if (dbHeader) {
+                req.tenantDb = `tenant${dbHeader}`;
+            }
+        }
+
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+
+        io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
+            message: "You have been logged out by admin",
+            reason: "admin_logout_all",
+            token_revoked: true,
+        });
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("Dispatcher force logout all error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 app.post("/change-driver-ride-status", async (req, res) => {
     const { driverId, status, booking } = req.body;
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {

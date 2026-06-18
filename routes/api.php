@@ -164,6 +164,7 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/dispatcher-cards', [DispatcherController::class, 'dispatcherCards']);
     Route::get('/company/delete-dispatcher', [DispatcherController::class, 'deleteDispatcher']);
     Route::get('/company/dispatcher-logs', [DispatcherController::class, 'dispatcherLogs']);
+    Route::post('/company/logout-all-dispatchers', [DispatcherController::class, 'logoutAllDispatchers']);
 
     Route::post('/company/create-user', [UserController::class, 'createUser']);
     Route::post('/company/edit-user', [UserController::class, 'editUser']);

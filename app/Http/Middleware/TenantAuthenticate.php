@@ -37,6 +37,11 @@ class TenantAuthenticate
                 if (!$dispatcher) {
                     return response()->json(['message' => 'Unauthenticated'], 401);
                 }
+
+                $tokenAuthVersion = (int) auth('dispatcher')->payload()->get('auth_version', 0);
+                if ($tokenAuthVersion !== (int) ($dispatcher->auth_version ?? 0)) {
+                    return response()->json(['message' => 'Token revoked'], 401);
+                }
             }
 
             $request->attributes->set('tenant', $tenant);

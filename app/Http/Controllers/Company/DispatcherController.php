@@ -16,6 +16,7 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use App\Models\CompanyBooking;
 use App\Services\BookingDateClassificationService;
+use App\Services\DispatcherSessionService;
 
 class DispatcherController extends Controller
 {
@@ -226,6 +227,35 @@ class DispatcherController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function logoutAllDispatchers(Request $request)
+    {
+        try {
+            $affected = DispatcherSessionService::invalidateAll();
+
+            try {
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
+                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/dispatcher-force-logout-all', []);
+            } catch (\Exception $socketException) {
+                \Log::warning('Dispatcher force logout socket call failed', [
+                    'error' => $socketException->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'All dispatchers logged out successfully',
+                'dispatchers_affected' => $affected,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 }

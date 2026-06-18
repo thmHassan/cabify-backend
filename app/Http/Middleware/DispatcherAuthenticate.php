@@ -27,6 +27,11 @@ class DispatcherAuthenticate
                 return response()->json(['message' => 'Unauthenticated'], 401);
             }
 
+            $tokenAuthVersion = (int) auth('dispatcher')->payload()->get('auth_version', 0);
+            if ($tokenAuthVersion !== (int) ($dispatcher->auth_version ?? 0)) {
+                return response()->json(['message' => 'Token revoked'], 401);
+            }
+
             $request->attributes->set('dispatcher', $dispatcher);
 
         } catch (\PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException $e) {
