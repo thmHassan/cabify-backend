@@ -21,6 +21,7 @@ use App\Services\BookingReminderService;
 use App\Services\BookingUpdateService;
 use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
+use App\Support\MapsApi;
 
 class BookingController extends Controller
 {
@@ -564,11 +565,11 @@ class BookingController extends Controller
                 throw new \Exception('Google Maps API key is not configured.');
             }
 
-            if ($map_api === 'barikoi' && empty($barikoi_key)) {
+            if (MapsApi::isMapify($map_api) && empty($barikoi_key)) {
                 throw new \Exception('Barikoi API key is not configured.');
             }
 
-            if (isset($map_api) && $map_api == "barikoi") {
+            if (MapsApi::isMapify($map_api)) {
 
                 if (!isset($request->via_point) || count($request->via_point) == 0) {
                     $points = "{$request->pickup_point['longitude']},{$request->pickup_point['latitude']};{$request->destination_point['longitude']},{$request->destination_point['latitude']}";

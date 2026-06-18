@@ -24,6 +24,7 @@ use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
 use App\Models\WalletTransaction;
 use App\Services\SocketApiUrlResolver;
+use App\Support\MapsApi;
 
 class BookingController extends Controller
 {
@@ -120,7 +121,7 @@ class BookingController extends Controller
                 $google_map_key = $data->google_api_keys;
             }
             
-            if(isset($map_api) && $map_api == "barikoi"){  
+            if (MapsApi::isMapify($map_api)) {  
                 
                 if(!isset($request->via_point) || count($request->via_point) == 0){
                     $points = "{$request->pickup_point['longitude']},{$request->pickup_point['latitude']};{$request->destination_point['longitude']},{$request->destination_point['latitude']}";

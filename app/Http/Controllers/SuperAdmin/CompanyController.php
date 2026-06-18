@@ -30,6 +30,7 @@ use App\Models\Dispatcher;
 use App\Events\NewNotification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Mail;
+use App\Support\MapsApi;
 
 class CompanyController extends Controller
 {
@@ -46,7 +47,7 @@ class CompanyController extends Controller
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
                 'currency' => 'required',
-                'maps_api' => 'required',
+                'maps_api' => ['required', Rule::in(MapsApi::allowedInputValues())],
                 'search_api' => 'required',
                 'log_map_search_result' => 'required',
                 'voip' => 'required',
@@ -100,7 +101,7 @@ class CompanyController extends Controller
             $tenant->address = $request->address;
             $tenant->city = $request->city;
             $tenant->currency = $request->currency;
-            $tenant->maps_api = $request->maps_api;
+            $tenant->maps_api = MapsApi::normalize($request->maps_api);
             $tenant->search_api = $request->search_api;
             $tenant->log_map_search_result = $request->log_map_search_result;
             $tenant->voip = $request->voip;
@@ -389,6 +390,7 @@ class CompanyController extends Controller
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
+                'maps_api' => ['nullable', Rule::in(MapsApi::allowedInputValues())],
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
@@ -491,7 +493,9 @@ class CompanyController extends Controller
             $tenant->address = isset($request->address) ? $request->address : $address->address;
             $tenant->city = isset($request->city) ? $request->city : $tenant->city;
             $tenant->currency = isset($request->currency) ? $request->currency : $tenant->currency;
-            $tenant->maps_api = isset($request->maps_api) ? $request->maps_api : $tenant->maps_api;
+            $tenant->maps_api = isset($request->maps_api)
+                ? MapsApi::normalize($request->maps_api)
+                : MapsApi::normalize($tenant->maps_api);
             $tenant->google_api_key = isset($request->google_api_key) ? $request->google_api_key : $tenant->google_api_key;
             $tenant->barikoi_api_key = isset($request->barikoi_api_key) ? $request->barikoi_api_key : $tenant->barikoi_api_key;
             $tenant->search_api = isset($request->search_api) ? $request->search_api : $tenant->search_api;
@@ -682,6 +686,7 @@ class CompanyController extends Controller
             ]);
 
             $company = Tenant::where("id", $request->id)->first();
+            $company->maps_api = MapsApi::normalize($company->maps_api);
             $subscription = Subscription::where('id', $company->subscription_type)->first();
             return response()->json([
                 'success' => 1,
