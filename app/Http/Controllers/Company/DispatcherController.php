@@ -233,23 +233,14 @@ class DispatcherController extends Controller
     public function logoutAllDispatchers(Request $request)
     {
         try {
-            $affected = DispatcherSessionService::invalidateAll();
-
-            try {
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                    'database' => $request->header('database'),
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/dispatcher-force-logout-all', []);
-            } catch (\Exception $socketException) {
-                \Log::warning('Dispatcher force logout socket call failed', [
-                    'error' => $socketException->getMessage(),
-                ]);
-            }
+            $tenantResults = DispatcherSessionService::invalidateAcrossAllTenants();
+            $totalAffected = array_sum(array_column($tenantResults, 'dispatchers_affected'));
 
             return response()->json([
                 'success' => 1,
                 'message' => 'All dispatchers logged out successfully',
-                'dispatchers_affected' => $affected,
+                'dispatchers_affected' => $totalAffected,
+                'tenants' => $tenantResults,
             ]);
         } catch (\Exception $e) {
             return response()->json([

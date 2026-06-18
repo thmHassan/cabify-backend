@@ -70,6 +70,7 @@ Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWeb
 Route::post('/super-admin/subscription-update-webhook', [CompanyController::class, 'subscriptionUpdateWebhook']);
 Route::post('login', [AuthController::class, 'login']);
 Route::post('/company/login', [CompanyController::class, 'companyLogin']);
+Route::post('/company/logout-all-dispatchers', [DispatcherController::class, 'logoutAllDispatchers']);
 Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
 Route::group(['middleware' => ['tenant.db']], function () {
@@ -164,7 +165,6 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/dispatcher-cards', [DispatcherController::class, 'dispatcherCards']);
     Route::get('/company/delete-dispatcher', [DispatcherController::class, 'deleteDispatcher']);
     Route::get('/company/dispatcher-logs', [DispatcherController::class, 'dispatcherLogs']);
-    Route::post('/company/logout-all-dispatchers', [DispatcherController::class, 'logoutAllDispatchers']);
 
     Route::post('/company/create-user', [UserController::class, 'createUser']);
     Route::post('/company/edit-user', [UserController::class, 'editUser']);
