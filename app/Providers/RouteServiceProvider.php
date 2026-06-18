@@ -29,6 +29,9 @@ class RouteServiceProvider extends ServiceProvider
         });
 
         $this->routes(function () {
+            // Public static pages — no session/cookie encryption (avoids APP_KEY issues)
+            Route::view('/privacy-policy', 'privacy-policy')->name('privacy-policy');
+
             Route::middleware('api')
                 ->prefix('api')
                 ->group(base_path('routes/api.php'));
