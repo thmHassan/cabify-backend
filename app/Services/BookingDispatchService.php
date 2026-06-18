@@ -9,6 +9,7 @@ use App\Models\CompanyDriver;
 use App\Models\CompanySendNewRide;
 use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
+use App\Support\PlotDispatch;
 use Illuminate\Support\Facades\Http;
 
 class BookingDispatchService
@@ -86,8 +87,9 @@ class BookingDispatchService
     ): void {
         $hasDriver = !empty($booking->driver);
         $nearestDriverDispatch = !$hasDriver && $this->isNearestDriverDispatchEnabled();
+        $plotDispatch = !$hasDriver && $this->isPlotDispatchEnabled();
 
-        if ((!$hasDriver || $alwaysBroadcast) && !$nearestDriverDispatch) {
+        if ((!$hasDriver || $alwaysBroadcast) && !$nearestDriverDispatch && !$plotDispatch) {
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . $this->internalSecret(),
             ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/broadcast'), [
@@ -175,14 +177,24 @@ class BookingDispatchService
         return config('services.node_socket.internal_secret');
     }
 
-    private function isNearestDriverDispatchEnabled(): bool
+    public function isNearestDriverDispatchEnabled(): bool
+    {
+        return $this->primaryDispatchSystem() === 'auto_dispatch_nearest_driver';
+    }
+
+    public function isPlotDispatchEnabled(): bool
+    {
+        return $this->primaryDispatchSystem() === 'auto_dispatch_plot_base';
+    }
+
+    private function primaryDispatchSystem(): ?string
     {
         $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
         if ($dispatchSystems->isEmpty()) {
-            return false;
+            return null;
         }
 
-        return $dispatchSystems->first()->dispatch_system === 'auto_dispatch_nearest_driver';
+        return $dispatchSystems->first()->dispatch_system;
     }
 
     private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void

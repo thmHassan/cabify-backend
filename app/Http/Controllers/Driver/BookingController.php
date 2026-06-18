@@ -23,8 +23,11 @@ use App\Models\TenantUser;
 use App\Models\CompanyUser;
 use App\Models\WalletTransaction;
 use App\Models\CompanySendNewRide;
+use App\Models\BookingDispatchCycle;
 use App\Services\SocketApiUrlResolver;
 use App\Support\NearestDispatch;
+use App\Support\PlotDispatch;
+use Illuminate\Support\Facades\DB;
 
 class BookingController extends Controller
 {
@@ -398,8 +401,9 @@ class BookingController extends Controller
 
             $driverId = auth('driver')->user()->id;
             $isNearestDispatchOffer = NearestDispatch::isActiveOffer($booking->dispatcher_action);
+            $isPlotDispatchOffer = PlotDispatch::isActiveOffer($booking->dispatcher_action);
 
-            if (!$isNearestDispatchOffer && $booking->driver && (string) $booking->driver !== (string) $driverId) {
+            if (!$isNearestDispatchOffer && !$isPlotDispatchOffer && $booking->driver && (string) $booking->driver !== (string) $driverId) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Ride already accepted by another driver',
@@ -444,20 +448,52 @@ class BookingController extends Controller
 
             $newStatus = $this->resolveStatusAfterDriverAccept($booking, $isNearestDispatchOffer);
 
-            $updateQuery = CompanyBooking::where('id', $booking->id)
-                ->where('booking_status', 'pending')
-                ->where(function ($query) use ($driverId) {
-                    $query->whereNull('driver')->orWhere('driver', $driverId);
-                });
+            $claimed = DB::transaction(function () use ($booking, $driverId, $bookingAmount, $newStatus, $isNearestDispatchOffer, $isPlotDispatchOffer) {
+                if ($isPlotDispatchOffer) {
+                    $cycle = BookingDispatchCycle::where('booking_id', $booking->id)
+                        ->where('status', 'in_progress')
+                        ->lockForUpdate()
+                        ->first();
 
-            $claimed = $updateQuery->update([
-                'driver' => $driverId,
-                'booking_amount' => $bookingAmount,
-                'booking_status' => $newStatus,
-                'dispatcher_action' => $isNearestDispatchOffer
-                    ? "Nearest dispatch — accepted by driver #{$driverId}"
-                    : $booking->dispatcher_action,
-            ]);
+                    if (!$cycle) {
+                        return false;
+                    }
+
+                    $notifiedDriverIds = $cycle->notified_driver_ids ?? [];
+                    if (!in_array((string) $driverId, array_map('strval', $notifiedDriverIds), true)) {
+                        $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
+                            ->where('driver_id', $driverId)
+                            ->exists();
+                        if (!$wasNotified) {
+                            return false;
+                        }
+                    }
+
+                    $cycle->update(['status' => 'accepted']);
+                }
+
+                return (bool) CompanyBooking::where('id', $booking->id)
+                    ->where('booking_status', 'pending')
+                    ->where(function ($query) use ($driverId, $isNearestDispatchOffer, $isPlotDispatchOffer) {
+                        if ($isNearestDispatchOffer || $isPlotDispatchOffer) {
+                            $query->where(function ($inner) use ($driverId) {
+                                $inner->whereNull('driver')->orWhere('driver', $driverId);
+                            });
+                        } else {
+                            $query->whereNull('driver')->orWhere('driver', $driverId);
+                        }
+                    })
+                    ->update([
+                        'driver' => $driverId,
+                        'booking_amount' => $bookingAmount,
+                        'booking_status' => $newStatus,
+                        'dispatcher_action' => $isNearestDispatchOffer
+                            ? "Nearest dispatch — accepted by driver #{$driverId}"
+                            : ($isPlotDispatchOffer
+                                ? PlotDispatch::acceptedAction($driverId)
+                                : $booking->dispatcher_action),
+                    ]);
+            });
 
             if (!$claimed) {
                 return response()->json([

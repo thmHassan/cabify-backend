@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CompanyBooking;
 use App\Support\NearestDispatch;
+use App\Support\PlotDispatch;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -70,12 +71,14 @@ class BookingDateClassificationService
 
         switch ($filter) {
             case 'todays_booking':
-                return $query
-                    ->whereDate('booking_date', Carbon::today())
-                    ->where(function (Builder $inner) {
-                        $inner->whereNull('dispatcher_action')
-                            ->orWhere('dispatcher_action', 'not like', NearestDispatch::ACTIVE_PREFIX . '%');
-                    });
+                return PlotDispatch::applyTodaysBookingVisibilityFilter(
+                    $query
+                        ->whereDate('booking_date', Carbon::today())
+                        ->where(function (Builder $inner) {
+                            $inner->whereNull('dispatcher_action')
+                                ->orWhere('dispatcher_action', 'not like', NearestDispatch::ACTIVE_PREFIX . '%');
+                        })
+                );
             case 'pre_bookings':
                 return app(PreBookingService::class)->applyPreBookingsFilter($query);
             case 'completed':
@@ -97,13 +100,14 @@ class BookingDateClassificationService
         $today = Carbon::today();
 
         return [
-            'todaysBooking' => (clone $query)
-                ->whereDate('booking_date', $today)
-                ->where(function (Builder $inner) {
-                    $inner->whereNull('dispatcher_action')
-                        ->orWhere('dispatcher_action', 'not like', 'NEAREST_DISPATCH_ACTIVE|%');
-                })
-                ->count(),
+            'todaysBooking' => PlotDispatch::applyTodaysBookingVisibilityFilter(
+                (clone $query)
+                    ->whereDate('booking_date', $today)
+                    ->where(function (Builder $inner) {
+                        $inner->whereNull('dispatcher_action')
+                            ->orWhere('dispatcher_action', 'not like', 'NEAREST_DISPATCH_ACTIVE|%');
+                    })
+            )->count(),
             'preBookings' => app(PreBookingService::class)->applyPreBookingsFilter(clone $query)->count(),
             'completed' => (clone $query)->where('booking_status', 'completed')->count(),
             'noShow' => (clone $query)->whereIn('booking_status', ['no_show', 'arrived', 'ongoing'])->count(),

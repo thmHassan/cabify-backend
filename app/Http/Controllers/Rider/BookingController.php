@@ -23,6 +23,8 @@ use Illuminate\Support\Facades\Http;
 use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
 use App\Models\WalletTransaction;
+use App\Services\BookingDispatchService;
+use App\Services\PickupPlotResolver;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
 
@@ -400,7 +402,7 @@ class BookingController extends Controller
             $newBooking->booking_date = (isset($request->booking_date) && $request->booking_date != NULL) ? $request->booking_date : date("Y-m-d");
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
-            $newBooking->pickup_plot_id = $request->pickup_plot_id;
+            $newBooking->pickup_plot_id = $request->pickup_plot_id ?? $request->pickup_point_id;
             $newBooking->destination_plot_id = $request->destination_plot_id;
             $newBooking->pickup_location = $request->pickup_location;
             $newBooking->destination_point = $request->destination_point;
@@ -421,43 +423,26 @@ class BookingController extends Controller
             $newBooking->note = $request->note;
             $newBooking->payment_method = $request->payment_method;
             $newBooking->otp = rand(1000,9999);
+
+            $bookingDispatchService = app(BookingDispatchService::class);
+            $pickupPlotResolver = app(PickupPlotResolver::class);
+
+            if ($bookingDispatchService->isPlotDispatchEnabled()) {
+                $newBooking->driver = null;
+                if (!$newBooking->pickup_plot_id) {
+                    $newBooking->pickup_plot_id = $pickupPlotResolver->resolveFromPickupPoint($newBooking->pickup_point);
+                }
+            }
+
             $newBooking->save();
 
             $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
-
-            $dispatch_system = CompanyDispatchSystem::where("status", "enable")->orderBy("priority", "ASC")->get();
-            $isNearestDriverDispatch = $dispatch_system->isNotEmpty()
-                && $dispatch_system->first()->dispatch_system === 'auto_dispatch_nearest_driver';
-
-            if (!$isNearestDriverDispatch) {
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-                ])->post(SocketApiUrlResolver::endpoint($request, 'bookings/broadcast'), [
-                    'booking_id' => $newBooking->id,
-                    'tenantDb'   => $request->header('database'),
-                ]);
-            }
-                
-            if($dispatch_system->first()->dispatch_system == "auto_dispatch_plot_base"){
-                // AutoDispatchPlotJob::dispatch($newBooking->id, 0, $request->header('database'));
-                Http::withHeaders([
-                    'database' => $request->header('database'),
-                    'Accept' => 'application/json',
-                ])->timeout(5)->post($socketApiBaseUrl . '/bookings/' . $newBooking->id . '/start-auto-dispatch');
-            }
-            elseif($dispatch_system->first()->dispatch_system == "bidding_fixed_fare_plot_base"){
-                SendBiddingFixedFareNotificationJob::dispatch($newBooking->id, NULL, 0, $request->header('database'));
-            }
-            elseif($dispatch_system->first()->dispatch_system == "auto_dispatch_nearest_driver"){
-                // AutoDispatchNearestDriverJob::dispatch($newBooking->id, $request->header('database'), []);
-                Http::withHeaders([
-                    'database' => $request->header('database'),
-                    'Accept' => 'application/json',
-                ])->timeout(5)->post($socketApiBaseUrl . '/bookings/' . $newBooking->id . '/start-nearest-dispatch');
-            }
-            elseif($dispatch_system->first()->dispatch_system == "bidding"){
-                SendBiddingNotificationJob::dispatch($newBooking->id);
-            }
+            $bookingDispatchService->notifyImmediateBookingCreated(
+                $newBooking,
+                (string) $request->header('database'),
+                false,
+                $socketApiBaseUrl
+            );
 
             return response()->json([
                 'success' => 1,

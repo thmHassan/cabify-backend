@@ -19,6 +19,7 @@ use App\Services\BookingDateClassificationService;
 use App\Services\BookingDispatchService;
 use App\Services\BookingReminderService;
 use App\Services\BookingUpdateService;
+use App\Services\PickupPlotResolver;
 use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
@@ -30,7 +31,8 @@ class BookingController extends Controller
         private readonly BookingReminderService $bookingReminderService,
         private readonly PreBookingService $preBookingService,
         private readonly BookingDispatchService $bookingDispatchService,
-        private readonly BookingUpdateService $bookingUpdateService
+        private readonly BookingUpdateService $bookingUpdateService,
+        private readonly PickupPlotResolver $pickupPlotResolver
     ) {
     }
 
@@ -110,6 +112,8 @@ class BookingController extends Controller
     public function createBooking(Request $request)
     {
         try {
+            $plotDispatchEnabled = $this->bookingDispatchService->isPlotDispatchEnabled();
+
             $request->validate([
                 'multi_booking' => 'required',
                 'pickup_time' => 'required',
@@ -126,10 +130,14 @@ class BookingController extends Controller
                 'passenger' => 'required',
                 'booking_amount' => 'required',
                 'payment_method' => 'required',
-                'driver' => 'required_without:booking_system',
-                'booking_system' => 'required_without:driver',
+                'driver' => $plotDispatchEnabled ? 'nullable' : 'required_without:booking_system',
+                'booking_system' => $plotDispatchEnabled ? 'nullable' : 'required_without:driver',
                 'pickup_time_type' => 'nullable|in:asap,time',
             ]);
+
+            if ($plotDispatchEnabled) {
+                $request->merge(['driver' => null]);
+            }
 
             $this->bookingReminderService->validateReminderRequest($request);
 
@@ -234,6 +242,7 @@ class BookingController extends Controller
                     $newBooking = $this->buildBookingFromRequest($request, $occurrenceDate, $existUser, $distance);
                     $newBooking->multi_booking = 'yes';
                     $newBooking->multi_days = $multiDaysStored;
+                    $this->applyPlotDispatchBookingDefaults($newBooking);
                     $newBooking->save();
 
                     if (!$isScheduled && isset($request->driver) && $request->driver != NULL) {
@@ -315,6 +324,7 @@ class BookingController extends Controller
                 $newBooking->multi_booking = $request->multi_booking;
                 $newBooking->multi_days = $request->multi_days;
                 $newBooking->week = $request->week;
+                $this->applyPlotDispatchBookingDefaults($newBooking);
                 $newBooking->save();
 
                 if (!$isScheduled && isset($request->driver) && $request->driver != NULL){
@@ -958,7 +968,7 @@ class BookingController extends Controller
         $newBooking->booking_type = $request->booking_type;
         $newBooking->pickup_point = $request->pickup_point;
         $newBooking->pickup_location = $request->pickup_location;
-        $newBooking->pickup_plot_id = $request->pickup_plot_id;
+        $newBooking->pickup_plot_id = $request->pickup_plot_id ?? $request->pickup_point_id;
         $newBooking->destination_point = $request->destination_point;
         $newBooking->destination_location = $request->destination_location;
         $newBooking->destination_plot_id = $request->destination_plot_id;
@@ -1005,6 +1015,22 @@ class BookingController extends Controller
         $newBooking->payment_method = $request->payment_method;
 
         return $newBooking;
+    }
+
+    private function applyPlotDispatchBookingDefaults(CompanyBooking $booking): void
+    {
+        if (!$this->bookingDispatchService->isPlotDispatchEnabled()) {
+            return;
+        }
+
+        if (!$booking->is_scheduled) {
+            $booking->driver = null;
+            $booking->pending_driver_id = null;
+        }
+
+        if (!$booking->pickup_plot_id) {
+            $booking->pickup_plot_id = $this->pickupPlotResolver->resolveFromPickupPoint($booking->pickup_point);
+        }
     }
 
     private function formatCreatedBookingSummary(CompanyBooking $booking): array
