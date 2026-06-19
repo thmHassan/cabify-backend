@@ -17,6 +17,7 @@ use App\Models\DriverPackage;
 use App\Models\Setting;
 use App\Services\BookingDateClassificationService;
 use App\Services\BookingDispatchService;
+use App\Services\BookingLocationResolver;
 use App\Services\BookingReminderService;
 use App\Services\BookingUpdateService;
 use App\Services\PickupPlotResolver;
@@ -32,7 +33,8 @@ class BookingController extends Controller
         private readonly PreBookingService $preBookingService,
         private readonly BookingDispatchService $bookingDispatchService,
         private readonly BookingUpdateService $bookingUpdateService,
-        private readonly PickupPlotResolver $pickupPlotResolver
+        private readonly PickupPlotResolver $pickupPlotResolver,
+        private readonly BookingLocationResolver $bookingLocationResolver
     ) {
     }
 
@@ -140,6 +142,8 @@ class BookingController extends Controller
             }
 
             $this->bookingReminderService->validateReminderRequest($request);
+
+            $this->bookingLocationResolver->resolveFromRequest($request);
 
             $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
 
@@ -413,6 +417,8 @@ class BookingController extends Controller
             ]);
 
             $this->bookingReminderService->validateReminderRequest($request);
+
+            $this->bookingLocationResolver->resolveFromRequest($request);
 
             $booking = CompanyBooking::where('id', $request->id)->first();
             if (!$booking) {
@@ -872,6 +878,7 @@ class BookingController extends Controller
 
             $perPage = $request->limit ?? $request->perPage ?? 10;
             $rides = $query->with('driverDetail')->paginate($perPage);
+            $this->bookingLocationResolver->resolveCollection($rides->items(), true);
 
             return response()->json([
                 'success' => 1,
@@ -898,6 +905,10 @@ class BookingController extends Controller
     {
         try {
             $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['driverDetail', 'vehicleDetail', 'subCompanyDetail', 'accountDetail'])->first();
+
+            if ($rideDetail) {
+                $this->bookingLocationResolver->resolveForBooking($rideDetail, true);
+            }
 
             return response()->json([
                 'success' => 1,

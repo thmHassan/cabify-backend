@@ -574,6 +574,9 @@ class SettingController extends Controller
                 'mapify_geocoding_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-geocoding')
                     : null,
+                'mapify_reverse_geocoding_endpoint' => $mapProvider['uses_mapify']
+                    ? url('/api/company/mapify-reverse-geocoding')
+                    : null,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -609,6 +612,9 @@ class SettingController extends Controller
                     : null,
                 'mapify_geocoding_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-geocoding')
+                    : null,
+                'mapify_reverse_geocoding_endpoint' => $mapProvider['uses_mapify']
+                    ? url('/api/company/mapify-reverse-geocoding')
                     : null,
             ]);
         } catch (\Exception $e) {

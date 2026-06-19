@@ -24,6 +24,7 @@ use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
 use App\Models\WalletTransaction;
 use App\Services\BookingDispatchService;
+use App\Services\BookingLocationResolver;
 use App\Services\PickupPlotResolver;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
@@ -394,6 +395,8 @@ class BookingController extends Controller
                 'payment_method' => 'required',
             ]);
 
+
+            app(BookingLocationResolver::class)->resolveFromRequest($request);
 
             $distance = $request->distance;
             $newBooking = new CompanyBooking;

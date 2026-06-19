@@ -3,11 +3,17 @@
 namespace App\Http\Controllers\Company;
 
 use App\Http\Controllers\Controller;
+use App\Services\MapifyReverseGeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
 class MapifyMapController extends Controller
 {
+    public function __construct(
+        private readonly MapifyReverseGeocodingService $mapifyReverseGeocoding
+    ) {
+    }
+
     private function mapifyBaseRequest()
     {
         $token = config('services.mapify.api_token');
@@ -148,6 +154,61 @@ class MapifyMapController extends Controller
             return response()->json([
                 'success' => 1,
                 'data' => $response->json(),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function reverseGeocoding(Request $request)
+    {
+        try {
+            $request->validate([
+                'lat' => 'required|numeric',
+                'lon' => 'required|numeric',
+                'size' => 'nullable|integer|min:1|max:50',
+            ]);
+
+            $baseRequest = $this->mapifyBaseRequest();
+            if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
+                return $baseRequest;
+            }
+            ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
+
+            $size = (int) ($request->input('size', 1));
+            $query = [
+                'lat' => $request->input('lat'),
+                'lon' => $request->input('lon'),
+                'size' => $size,
+            ];
+
+            $response = Http::withToken($token)
+                ->acceptJson()
+                ->timeout(30)
+                ->get($baseUrl . '/api/v1/proxy/reverse_geocoding', $query);
+
+            if ($response->failed()) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Failed to fetch Mapify reverse geocoding results.',
+                    'status' => $response->status(),
+                    'details' => $response->json() ?? $response->body(),
+                ], $response->status());
+            }
+
+            $payload = $response->json();
+
+            return response()->json([
+                'success' => 1,
+                'data' => $payload,
+                'label' => is_array($payload)
+                    ? $this->mapifyReverseGeocoding->extractLabelFromResponse($payload)
+                    : null,
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             throw $e;
