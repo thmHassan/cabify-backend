@@ -58,7 +58,7 @@ class MapifyMapController extends Controller
                 ->all();
 
             $response = Http::withToken($token)
-                ->acceptJson()
+                ->withHeaders(['Accept' => 'image/png,image/webp,application/octet-stream,*/*'])
                 ->timeout(30)
                 ->get($baseUrl . $path, $query);
 
@@ -68,10 +68,10 @@ class MapifyMapController extends Controller
                     'message' => 'Failed to fetch Mapify tiles.',
                     'status' => $response->status(),
                     'details' => $response->json() ?? $response->body(),
-                ], $response->status());
+                ], $response->status() >= 400 && $response->status() < 600 ? $response->status() : 502);
             }
 
-            $contentType = $response->header('Content-Type') ?? 'application/json';
+            $contentType = $response->header('Content-Type') ?? 'image/png';
 
             if (str_contains($contentType, 'application/json')) {
                 return response()->json([

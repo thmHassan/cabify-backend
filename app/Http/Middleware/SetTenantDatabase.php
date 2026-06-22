@@ -2,13 +2,11 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\TenantDatabaseConfigurator;
 use App\Support\TenantRequestContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 
 class SetTenantDatabase
 {
@@ -22,54 +20,26 @@ class SetTenantDatabase
         $database = TenantRequestContext::databaseId($request);
 
         if (!$database) {
+            $tenant = auth('tenant')->user();
+            if ($tenant) {
+                $database = (string) $tenant->getAuthIdentifier();
+            }
+        }
+
+        if (!$database) {
             return response()->json([
                 'error' => 1,
                 'message' => 'Database header or database query parameter is missing.',
             ], 400);
         }
 
-        $tenantDb = 'tenant' . $database;
-        try {
-             $exists = DB::selectOne(
-                    "SELECT SCHEMA_NAME 
-                    FROM INFORMATION_SCHEMA.SCHEMATA 
-                    WHERE SCHEMA_NAME = ?",
-                    [$tenantDb]
-                );
-
-
-            if (empty($exists)) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => "Company Id is Invalid. Please contact your Company Admin"
-                ], 400);
-            }
-        } catch (QueryException $e) {
+        $result = TenantDatabaseConfigurator::configure($database);
+        if (!$result['configured']) {
             return response()->json([
                 'error' => 1,
-                'message' => 'Unable to verify tenant database.',
-                'details' => $e->getMessage()
-            ], 500);
+                'message' => $result['error'] ?? 'Unable to configure tenant database.',
+            ], $result['status'] ?? 500);
         }
-
-         Config::set('database.connections.tenant', [
-            'driver' => 'mysql',
-            'host' => config('database.connections.central.host'),
-            'port' => config('database.connections.central.port'),
-            'database' => "tenant".$database,
-            'username' => config('database.connections.central.username'),
-            'password' => config('database.connections.central.password'),
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '',
-            'strict' => false,
-        ]);
-
-        // Reset and reconnect
-        DB::purge('tenant');
-        DB::reconnect('tenant');
-
-        Config::set('database.default', 'tenant');
 
         return $next($request);
     }

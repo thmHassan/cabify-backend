@@ -154,6 +154,13 @@ Route::group(['middleware' => ['auth:api']], function () {
     });
 });
 
+// Tile image GETs cannot send headers; auth runs first so JWT (query token) can
+// identify the company, then tenant.db resolves database from query or tenant id.
+Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
+    Route::get('/company/mapify-tiles/bright', [MapifyMapController::class, 'brightTiles']);
+    Route::get('/company/mapify-tiles/bright/{z}/{x}/{y}', [MapifyMapController::class, 'brightTiles']);
+});
+
 Route::group(['middleware' => ['tenant.db', 'auth.tenant.jwt']], function () {
     // Route::group(['middleware' => ['tenant']], function () {
     Route::post('/company/dashboard', [SettingController::class, 'dashboard']);
@@ -245,8 +252,6 @@ Route::group(['middleware' => ['tenant.db', 'auth.tenant.jwt']], function () {
     Route::post('/company/stripe-information', [SettingController::class, 'saveStripeInformation']);
     Route::get('/company/third-party-information', [SettingController::class, 'thirdPartyInformation']);
     Route::get('/company/map-information', [SettingController::class, 'mapInformation']);
-    Route::get('/company/mapify-tiles/bright', [MapifyMapController::class, 'brightTiles']);
-    Route::get('/company/mapify-tiles/bright/{z}/{x}/{y}', [MapifyMapController::class, 'brightTiles']);
     Route::get('/company/mapify-search', [MapifyMapController::class, 'search']);
     Route::get('/company/mapify-geocoding', [MapifyMapController::class, 'geocoding']);
     Route::get('/company/mapify-reverse-geocoding', [MapifyMapController::class, 'reverseGeocoding']);

@@ -2,12 +2,11 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\TenantDatabaseConfigurator;
 use App\Support\TenantRequestContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 
 class TenantAuthenticate
 {
@@ -23,6 +22,8 @@ class TenantAuthenticate
             if (!$token) {
                 return response()->json(['message' => 'Token not provided'], 401);
             }
+
+            $this->ensureTenantDatabaseConfigured($request);
 
             $tenant = auth('tenant')->setToken($token)->user();
 
@@ -60,26 +61,6 @@ class TenantAuthenticate
             return;
         }
 
-        $expectedDb = 'tenant' . $database;
-        if (config('database.connections.tenant.database') === $expectedDb) {
-            return;
-        }
-
-        Config::set('database.connections.tenant', [
-            'driver' => 'mysql',
-            'host' => config('database.connections.central.host'),
-            'port' => config('database.connections.central.port'),
-            'database' => $expectedDb,
-            'username' => config('database.connections.central.username'),
-            'password' => config('database.connections.central.password'),
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '',
-            'strict' => false,
-        ]);
-
-        DB::purge('tenant');
-        DB::reconnect('tenant');
-        Config::set('database.default', 'tenant');
+        TenantDatabaseConfigurator::configure($database);
     }
 }
