@@ -45,13 +45,22 @@ class MapifyMapController extends Controller
             $path = '/api/v1/proxy/tiles/bright';
             if ($z !== null && $x !== null && $y !== null) {
                 $extension = $request->query('ext', 'png');
+                if (preg_match('/^(.+)\.([a-zA-Z0-9]+)$/', (string) $y, $matches)) {
+                    $y = $matches[1];
+                    $extension = $matches[2];
+                }
+
                 $path .= '/' . $z . '/' . $x . '/' . $y . '.' . ltrim((string) $extension, '.');
             }
+
+            $query = collect($request->query())
+                ->except(['database', 'token', 'access_token', 'ext'])
+                ->all();
 
             $response = Http::withToken($token)
                 ->acceptJson()
                 ->timeout(30)
-                ->get($baseUrl . $path, $request->query());
+                ->get($baseUrl . $path, $query);
 
             if ($response->failed()) {
                 return response()->json([

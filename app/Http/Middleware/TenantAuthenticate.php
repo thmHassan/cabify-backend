@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\TenantRequestContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -18,7 +19,7 @@ class TenantAuthenticate
     public function handle(Request $request, Closure $next): Response
     {
         try {
-            $token = $request->bearerToken();
+            $token = TenantRequestContext::bearerToken($request);
             if (!$token) {
                 return response()->json(['message' => 'Token not provided'], 401);
             }
@@ -54,7 +55,7 @@ class TenantAuthenticate
 
     private function ensureTenantDatabaseConfigured(Request $request): void
     {
-        $database = $request->header('database');
+        $database = TenantRequestContext::databaseId($request);
         if (!$database) {
             return;
         }

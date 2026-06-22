@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\TenantRequestContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -18,12 +19,12 @@ class SetTenantDatabase
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $database = $request->header('database');
+        $database = TenantRequestContext::databaseId($request);
 
         if (!$database) {
             return response()->json([
                 'error' => 1,
-                'message' => 'Database header is missing.'
+                'message' => 'Database header or database query parameter is missing.',
             ], 400);
         }
 

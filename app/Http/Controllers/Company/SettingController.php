@@ -576,6 +576,12 @@ class SettingController extends Controller
                 'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-tiles/bright')
                     : null,
+                'mapify_tiles_url_template' => $mapProvider['uses_mapify']
+                    ? url('/api/company/mapify-tiles/bright/{z}/{x}/{y}.png')
+                    : null,
+                'mapify_tiles_auth_query_params' => $mapProvider['uses_mapify']
+                    ? ['database', 'token']
+                    : null,
                 'mapify_search_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-search')
                     : null,
@@ -621,6 +627,12 @@ class SettingController extends Controller
                 'google_api_key_configured' => $mapProvider['google_api_key_configured'],
                 'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-tiles/bright')
+                    : null,
+                'mapify_tiles_url_template' => $mapProvider['uses_mapify']
+                    ? url('/api/company/mapify-tiles/bright/{z}/{x}/{y}.png')
+                    : null,
+                'mapify_tiles_auth_query_params' => $mapProvider['uses_mapify']
+                    ? ['database', 'token']
                     : null,
                 'mapify_search_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-search')
