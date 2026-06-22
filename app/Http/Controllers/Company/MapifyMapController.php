@@ -4,13 +4,17 @@ namespace App\Http\Controllers\Company;
 
 use App\Http\Controllers\Controller;
 use App\Services\MapifyReverseGeocodingService;
+use App\Services\MapSearchPreferenceService;
+use App\Support\MapifyQueryBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\Rule;
 
 class MapifyMapController extends Controller
 {
     public function __construct(
-        private readonly MapifyReverseGeocodingService $mapifyReverseGeocoding
+        private readonly MapifyReverseGeocodingService $mapifyReverseGeocoding,
+        private readonly MapSearchPreferenceService $mapSearchPreference
     ) {
     }
 
@@ -80,12 +84,30 @@ class MapifyMapController extends Controller
     public function search(Request $request)
     {
         try {
+            $nearbySearch = MapifyQueryBuilder::parseNearbySearch($request);
+
             $request->validate([
                 'q' => 'required|string|max:255',
-                'lat' => 'required|numeric',
-                'lon' => 'required|numeric',
+                'lat' => 'nullable|numeric|required_with:lon',
+                'lon' => 'nullable|numeric|required_with:lat',
                 'size' => 'nullable|integer|min:1|max:50',
+                'nearby_search' => 'nullable|boolean',
+                'boundary_country' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'string',
+                    'min:2',
+                    'max:3',
+                    'regex:/^[A-Za-z]{2,3}$/',
+                ],
             ]);
+
+            if ($request->has('nearby_search')) {
+                $this->mapSearchPreference->save(
+                    $nearbySearch,
+                    $request->input('boundary_country')
+                );
+            }
 
             $baseRequest = $this->mapifyBaseRequest();
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
@@ -93,10 +115,12 @@ class MapifyMapController extends Controller
             }
             ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
 
+            $query = MapifyQueryBuilder::buildSearchQuery($request, $nearbySearch);
+
             $response = Http::withToken($token)
                 ->acceptJson()
                 ->timeout(30)
-                ->get($baseUrl . '/api/v1/proxy/search', $request->only(['q', 'lat', 'lon', 'size']));
+                ->get($baseUrl . '/api/v1/proxy/search', $query);
 
             if ($response->failed()) {
                 return response()->json([
@@ -124,12 +148,29 @@ class MapifyMapController extends Controller
     public function geocoding(Request $request)
     {
         try {
+            $nearbySearch = MapifyQueryBuilder::parseNearbySearch($request);
+
             $request->validate([
                 'q' => 'required|string|max:255',
-                'lat' => 'required|numeric',
-                'lon' => 'required|numeric',
-                'boundary_country' => 'nullable|string|size:2',
+                'lat' => 'nullable|numeric|required_with:lon',
+                'lon' => 'nullable|numeric|required_with:lat',
+                'nearby_search' => 'nullable|boolean',
+                'boundary_country' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'string',
+                    'min:2',
+                    'max:3',
+                    'regex:/^[A-Za-z]{2,3}$/',
+                ],
             ]);
+
+            if ($request->has('nearby_search')) {
+                $this->mapSearchPreference->save(
+                    $nearbySearch,
+                    $request->input('boundary_country')
+                );
+            }
 
             $baseRequest = $this->mapifyBaseRequest();
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
@@ -137,10 +178,12 @@ class MapifyMapController extends Controller
             }
             ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
 
+            $query = MapifyQueryBuilder::buildGeocodingQuery($request, $nearbySearch);
+
             $response = Http::withToken($token)
                 ->acceptJson()
                 ->timeout(30)
-                ->get($baseUrl . '/api/v1/proxy/geocoding', $request->only(['q', 'lat', 'lon', 'boundary_country']));
+                ->get($baseUrl . '/api/v1/proxy/geocoding', $query);
 
             if ($response->failed()) {
                 return response()->json([
@@ -209,6 +252,66 @@ class MapifyMapController extends Controller
                 'label' => is_array($payload)
                     ? $this->mapifyReverseGeocoding->extractLabelFromResponse($payload)
                     : null,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function getMapSearchPreferences()
+    {
+        try {
+            $preferences = $this->mapSearchPreference->resolve();
+
+            return response()->json([
+                'success' => 1,
+                'nearby_search_enabled' => $preferences['nearby_search_enabled'],
+                'search_boundary_country' => $preferences['search_boundary_country'],
+                'map_search_preferences' => $preferences,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function saveMapSearchPreferences(Request $request)
+    {
+        try {
+            $nearbySearch = MapifyQueryBuilder::parseNearbySearch($request);
+
+            $request->validate([
+                'nearby_search' => 'required|boolean',
+                'boundary_country' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'string',
+                    'min:2',
+                    'max:3',
+                    'regex:/^[A-Za-z]{2,3}$/',
+                ],
+            ]);
+
+            $this->mapSearchPreference->save(
+                $nearbySearch,
+                $request->input('boundary_country')
+            );
+
+            $preferences = $this->mapSearchPreference->resolve();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Map search preferences saved successfully.',
+                'nearby_search_enabled' => $preferences['nearby_search_enabled'],
+                'search_boundary_country' => $preferences['search_boundary_country'],
+                'map_search_preferences' => $preferences,
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             throw $e;

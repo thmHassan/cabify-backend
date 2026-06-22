@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Support\MapsApi;
+use App\Services\MapSearchPreferenceService;
 use App\Models\CompanySetting;
 use App\Models\TenantUser;
 use App\Models\Tenant;
@@ -23,6 +24,11 @@ use Carbon\Carbon;
 
 class SettingController extends Controller
 {
+    public function __construct(
+        private readonly MapSearchPreferenceService $mapSearchPreference
+    ) {
+    }
+
     public function getCompanyProfile(Request $request)
     {
         try {
@@ -579,6 +585,12 @@ class SettingController extends Controller
                 'mapify_reverse_geocoding_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-reverse-geocoding')
                     : null,
+                'map_search_preferences_endpoint' => $mapProvider['uses_mapify']
+                    ? url('/api/company/map-search-preferences')
+                    : null,
+                'map_search_preferences' => $mapProvider['uses_mapify']
+                    ? $this->mapSearchPreference->resolve()
+                    : null,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -618,6 +630,12 @@ class SettingController extends Controller
                     : null,
                 'mapify_reverse_geocoding_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-reverse-geocoding')
+                    : null,
+                'map_search_preferences_endpoint' => $mapProvider['uses_mapify']
+                    ? url('/api/company/map-search-preferences')
+                    : null,
+                'map_search_preferences' => $mapProvider['uses_mapify']
+                    ? $this->mapSearchPreference->resolve()
                     : null,
             ]);
         } catch (\Exception $e) {

@@ -1200,7 +1200,7 @@ class CompanyController extends Controller
             // $tenant->device_token = $request->device_token;
             // $tenant->fcm_token = $request->fcm_token;
             $tenant->save();
-            $token = JWTAuth::fromUser($tenant);
+            $token = auth('tenant')->login($tenant);
 
             $tenantData = $tenant->data;
             $timezone = $tenantData['time_zone'] ?? null;

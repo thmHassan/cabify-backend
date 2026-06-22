@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 
@@ -23,17 +22,13 @@ class TenantAuthenticate
             if (!$token) {
                 return response()->json(['message' => 'Token not provided'], 401);
             }
-            
-            $tenant = auth('tenant')->setToken($request->bearerToken())->user();
+
+            $tenant = auth('tenant')->setToken($token)->user();
 
             if (!$tenant) {
-                
-                $database = "tenant".$request->header('database');
-                Config::set('database.connections.tenant.database', $database);
-                DB::purge('tenant');
-                DB::reconnect('tenant');
-                DB::setDefaultConnection('tenant');
-                $dispatcher = auth('dispatcher')->setToken($request->bearerToken())->user();
+                $this->ensureTenantDatabaseConfigured($request);
+
+                $dispatcher = auth('dispatcher')->setToken($token)->user();
                 if (!$dispatcher) {
                     return response()->json(['message' => 'Unauthenticated'], 401);
                 }
@@ -55,5 +50,35 @@ class TenantAuthenticate
         }
 
         return $next($request);
+    }
+
+    private function ensureTenantDatabaseConfigured(Request $request): void
+    {
+        $database = $request->header('database');
+        if (!$database) {
+            return;
+        }
+
+        $expectedDb = 'tenant' . $database;
+        if (config('database.connections.tenant.database') === $expectedDb) {
+            return;
+        }
+
+        Config::set('database.connections.tenant', [
+            'driver' => 'mysql',
+            'host' => config('database.connections.central.host'),
+            'port' => config('database.connections.central.port'),
+            'database' => $expectedDb,
+            'username' => config('database.connections.central.username'),
+            'password' => config('database.connections.central.password'),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => false,
+        ]);
+
+        DB::purge('tenant');
+        DB::reconnect('tenant');
+        Config::set('database.default', 'tenant');
     }
 }

@@ -154,7 +154,7 @@ Route::group(['middleware' => ['auth:api']], function () {
     });
 });
 
-Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
+Route::group(['middleware' => ['tenant.db', 'auth.tenant.jwt']], function () {
     // Route::group(['middleware' => ['tenant']], function () {
     Route::post('/company/dashboard', [SettingController::class, 'dashboard']);
 
@@ -250,6 +250,8 @@ Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/mapify-search', [MapifyMapController::class, 'search']);
     Route::get('/company/mapify-geocoding', [MapifyMapController::class, 'geocoding']);
     Route::get('/company/mapify-reverse-geocoding', [MapifyMapController::class, 'reverseGeocoding']);
+    Route::get('/company/map-search-preferences', [MapifyMapController::class, 'getMapSearchPreferences']);
+    Route::post('/company/map-search-preferences', [MapifyMapController::class, 'saveMapSearchPreferences']);
     Route::post('/company/third-party-information', [SettingController::class, 'saveThirdPartyInformation']);
     Route::get('/company/notification-recipients', [SettingController::class, 'notificationRecipients']);
     Route::post('/company/send-notification', [SettingController::class, 'sendNotification']);
