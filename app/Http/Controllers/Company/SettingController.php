@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Company;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Support\MapsApi;
 use App\Models\CompanySetting;
 use App\Models\TenantUser;
 use App\Models\Tenant;
@@ -550,20 +551,21 @@ class SettingController extends Controller
     {
         try {
             $settings = CompanySetting::orderBy('id', 'DESC')->first();
-            $mapProvider = $this->resolveMapProvider($settings);
+            $mapProvider = $this->resolveMapProvider($settings, $request);
 
-            if (!$mapProvider['uses_google_map'] && !$mapProvider['mapify_available']) {
+            if (!$this->isMapProviderConfigured($mapProvider)) {
                 return $this->mapProviderUnavailableResponse($mapProvider);
             }
 
             return response()->json([
                 'success' => 1,
                 'settings' => $settings,
+                'maps_api' => $mapProvider['maps_api'],
                 'map_type' => $mapProvider['map_type'],
                 'map_provider' => $mapProvider['map_provider'],
                 'uses_google_map' => $mapProvider['uses_google_map'],
                 'uses_mapify' => $mapProvider['uses_mapify'],
-                'google_api_key_configured' => $mapProvider['uses_google_map'],
+                'google_api_key_configured' => $mapProvider['google_api_key_configured'],
                 'google_api_keys' => $mapProvider['uses_google_map'] ? $mapProvider['google_api_key'] : null,
                 'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-tiles/bright')
@@ -591,19 +593,20 @@ class SettingController extends Controller
     {
         try {
             $settings = CompanySetting::orderBy('id', 'DESC')->first();
-            $mapProvider = $this->resolveMapProvider($settings);
+            $mapProvider = $this->resolveMapProvider($settings, $request);
 
-            if (!$mapProvider['uses_google_map'] && !$mapProvider['mapify_available']) {
+            if (!$this->isMapProviderConfigured($mapProvider)) {
                 return $this->mapProviderUnavailableResponse($mapProvider);
             }
 
             return response()->json([
                 'success' => 1,
+                'maps_api' => $mapProvider['maps_api'],
                 'map_type' => $mapProvider['map_type'],
                 'map_provider' => $mapProvider['map_provider'],
                 'uses_google_map' => $mapProvider['uses_google_map'],
                 'uses_mapify' => $mapProvider['uses_mapify'],
-                'google_api_key_configured' => $mapProvider['uses_google_map'],
+                'google_api_key_configured' => $mapProvider['google_api_key_configured'],
                 'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-tiles/bright')
                     : null,
@@ -633,34 +636,97 @@ class SettingController extends Controller
         return filled($googleMapKey) ? trim((string) $googleMapKey) : null;
     }
 
-    private function resolveMapProvider(?CompanySetting $settings): array
+    private function resolveTenantMapsApi(?Request $request): ?string
+    {
+        if (!$request || !$request->header('database')) {
+            return null;
+        }
+
+        $tenant = (new Tenant)
+            ->setConnection('central')
+            ->where('id', $request->header('database'))
+            ->first();
+
+        if (!$tenant) {
+            return null;
+        }
+
+        $mapsApi = $tenant->maps_api ?? data_get($tenant->data, 'maps_api');
+
+        return MapsApi::normalize($mapsApi);
+    }
+
+    private function resolveMapProvider(?CompanySetting $settings, ?Request $request = null): array
     {
         $googleApiKey = $this->resolveGoogleMapKeyFromSettings($settings);
-        $usesGoogleMap = filled($googleApiKey);
-        $mapifyToken = config('services.mapify.api_token');
-        $mapifyAvailable = filled($mapifyToken);
+        $mapsApi = $this->resolveTenantMapsApi($request);
+        $mapifyAvailable = filled(config('services.mapify.api_token'));
+
+        if ($mapsApi === MapsApi::GOOGLE) {
+            $usesGoogleMap = true;
+            $usesMapify = false;
+        } elseif (MapsApi::isMapify($mapsApi)) {
+            $usesGoogleMap = false;
+            $usesMapify = true;
+        } else {
+            $usesGoogleMap = filled($googleApiKey);
+            $usesMapify = !$usesGoogleMap;
+        }
 
         return [
-            'map_type' => $usesGoogleMap ? 'google' : 'default',
-            'map_provider' => $usesGoogleMap ? 'google' : 'mapify',
+            'maps_api' => $mapsApi,
+            'map_type' => $usesGoogleMap ? MapsApi::GOOGLE : ($usesMapify ? MapsApi::MAPIFY : 'default'),
+            'map_provider' => $usesGoogleMap ? MapsApi::GOOGLE : MapsApi::MAPIFY,
             'uses_google_map' => $usesGoogleMap,
-            'uses_mapify' => !$usesGoogleMap,
+            'uses_mapify' => $usesMapify,
             'google_api_key' => $googleApiKey,
+            'google_api_key_configured' => filled($googleApiKey),
             'mapify_available' => $mapifyAvailable,
             'mapify_token_configured' => $mapifyAvailable,
         ];
     }
 
+    private function isMapProviderConfigured(array $mapProvider): bool
+    {
+        if ($mapProvider['uses_google_map']) {
+            return $mapProvider['google_api_key_configured'];
+        }
+
+        if ($mapProvider['uses_mapify']) {
+            return $mapProvider['mapify_available'];
+        }
+
+        return false;
+    }
+
     private function mapProviderUnavailableResponse(array $mapProvider): \Illuminate\Http\JsonResponse
     {
+        $usesGoogleMap = $mapProvider['uses_google_map'];
+        $usesMapify = $mapProvider['uses_mapify'];
+
+        if ($usesGoogleMap) {
+            $message = 'Google Maps is enabled for this company, but no Google Maps API key is configured.';
+            $hint = 'Add google_api_keys in Third Party settings to use Google Maps.';
+        } elseif ($usesMapify) {
+            $message = 'Mapify is enabled for this company, but Mapify is not configured on the server.';
+            $hint = 'Set MAPIFY_API_TOKEN in server .env, then run: php artisan config:clear && php artisan config:cache';
+        } else {
+            $message = 'No map provider is configured. Add a Google Maps API key or configure Mapify on the server.';
+            $hint = !$mapProvider['mapify_token_configured']
+                ? 'Set MAPIFY_API_TOKEN in server .env, then run: php artisan config:clear && php artisan config:cache'
+                : 'Add google_api_keys in Third Party settings to use Google Maps.';
+        }
+
         return response()->json([
             'error' => 1,
-            'message' => 'No map provider is configured. Add a Google Maps API key or configure Mapify on the server.',
-            'google_api_key_configured' => $mapProvider['uses_google_map'],
+            'message' => $message,
+            'maps_api' => $mapProvider['maps_api'],
+            'map_type' => $mapProvider['map_type'],
+            'uses_google_map' => $usesGoogleMap,
+            'uses_mapify' => $usesMapify,
+            'google_api_key_configured' => $mapProvider['google_api_key_configured'],
             'mapify_token_configured' => $mapProvider['mapify_token_configured'],
-            'hint' => !$mapProvider['mapify_token_configured']
-                ? 'Set MAPIFY_API_TOKEN in server .env, then run: php artisan config:clear && php artisan config:cache'
-                : 'Add google_api_keys in Third Party settings to use Google Maps.',
+            'hint' => $hint,
         ], 503);
     }
 
@@ -698,18 +764,23 @@ class SettingController extends Controller
             $settings->mail_port = $request->mail_port;
             $settings->save();
 
-            $mapProvider = $this->resolveMapProvider($settings);
+            $mapProvider = $this->resolveMapProvider($settings, $request);
 
-            if (!$mapProvider['uses_google_map'] && !$mapProvider['mapify_available']) {
+            if (!$this->isMapProviderConfigured($mapProvider)) {
                 return response()->json([
                     'error' => 1,
-                    'message' => 'Settings saved, but no map provider is available. Add a Google Maps API key or configure Mapify on the server.',
+                    'message' => 'Settings saved, but the selected map provider is not fully configured.',
+                    'maps_api' => $mapProvider['maps_api'],
+                    'map_type' => $mapProvider['map_type'],
+                    'uses_google_map' => $mapProvider['uses_google_map'],
+                    'uses_mapify' => $mapProvider['uses_mapify'],
                 ], 422);
             }
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Third party information saved successfully',
+                'maps_api' => $mapProvider['maps_api'],
                 'map_type' => $mapProvider['map_type'],
                 'map_provider' => $mapProvider['map_provider'],
                 'uses_google_map' => $mapProvider['uses_google_map'],
