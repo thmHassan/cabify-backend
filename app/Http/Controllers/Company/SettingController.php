@@ -6,9 +6,10 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Support\MapsApi;
 use App\Services\MapSearchPreferenceService;
+use App\Support\TenantRequestContext;
+use App\Models\Tenant as CentralTenant;
 use App\Models\CompanySetting;
 use App\Models\TenantUser;
-use App\Models\Tenant;
 use App\Models\Subscription;
 use App\Models\UserSubscription;
 use App\Models\MobileAppSetting;
@@ -68,7 +69,7 @@ class SettingController extends Controller
     public function getApiKeys(Request $request)
     {
         try {
-            $tenant = (new Tenant)
+            $tenant = (new CentralTenant)
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
                 ->first();
@@ -184,7 +185,7 @@ class SettingController extends Controller
                 ]);
             }
 
-            $data = (new Tenant)
+            $data = (new CentralTenant)
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
                 ->first();
@@ -580,7 +581,7 @@ class SettingController extends Controller
                     ? url('/api/company/mapify-tiles/bright/{z}/{x}/{y}.png')
                     : null,
                 'mapify_tiles_auth_query_params' => $mapProvider['uses_mapify']
-                    ? ['database', 'token']
+                    ? ['token']
                     : null,
                 'mapify_search_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-search')
@@ -612,6 +613,7 @@ class SettingController extends Controller
         try {
             $settings = CompanySetting::orderBy('id', 'DESC')->first();
             $mapProvider = $this->resolveMapProvider($settings, $request);
+            $centralTenant = $this->resolveCentralTenant($request);
 
             if (!$this->isMapProviderConfigured($mapProvider)) {
                 return $this->mapProviderUnavailableResponse($mapProvider);
@@ -625,6 +627,8 @@ class SettingController extends Controller
                 'uses_google_map' => $mapProvider['uses_google_map'],
                 'uses_mapify' => $mapProvider['uses_mapify'],
                 'google_api_key_configured' => $mapProvider['google_api_key_configured'],
+                'central_map_flag' => $centralTenant?->map,
+                'central_map_enabled' => ($centralTenant?->map ?? null) === 'enable',
                 'mapify_tiles_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-tiles/bright')
                     : null,
@@ -632,7 +636,7 @@ class SettingController extends Controller
                     ? url('/api/company/mapify-tiles/bright/{z}/{x}/{y}.png')
                     : null,
                 'mapify_tiles_auth_query_params' => $mapProvider['uses_mapify']
-                    ? ['database', 'token']
+                    ? ['token']
                     : null,
                 'mapify_search_endpoint' => $mapProvider['uses_mapify']
                     ? url('/api/company/mapify-search')
@@ -668,15 +672,11 @@ class SettingController extends Controller
 
     private function resolveTenantMapsApi(?Request $request): ?string
     {
-        if (!$request || !$request->header('database')) {
+        if (!$request) {
             return null;
         }
 
-        $tenant = (new Tenant)
-            ->setConnection('central')
-            ->where('id', $request->header('database'))
-            ->first();
-
+        $tenant = $this->resolveCentralTenant($request);
         if (!$tenant) {
             return null;
         }
@@ -684,6 +684,23 @@ class SettingController extends Controller
         $mapsApi = $tenant->maps_api ?? data_get($tenant->data, 'maps_api');
 
         return MapsApi::normalize($mapsApi);
+    }
+
+    private function resolveCentralTenant(?Request $request): ?CentralTenant
+    {
+        if (!$request) {
+            return null;
+        }
+
+        $databaseId = TenantRequestContext::databaseId($request);
+        if (!$databaseId) {
+            return null;
+        }
+
+        return (new CentralTenant)
+            ->setConnection('central')
+            ->where('id', $databaseId)
+            ->first();
     }
 
     private function resolveMapProvider(?CompanySetting $settings, ?Request $request = null): array

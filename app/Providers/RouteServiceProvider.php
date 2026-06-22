@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\TenantRequestContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
 use Illuminate\Http\Request;
@@ -25,7 +26,18 @@ class RouteServiceProvider extends ServiceProvider
     public function boot(): void
     {
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+            $key = TenantRequestContext::rateLimitKey($request);
+            $path = ltrim($request->path(), '/');
+
+            if (str_starts_with($path, 'api/company/mapify-tiles/')) {
+                return Limit::perMinute(2000)->by($key);
+            }
+
+            if (preg_match('#^api/company/(mapify-(search|geocoding|reverse-geocoding)|map-search-preferences)#', $path) === 1) {
+                return Limit::perMinute(500)->by($key);
+            }
+
+            return Limit::perMinute(300)->by($key);
         });
 
         $this->routes(function () {

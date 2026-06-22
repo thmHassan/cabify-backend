@@ -18,17 +18,32 @@ class Dispatcher extends Authenticatable implements JWTSubject
     protected $connection = 'tenant';
     protected $table = "dispatcher";
     protected $appends = ["active_rides", 'completed_rides'];
+
+    private ?string $jwtTenantId = null;
     
     public function getJWTIdentifier()
     {
         return $this->getKey();
     }
 
+    public function withJwtTenantId(?string $tenantId): self
+    {
+        $this->jwtTenantId = filled($tenantId) ? trim($tenantId) : null;
+
+        return $this;
+    }
+
     public function getJWTCustomClaims()
     {
-        return [
+        $claims = [
             'auth_version' => (int) ($this->auth_version ?? 0),
         ];
+
+        if (filled($this->jwtTenantId)) {
+            $claims['tenant_id'] = $this->jwtTenantId;
+        }
+
+        return $claims;
     }
 
     public function getActiveRidesAttribute(){

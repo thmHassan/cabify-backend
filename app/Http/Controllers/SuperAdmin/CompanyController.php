@@ -1313,7 +1313,10 @@ class CompanyController extends Controller
         }
         
         $dispatcherTtlMinutes = 36 * 60; // 36 hours
-        $token = auth('dispatcher')->setTTL($dispatcherTtlMinutes)->login($user);
+        $tenantId = $request->header('database');
+        $token = auth('dispatcher')
+            ->setTTL($dispatcherTtlMinutes)
+            ->login($user->withJwtTenantId($tenantId));
 
         $record = new CompanyDispatcherLog;
         $record->dispatcher_id = $user->id;

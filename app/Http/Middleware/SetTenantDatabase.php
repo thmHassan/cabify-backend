@@ -27,6 +27,11 @@ class SetTenantDatabase
         }
 
         if (!$database) {
+            $token = TenantRequestContext::bearerToken($request);
+            $database = TenantRequestContext::databaseIdFromToken($token);
+        }
+
+        if (!$database) {
             return response()->json([
                 'error' => 1,
                 'message' => 'Database header or database query parameter is missing.',

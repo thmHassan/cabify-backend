@@ -37,4 +37,11 @@ class TenantRequestContextTest extends TestCase
 
         $this->assertSame('from-header', TenantRequestContext::databaseId($request));
     }
+
+    public function test_rate_limit_key_uses_database_and_token_when_available(): void
+    {
+        $request = Request::create('/api/company/mapify-tiles/bright/1/2/3.png?database=alpha31&token=abc123', 'GET');
+
+        $this->assertSame('tenant:alpha31:' . sha1('abc123'), TenantRequestContext::rateLimitKey($request));
+    }
 }
