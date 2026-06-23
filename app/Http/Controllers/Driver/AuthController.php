@@ -14,7 +14,9 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanySetting;
+use App\Models\DriverDocument;
 use App\Services\DriverSessionService;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
@@ -192,6 +194,7 @@ class AuthController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => "User exist. Please enter your password",
+                'data' => $this->formatDriverProfileData($user),
             ], 200);
         }
         catch(\Exception $e){
@@ -412,11 +415,11 @@ class AuthController extends Controller
 
     public function getProfile(Request $request){
         try{
-            $user = auth("driver")->user();
+            $user = CompanyDriver::where('id', auth('driver')->user()->id)->first();
 
             return response()->json([
                 'success' => 1,
-                'data' => $user
+                'data' => $this->formatDriverProfileData($user),
             ]);
         }
         catch(\Exception $e){
@@ -663,5 +666,50 @@ class AuthController extends Controller
                 'message' => 'SOmething went wrong'
             ]);
         }
+    }
+
+    private function formatDriverProfileData(CompanyDriver $user): array
+    {
+        $profile = $user->toArray();
+
+        $vehicleFields = [
+            'vehicle_name',
+            'vehicle_type',
+            'vehicle_service',
+            'seats',
+            'color',
+            'capacity',
+            'plate_no',
+            'vehicle_registration_date',
+            'assigned_vehicle',
+            'vehicle_change_request',
+            'change_vehicle_service',
+            'change_vehicle_type',
+            'change_color',
+            'change_seats',
+            'change_plate_no',
+            'change_vehicle_registration_date',
+        ];
+
+        $documentFields = [
+            'driver_license',
+            'document_approved_office',
+            'profile_image_approval_status',
+            'profile_image_approval_description',
+            'profile_image_pending',
+        ];
+
+        $vehicle = Arr::only($profile, $vehicleFields);
+        $document = Arr::only($profile, $documentFields);
+        $document['documents'] = DriverDocument::where('driver_id', $user->id)
+            ->with('documentDetail')
+            ->orderBy('id', 'DESC')
+            ->get();
+
+        $data = Arr::except($profile, array_merge($vehicleFields, $documentFields));
+        $data['vehicle'] = $vehicle;
+        $data['document'] = $document;
+
+        return $data;
     }
 }
