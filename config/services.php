@@ -48,6 +48,11 @@ return [
     'mapify' => [
         'base_url' => env('MAPIFY_BASE_URL', 'https://client.mapifyit.com'),
         'api_token' => env('MAPIFY_API_TOKEN'),
+        'nearby_radius_km' => env('MAPIFY_NEARBY_RADIUS_KM', 50),
+        'nearby_fetch_size' => env('MAPIFY_NEARBY_FETCH_SIZE', 50),
+        'nearby_default_size' => env('MAPIFY_NEARBY_DEFAULT_SIZE', 20),
+        'nearby_min_size' => env('MAPIFY_NEARBY_MIN_SIZE', 20),
+        'nearby_max_size' => env('MAPIFY_NEARBY_MAX_SIZE', 50),
     ],
 
     'node_socket' => [

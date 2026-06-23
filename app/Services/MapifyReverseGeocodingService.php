@@ -73,6 +73,77 @@ class MapifyReverseGeocodingService
         return $first['label'] ?? $first['name'] ?? null;
     }
 
+    public function extractCountryCodeFromResponse(array $data): ?string
+    {
+        $results = $data['results'] ?? ($data['data']['results'] ?? null);
+        if (is_array($results)) {
+            foreach ($results as $result) {
+                if (!is_array($result)) {
+                    continue;
+                }
+
+                $countryCode = $this->extractCountryCodeFromItem($result);
+                if (filled($countryCode)) {
+                    return $countryCode;
+                }
+            }
+        }
+
+        $features = $data['features'] ?? ($data['data']['features'] ?? null);
+        if (is_array($features)) {
+            foreach ($features as $feature) {
+                if (!is_array($feature)) {
+                    continue;
+                }
+
+                $properties = $feature['properties'] ?? $feature;
+                if (!is_array($properties)) {
+                    continue;
+                }
+
+                $countryCode = $this->extractCountryCodeFromItem($properties);
+                if (filled($countryCode)) {
+                    return $countryCode;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public function resolveCountryCode(float $lat, float $lon): ?string
+    {
+        $cacheKey = sprintf('mapify_reverse_geocode_country:%s:%s', $lat, $lon);
+        $cached = Cache::get($cacheKey);
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
+        $payload = $this->fetchReverseGeocoding($lat, $lon, 1);
+        $countryCode = $payload ? $this->extractCountryCodeFromResponse($payload) : null;
+
+        if (filled($countryCode)) {
+            Cache::put($cacheKey, $countryCode, now()->addDay());
+        }
+
+        return $countryCode;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function extractCountryCodeFromItem(array $item): ?string
+    {
+        foreach (['country_code', 'countrycode', 'country_a'] as $key) {
+            $value = $item[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                return strtoupper(trim($value));
+            }
+        }
+
+        return null;
+    }
+
     public function reverseGeocode(float $lat, float $lon, int $size = 1): ?string
     {
         $cacheKey = sprintf('mapify_reverse_geocode:%s:%s:%d', $lat, $lon, $size);

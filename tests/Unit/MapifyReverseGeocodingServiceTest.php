@@ -65,4 +65,33 @@ class MapifyReverseGeocodingServiceTest extends TestCase
 
         $this->assertSame('Faisal Mosque', $label);
     }
+
+    public function test_extract_country_code_from_results(): void
+    {
+        $countryCode = $this->service->extractCountryCodeFromResponse([
+            'results' => [
+                [
+                    'label' => 'Lahore, Pakistan',
+                    'country_code' => 'pk',
+                ],
+            ],
+        ]);
+
+        $this->assertSame('PK', $countryCode);
+    }
+
+    public function test_extract_country_code_from_feature_properties(): void
+    {
+        $countryCode = $this->service->extractCountryCodeFromResponse([
+            'features' => [
+                [
+                    'properties' => [
+                        'country_a' => 'ARE',
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertSame('ARE', $countryCode);
+    }
 }

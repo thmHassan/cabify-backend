@@ -36,11 +36,30 @@ class MapifyQueryBuilder
         return strtoupper(trim($value));
     }
 
+    public static function resolveBoundaryCountry(
+        Request $request,
+        bool $nearbySearch,
+        ?string $resolvedUserCountry = null
+    ): ?string {
+        if ($request->filled('boundary_country')) {
+            return self::normalizeBoundaryCountry($request->input('boundary_country'));
+        }
+
+        if ($nearbySearch) {
+            return self::normalizeBoundaryCountry($resolvedUserCountry);
+        }
+
+        return null;
+    }
+
     /**
      * @return array<string, mixed>
      */
-    public static function buildSearchQuery(Request $request, bool $nearbySearch): array
-    {
+    public static function buildSearchQuery(
+        Request $request,
+        bool $nearbySearch,
+        ?string $resolvedUserCountry = null
+    ): array {
         $query = [
             'q' => $request->input('q'),
         ];
@@ -53,14 +72,22 @@ class MapifyQueryBuilder
             $query['lon'] = $request->input('lon');
         }
 
-        if ($request->filled('size')) {
+        if ($request->filled('size') && !$nearbySearch) {
             $query['size'] = $request->input('size');
         }
 
         if ($nearbySearch) {
-            $query['boundary_country'] = self::normalizeBoundaryCountry(
-                $request->input('boundary_country')
-            );
+            $query['size'] = (int) config('services.mapify.nearby_fetch_size', 50);
+        }
+
+        $boundaryCountry = self::resolveBoundaryCountry(
+            $request,
+            $nearbySearch,
+            $resolvedUserCountry
+        );
+
+        if (filled($boundaryCountry)) {
+            $query['boundary_country'] = $boundaryCountry;
         }
 
         return $query;
@@ -69,8 +96,11 @@ class MapifyQueryBuilder
     /**
      * @return array<string, mixed>
      */
-    public static function buildGeocodingQuery(Request $request, bool $nearbySearch): array
-    {
+    public static function buildGeocodingQuery(
+        Request $request,
+        bool $nearbySearch,
+        ?string $resolvedUserCountry = null
+    ): array {
         $query = [
             'q' => $request->input('q'),
         ];
@@ -83,10 +113,14 @@ class MapifyQueryBuilder
             $query['lon'] = $request->input('lon');
         }
 
-        if ($nearbySearch) {
-            $query['boundary_country'] = self::normalizeBoundaryCountry(
-                $request->input('boundary_country')
-            );
+        $boundaryCountry = self::resolveBoundaryCountry(
+            $request,
+            $nearbySearch,
+            $resolvedUserCountry
+        );
+
+        if (filled($boundaryCountry)) {
+            $query['boundary_country'] = $boundaryCountry;
         }
 
         return $query;

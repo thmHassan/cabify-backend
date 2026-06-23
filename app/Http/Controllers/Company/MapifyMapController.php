@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Company;
 
 use App\Http\Controllers\Controller;
+use App\Services\MapifyNearbySearchService;
 use App\Services\MapifyReverseGeocodingService;
 use App\Services\MapSearchPreferenceService;
 use App\Support\MapifyQueryBuilder;
@@ -14,7 +15,8 @@ class MapifyMapController extends Controller
 {
     public function __construct(
         private readonly MapifyReverseGeocodingService $mapifyReverseGeocoding,
-        private readonly MapSearchPreferenceService $mapSearchPreference
+        private readonly MapSearchPreferenceService $mapSearchPreference,
+        private readonly MapifyNearbySearchService $mapifyNearbySearch
     ) {
     }
 
@@ -97,12 +99,21 @@ class MapifyMapController extends Controller
 
             $request->validate([
                 'q' => 'required|string|max:255',
-                'lat' => 'nullable|numeric|required_with:lon',
-                'lon' => 'nullable|numeric|required_with:lat',
+                'lat' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'numeric',
+                    'required_with:lon',
+                ],
+                'lon' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'numeric',
+                    'required_with:lat',
+                ],
                 'size' => 'nullable|integer|min:1|max:50',
                 'nearby_search' => 'nullable|boolean',
                 'boundary_country' => [
-                    Rule::requiredIf($nearbySearch),
                     'nullable',
                     'string',
                     'min:2',
@@ -110,6 +121,19 @@ class MapifyMapController extends Controller
                     'regex:/^[A-Za-z]{2,3}$/',
                 ],
             ]);
+
+            $resolvedUserCountry = null;
+            if (
+                $nearbySearch
+                && !$request->filled('boundary_country')
+                && $request->filled('lat')
+                && $request->filled('lon')
+            ) {
+                $resolvedUserCountry = $this->mapifyReverseGeocoding->resolveCountryCode(
+                    (float) $request->input('lat'),
+                    (float) $request->input('lon')
+                );
+            }
 
             if ($request->has('nearby_search')) {
                 $this->mapSearchPreference->save(
@@ -124,7 +148,7 @@ class MapifyMapController extends Controller
             }
             ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
 
-            $query = MapifyQueryBuilder::buildSearchQuery($request, $nearbySearch);
+            $query = MapifyQueryBuilder::buildSearchQuery($request, $nearbySearch, $resolvedUserCountry);
 
             $response = Http::withToken($token)
                 ->acceptJson()
@@ -140,9 +164,25 @@ class MapifyMapController extends Controller
                 ], $response->status());
             }
 
+            $payload = $response->json();
+
+            if (
+                $nearbySearch
+                && is_array($payload)
+                && $request->filled('lat')
+                && $request->filled('lon')
+            ) {
+                $payload = $this->mapifyNearbySearch->filterPayload(
+                    $payload,
+                    (float) $request->input('lat'),
+                    (float) $request->input('lon'),
+                    $this->mapifyNearbySearch->resolveResponseLimit($request)
+                );
+            }
+
             return response()->json([
                 'success' => 1,
-                'data' => $response->json(),
+                'data' => $payload,
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             throw $e;
@@ -161,11 +201,20 @@ class MapifyMapController extends Controller
 
             $request->validate([
                 'q' => 'required|string|max:255',
-                'lat' => 'nullable|numeric|required_with:lon',
-                'lon' => 'nullable|numeric|required_with:lat',
+                'lat' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'numeric',
+                    'required_with:lon',
+                ],
+                'lon' => [
+                    Rule::requiredIf($nearbySearch),
+                    'nullable',
+                    'numeric',
+                    'required_with:lat',
+                ],
                 'nearby_search' => 'nullable|boolean',
                 'boundary_country' => [
-                    Rule::requiredIf($nearbySearch),
                     'nullable',
                     'string',
                     'min:2',
@@ -173,6 +222,19 @@ class MapifyMapController extends Controller
                     'regex:/^[A-Za-z]{2,3}$/',
                 ],
             ]);
+
+            $resolvedUserCountry = null;
+            if (
+                $nearbySearch
+                && !$request->filled('boundary_country')
+                && $request->filled('lat')
+                && $request->filled('lon')
+            ) {
+                $resolvedUserCountry = $this->mapifyReverseGeocoding->resolveCountryCode(
+                    (float) $request->input('lat'),
+                    (float) $request->input('lon')
+                );
+            }
 
             if ($request->has('nearby_search')) {
                 $this->mapSearchPreference->save(
@@ -187,7 +249,7 @@ class MapifyMapController extends Controller
             }
             ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
 
-            $query = MapifyQueryBuilder::buildGeocodingQuery($request, $nearbySearch);
+            $query = MapifyQueryBuilder::buildGeocodingQuery($request, $nearbySearch, $resolvedUserCountry);
 
             $response = Http::withToken($token)
                 ->acceptJson()
@@ -299,7 +361,6 @@ class MapifyMapController extends Controller
             $request->validate([
                 'nearby_search' => 'required|boolean',
                 'boundary_country' => [
-                    Rule::requiredIf($nearbySearch),
                     'nullable',
                     'string',
                     'min:2',

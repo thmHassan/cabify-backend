@@ -36,7 +36,7 @@ class MapSearchPreferenceService
 
     public function save(bool $nearbySearchEnabled, ?string $boundaryCountry): void
     {
-        $normalizedCountry = $nearbySearchEnabled && filled($boundaryCountry)
+        $normalizedCountry = filled($boundaryCountry)
             ? strtoupper(trim($boundaryCountry))
             : null;
 
