@@ -22,17 +22,23 @@ class CheckAppAvailibility
             return $next($request);
         }
 
-        if(auth("driver")->check() && $setting->driver_app == "disable"){
-            return response()->json([
-                'error' => 1,
-                'message' => 'Driver App is not allowed by Company Admin'
-            ], 400);
+        if (auth("driver")->check()) {
+            $driver = auth("driver")->user();
+            $status = strtolower((string) ($driver->status ?? 'pending'));
+            $approvedStatuses = ['accepted', 'approved', 'active'];
+
+            if (!in_array($status, $approvedStatuses, true)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver is not approved by Company Admin'
+                ], 400);
+            }
         }
 
         if(auth("rider")->check() && $setting->customer_app == "disable"){
             return response()->json([
                 'error' => 1,
-                'message' => 'Rider App is not allowed by Company Admin'
+                'message' => 'Rider is not approved by Company Admin'
             ], 400);
         }
         return $next($request);
