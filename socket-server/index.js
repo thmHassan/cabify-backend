@@ -4164,6 +4164,7 @@ app.post("/company-inactive-logout", async (req, res) => {
         };
 
         io.to(`client_${dbName}`).emit("company-inactive-logout", payload);
+        io.to(`admin_${dbName}`).emit("company-inactive-logout", payload);
         io.to(`dispatcher_${dbName}`).emit("company-inactive-logout", payload);
 
         // Backward-compatible event for dispatcher clients already listening for this.
