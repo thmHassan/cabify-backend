@@ -1120,7 +1120,30 @@ const nearestDriverDispatch = async ({
 };
 
 io.use(async (socket, next) => {
-    const authHeader = socket.handshake.headers.authorization;
+    const authHeader = (() => {
+        const fromHeader = socket.handshake.headers.authorization;
+        if (fromHeader) return fromHeader;
+
+        const auth = socket.handshake.auth || {};
+        if (auth.authorization) {
+            return auth.authorization.startsWith("Bearer ")
+                ? auth.authorization
+                : `Bearer ${auth.authorization}`;
+        }
+        if (auth.token) {
+            return auth.token.startsWith("Bearer ")
+                ? auth.token
+                : `Bearer ${auth.token}`;
+        }
+
+        const queryToken = socket.handshake.query?.token;
+        if (queryToken) {
+            return `Bearer ${queryToken}`;
+        }
+
+        return null;
+    })();
+
     const driverId = socket.handshake.query.driver_id;
     const userId = socket.handshake.query.user_id;
     const adminId = socket.handshake.query.admin_id;
