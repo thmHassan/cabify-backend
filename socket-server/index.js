@@ -4243,7 +4243,9 @@ const emitCompanyStatusChanged = (req, res) => {
 };
 
 app.post("/company/status-changed", emitCompanyStatusChanged);
+app.post("/socket-api/company/status-changed", emitCompanyStatusChanged);
 app.post("/company-inactive-logout", emitCompanyStatusChanged);
+app.post("/socket-api/company-inactive-logout", emitCompanyStatusChanged);
 
 app.post("/dispatch-settings-changed", async (req, res) => {
     try {

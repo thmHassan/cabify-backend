@@ -29,10 +29,11 @@ class CompanyInactiveService
         return self::normalizeStatus($status) === 'inactive';
     }
 
-    public static function handle(string $tenantId, string $previousStatus = 'active'): void
+    public static function handle(string $tenantId, string $previousStatus = 'active'): array
     {
         self::invalidateDispatcherSessions($tenantId);
-        self::notifySocketLogout($tenantId, $previousStatus);
+
+        return self::notifySocketLogout($tenantId, $previousStatus);
     }
 
     private static function invalidateDispatcherSessions(string $tenantId): void
@@ -57,19 +58,26 @@ class CompanyInactiveService
         }
     }
 
-    public static function notifySocketLogout(string $tenantId, string $previousStatus = 'active'): void
+    public static function notifySocketLogout(string $tenantId, string $previousStatus = 'active'): array
     {
         $socketUrl = rtrim((string) (config('services.node_socket.url') ?: env('NODE_SOCKET_URL', '')), '/');
         $secret = (string) (config('services.node_socket.internal_secret') ?: env('NODE_INTERNAL_SECRET', ''));
+        $endpoint = $socketUrl . '/company/status-changed';
 
         if ($socketUrl === '' || $secret === '') {
+            $result = [
+                'success' => false,
+                'reason' => 'socket_not_configured',
+                'url' => $endpoint,
+            ];
+
             Log::warning('Company inactive socket call skipped: socket URL or internal secret is not configured', [
                 'tenant_id' => $tenantId,
                 'socket_url_configured' => $socketUrl !== '',
                 'secret_configured' => $secret !== '',
             ]);
 
-            return;
+            return $result;
         }
 
         try {
@@ -77,7 +85,7 @@ class CompanyInactiveService
                 'Authorization' => 'Bearer ' . $secret,
                 'database' => $tenantId,
             ])->timeout(5)->post(
-                $socketUrl . '/company/status-changed',
+                $endpoint,
                 [
                     'client_id' => $tenantId,
                     'previous_status' => self::normalizeStatus($previousStatus),
@@ -86,26 +94,48 @@ class CompanyInactiveService
                 ]
             );
 
+            $body = $response->json() ?? [];
+            $result = [
+                'success' => $response->successful(),
+                'http_status' => $response->status(),
+                'url' => $endpoint,
+                'response' => $body,
+            ];
+
             if (!$response->successful()) {
+                $result['reason'] = 'socket_http_error';
+                $result['body'] = $response->body();
+
                 Log::warning('Company inactive socket call returned error', [
                     'tenant_id' => $tenantId,
                     'status' => $response->status(),
                     'body' => $response->body(),
-                    'url' => $socketUrl . '/company/status-changed',
+                    'url' => $endpoint,
                 ]);
 
-                return;
+                return $result;
             }
 
-            Log::info('Company inactive socket event dispatched', [
+            Log::warning('Company inactive socket event dispatched', [
                 'tenant_id' => $tenantId,
-                'response' => $response->json(),
+                'response' => $body,
             ]);
+
+            return $result;
         } catch (\Throwable $e) {
+            $result = [
+                'success' => false,
+                'reason' => 'socket_request_failed',
+                'url' => $endpoint,
+                'error' => $e->getMessage(),
+            ];
+
             Log::warning('Company inactive socket logout call failed', [
                 'tenant_id' => $tenantId,
                 'error' => $e->getMessage(),
             ]);
+
+            return $result;
         }
     }
 }

@@ -587,16 +587,18 @@ class CompanyController extends Controller
             });
 
             $newStatus = CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
+            $socketNotify = null;
 
             if ($previousStatus === 'active' && $newStatus === 'inactive') {
-                CompanyInactiveService::handle($tenant->id, $previousStatus);
+                $socketNotify = CompanyInactiveService::handle($tenant->id, $previousStatus);
             }
 
             return response()->json([
                 'success' => 1,
                 'message' => "Client {$tenant->id} updated successfully!",
                 'tenant' => $tenant,
-                'newSubscriptionCreate' => $newSubscriptionCreate
+                'newSubscriptionCreate' => $newSubscriptionCreate,
+                'socket_notify' => $socketNotify,
             ]);
         }
         catch(\Exception $e){
