@@ -4132,6 +4132,94 @@ app.post("/driver-force-logout", async (req, res) => {
     }
 });
 
+app.post("/company-client-force-logout", async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        const clientId = req.body.client_id
+            || req.headers["database"]
+            || req.headers["x-database"];
+
+        if (!clientId) {
+            return res.status(400).json({ success: false, message: "client_id is required" });
+        }
+
+        const dbName = clientId.toString();
+        const payload = {
+            title: "Company deactivated",
+            description: "Your company has been deactivated. You have been logged out.",
+            message: "Your company has been deactivated. You have been logged out.",
+            type: "force_logout",
+            action: "force_logout",
+            reason: "company_inactive",
+            status: "inactive",
+            token_revoked: true,
+            source: "company_status",
+            audience: "company_client",
+            client_id: dbName,
+            changed_at: req.body.changed_at || new Date().toISOString(),
+        };
+
+        io.to(`client_${dbName}`).emit("company-client-force-logout", payload);
+        io.to(`admin_${dbName}`).emit("company-client-force-logout", payload);
+
+        return res.json({ success: true, audience: "company_client", client_id: dbName });
+    } catch (error) {
+        console.error("Company client force logout notification error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+app.post("/dispatcher-company-inactive-logout", async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        const clientId = req.body.client_id
+            || req.headers["database"]
+            || req.headers["x-database"];
+
+        if (!clientId) {
+            return res.status(400).json({ success: false, message: "client_id is required" });
+        }
+
+        const dbName = clientId.toString();
+        const payload = {
+            title: "Company deactivated",
+            description: "Your company has been deactivated. You have been logged out.",
+            message: "Your company has been deactivated. You have been logged out.",
+            type: "force_logout",
+            action: "force_logout",
+            reason: "company_inactive",
+            status: "inactive",
+            token_revoked: true,
+            source: "company_status",
+            audience: "dispatcher",
+            client_id: dbName,
+            changed_at: req.body.changed_at || new Date().toISOString(),
+        };
+
+        io.to(`dispatcher_${dbName}`).emit("dispatcher-company-inactive-logout", payload);
+        io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
+            message: payload.message,
+            reason: payload.reason,
+            token_revoked: payload.token_revoked,
+        });
+
+        return res.json({ success: true, audience: "dispatcher", client_id: dbName });
+    } catch (error) {
+        console.error("Dispatcher company inactive logout notification error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 app.post("/company-inactive-logout", async (req, res) => {
     try {
         const authHeader = req.headers.authorization || "";
@@ -4167,7 +4255,6 @@ app.post("/company-inactive-logout", async (req, res) => {
         io.to(`admin_${dbName}`).emit("company-inactive-logout", payload);
         io.to(`dispatcher_${dbName}`).emit("company-inactive-logout", payload);
 
-        // Backward-compatible event for dispatcher clients already listening for this.
         io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
             message: payload.message,
             reason: payload.reason,
