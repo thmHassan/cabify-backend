@@ -9,10 +9,10 @@ use Illuminate\Support\Facades\Schema;
 
 class CompanyInactiveService
 {
-    public static function handle(string $tenantId): void
+    public static function handle(string $tenantId, string $previousStatus = 'active'): void
     {
         self::invalidateDispatcherSessions($tenantId);
-        self::notifySocketLogout($tenantId);
+        self::notifySocketLogout($tenantId, $previousStatus);
     }
 
     private static function invalidateDispatcherSessions(string $tenantId): void
@@ -37,16 +37,18 @@ class CompanyInactiveService
         }
     }
 
-    public static function notifySocketLogout(string $tenantId): void
+    public static function notifySocketLogout(string $tenantId, string $previousStatus = 'active'): void
     {
         try {
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $tenantId,
             ])->timeout(5)->post(
-                rtrim((string) config('services.node_socket.url'), '/') . '/company-inactive-logout',
+                SocketApiUrlResolver::endpoint(null, 'company/status-changed'),
                 [
                     'client_id' => $tenantId,
+                    'previous_status' => $previousStatus,
+                    'new_status' => 'inactive',
                     'changed_at' => now()->toISOString(),
                 ]
             );

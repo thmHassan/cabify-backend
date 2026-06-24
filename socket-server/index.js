@@ -4132,7 +4132,7 @@ app.post("/driver-force-logout", async (req, res) => {
     }
 });
 
-app.post("/company-inactive-logout", async (req, res) => {
+const emitCompanyStatusChanged = (req, res) => {
     try {
         const authHeader = req.headers.authorization || "";
         const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
@@ -4149,6 +4149,13 @@ app.post("/company-inactive-logout", async (req, res) => {
         }
 
         const dbName = clientId.toString();
+        const previousStatus = (req.body.previous_status || "active").toString().toLowerCase();
+        const newStatus = (req.body.new_status || "inactive").toString().toLowerCase();
+
+        if (previousStatus !== "active" || newStatus !== "inactive") {
+            return res.json({ success: true, skipped: true, message: "No active-to-inactive transition to broadcast" });
+        }
+
         const payload = {
             title: "Company deactivated",
             description: "Your company has been deactivated. You have been logged out.",
@@ -4156,18 +4163,23 @@ app.post("/company-inactive-logout", async (req, res) => {
             type: "force_logout",
             action: "force_logout",
             reason: "company_inactive",
-            status: "inactive",
+            status: newStatus,
+            previous_status: previousStatus,
+            new_status: newStatus,
             token_revoked: true,
             source: "company_status",
             client_id: dbName,
             changed_at: req.body.changed_at || new Date().toISOString(),
         };
 
+        io.to(`client_${dbName}`).emit("company-status-changed", payload);
+        io.to(`admin_${dbName}`).emit("company-status-changed", payload);
+        io.to(`dispatcher_${dbName}`).emit("company-status-changed", payload);
+
         io.to(`client_${dbName}`).emit("company-inactive-logout", payload);
         io.to(`admin_${dbName}`).emit("company-inactive-logout", payload);
         io.to(`dispatcher_${dbName}`).emit("company-inactive-logout", payload);
 
-        // Backward-compatible event for dispatcher clients already listening for this.
         io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
             message: payload.message,
             reason: payload.reason,
@@ -4176,10 +4188,13 @@ app.post("/company-inactive-logout", async (req, res) => {
 
         return res.json({ success: true });
     } catch (error) {
-        console.error("Company inactive logout notification error:", error);
+        console.error("Company status changed notification error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
-});
+};
+
+app.post("/company/status-changed", emitCompanyStatusChanged);
+app.post("/company-inactive-logout", emitCompanyStatusChanged);
 
 app.post("/dispatch-settings-changed", async (req, res) => {
     try {

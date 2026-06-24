@@ -585,10 +585,10 @@ class CompanyController extends Controller
             });
 
             if (
-                strtolower((string) $tenant->status) === 'inactive'
-                && $previousStatus !== 'inactive'
+                $previousStatus === 'active'
+                && strtolower((string) $tenant->status) === 'inactive'
             ) {
-                CompanyInactiveService::handle($tenant->id);
+                CompanyInactiveService::handle($tenant->id, $previousStatus);
             }
 
             return response()->json([
@@ -1190,6 +1190,13 @@ class CompanyController extends Controller
 
             if (!Hash::check($request->password, $tenant->data['password'])) {
                 return response()->json(['message' => 'Invalid credentials'], 401);
+            }
+
+            if (strtolower((string) ($tenant->data['status'] ?? '')) === 'inactive') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Your company has been deactivated. Please contact the administrator.',
+                ], 403);
             }
 
             if($tenant->data['payment_status'] == "pending" || !isset($tenant->data['expiry_date']) || $tenant->data['expiry_date'] < Carbon::now()->format('Y-m-d')){
