@@ -4109,6 +4109,98 @@ app.post("/driver-force-logout", async (req, res) => {
     }
 });
 
+app.post("/company-inactive-logout", async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        const clientId = req.body.client_id
+            || req.headers["database"]
+            || req.headers["x-database"];
+
+        if (!clientId) {
+            return res.status(400).json({ success: false, message: "client_id is required" });
+        }
+
+        const dbName = clientId.toString();
+        const payload = {
+            title: "Company deactivated",
+            description: "Your company has been deactivated. You have been logged out.",
+            message: "Your company has been deactivated. You have been logged out.",
+            type: "force_logout",
+            action: "force_logout",
+            reason: "company_inactive",
+            status: "inactive",
+            token_revoked: true,
+            source: "company_status",
+            client_id: dbName,
+            changed_at: req.body.changed_at || new Date().toISOString(),
+        };
+
+        io.to(`client_${dbName}`).emit("company-inactive-logout", payload);
+        io.to(`dispatcher_${dbName}`).emit("company-inactive-logout", payload);
+
+        // Backward-compatible event for dispatcher clients already listening for this.
+        io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
+            message: payload.message,
+            reason: payload.reason,
+            token_revoked: payload.token_revoked,
+        });
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("Company inactive logout notification error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+app.post("/dispatch-settings-changed", async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        const clientId = req.body.client_id
+            || req.headers["database"]
+            || req.headers["x-database"];
+
+        if (!clientId) {
+            return res.status(400).json({ success: false, message: "client_id is required" });
+        }
+
+        const dbName = clientId.toString();
+        const excludeSocketId = req.body.exclude_socket_id || null;
+
+        const payload = {
+            title: "Dispatch settings updated",
+            description: "Auto dispatch configuration was changed. Please refresh the page to load the latest settings.",
+            message: "Auto dispatch configuration was changed. Please refresh the page to load the latest settings.",
+            type: "refresh_required",
+            action: "refresh_page",
+            source: "dispatch_settings",
+            client_id: dbName,
+            changed_at: req.body.changed_at || new Date().toISOString(),
+        };
+
+        const room = io.to(`client_${dbName}`);
+        if (excludeSocketId) {
+            room.except(excludeSocketId).emit("dispatch-settings-changed", payload);
+        } else {
+            room.emit("dispatch-settings-changed", payload);
+        }
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("Dispatch settings changed notification error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 app.post("/dispatcher-force-logout-all", async (req, res) => {
     try {
         const authHeader = req.headers.authorization || "";

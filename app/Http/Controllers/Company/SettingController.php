@@ -21,7 +21,10 @@ use Illuminate\Support\Facades\Artisan;
 use App\Models\CompanyDispatchSystem;
 use App\Models\CompanyBooking;
 use App\Models\PackageRideCountSetting;
+use App\Services\SocketApiUrlResolver;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class SettingController extends Controller
 {
@@ -1223,6 +1226,11 @@ class SettingController extends Controller
                     ]);
             }
 
+            $tenantId = TenantRequestContext::databaseId($request);
+            if ($tenantId) {
+                $this->notifyDispatchSettingsChanged($request, $tenantId);
+            }
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Data updated successfully',
@@ -1232,6 +1240,34 @@ class SettingController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function notifyDispatchSettingsChanged(Request $request, string $tenantId): void
+    {
+        try {
+            $body = [
+                'client_id' => $tenantId,
+                'changed_at' => now()->toISOString(),
+            ];
+
+            if ($request->filled('exclude_socket_id')) {
+                $body['exclude_socket_id'] = $request->input('exclude_socket_id');
+            } elseif ($request->filled('socket_id')) {
+                $body['exclude_socket_id'] = $request->input('socket_id');
+            }
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->timeout(5)->post(
+                SocketApiUrlResolver::endpoint($request, 'dispatch-settings-changed'),
+                $body
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Dispatch settings changed socket call failed', [
+                'tenant_id' => $tenantId,
+                'error' => $e->getMessage(),
             ]);
         }
     }

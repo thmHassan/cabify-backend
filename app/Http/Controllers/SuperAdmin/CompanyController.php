@@ -31,6 +31,7 @@ use App\Events\NewNotification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Mail;
 use App\Support\MapsApi;
+use App\Services\CompanyInactiveService;
 
 class CompanyController extends Controller
 {
@@ -394,6 +395,7 @@ class CompanyController extends Controller
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
+            $previousStatus = strtolower((string) ($tenant->status ?? ''));
             $newSubscriptionCreate = 0;
 
             if($tenant->subscription_type != $request->subscription_type){
@@ -581,6 +583,13 @@ class CompanyController extends Controller
                     \DB::table('settings')->insert($data);
                 }
             });
+
+            if (
+                strtolower((string) $tenant->status) === 'inactive'
+                && $previousStatus !== 'inactive'
+            ) {
+                CompanyInactiveService::handle($tenant->id);
+            }
 
             return response()->json([
                 'success' => 1,
