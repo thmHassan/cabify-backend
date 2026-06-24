@@ -9,6 +9,26 @@ use Illuminate\Support\Facades\Schema;
 
 class CompanyInactiveService
 {
+    public static function normalizeStatus(mixed $status): string
+    {
+        $value = strtolower(trim((string) ($status ?? '')));
+
+        if (in_array($value, ['inactive', 'deactive', 'disabled', 'disable', '0', 'false'], true)) {
+            return 'inactive';
+        }
+
+        if ($value === '' || in_array($value, ['active', '1', 'true', 'enable', 'enabled'], true)) {
+            return 'active';
+        }
+
+        return $value;
+    }
+
+    public static function isInactive(mixed $status): bool
+    {
+        return self::normalizeStatus($status) === 'inactive';
+    }
+
     public static function handle(string $tenantId, string $previousStatus = 'active'): void
     {
         self::invalidateDispatcherSessions($tenantId);
@@ -39,19 +59,48 @@ class CompanyInactiveService
 
     public static function notifySocketLogout(string $tenantId, string $previousStatus = 'active'): void
     {
+        $socketUrl = rtrim((string) (config('services.node_socket.url') ?: env('NODE_SOCKET_URL', '')), '/');
+        $secret = (string) (config('services.node_socket.internal_secret') ?: env('NODE_INTERNAL_SECRET', ''));
+
+        if ($socketUrl === '' || $secret === '') {
+            Log::warning('Company inactive socket call skipped: socket URL or internal secret is not configured', [
+                'tenant_id' => $tenantId,
+                'socket_url_configured' => $socketUrl !== '',
+                'secret_configured' => $secret !== '',
+            ]);
+
+            return;
+        }
+
         try {
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $secret,
                 'database' => $tenantId,
             ])->timeout(5)->post(
-                SocketApiUrlResolver::endpoint(null, 'company/status-changed'),
+                $socketUrl . '/company/status-changed',
                 [
                     'client_id' => $tenantId,
-                    'previous_status' => $previousStatus,
+                    'previous_status' => self::normalizeStatus($previousStatus),
                     'new_status' => 'inactive',
                     'changed_at' => now()->toISOString(),
                 ]
             );
+
+            if (!$response->successful()) {
+                Log::warning('Company inactive socket call returned error', [
+                    'tenant_id' => $tenantId,
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                    'url' => $socketUrl . '/company/status-changed',
+                ]);
+
+                return;
+            }
+
+            Log::info('Company inactive socket event dispatched', [
+                'tenant_id' => $tenantId,
+                'response' => $response->json(),
+            ]);
         } catch (\Throwable $e) {
             Log::warning('Company inactive socket logout call failed', [
                 'tenant_id' => $tenantId,

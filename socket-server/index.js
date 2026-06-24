@@ -4132,11 +4132,31 @@ app.post("/driver-force-logout", async (req, res) => {
     }
 });
 
+const normalizeCompanyStatus = (status) => {
+    const value = (status ?? "").toString().toLowerCase().trim();
+
+    if (["inactive", "deactive", "disabled", "disable", "0", "false"].includes(value)) {
+        return "inactive";
+    }
+
+    if (!value || ["active", "1", "true", "enable", "enabled"].includes(value)) {
+        return "active";
+    }
+
+    return value;
+};
+
+const getRoomClientCount = (roomName) => {
+    const room = io.sockets.adapter.rooms.get(roomName);
+    return room ? room.size : 0;
+};
+
 const emitCompanyStatusChanged = (req, res) => {
     try {
         const authHeader = req.headers.authorization || "";
         const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
         if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            console.warn("Company status changed: unauthorized internal call");
             return res.status(401).json({ success: false, message: "Unauthorized" });
         }
 
@@ -4149,11 +4169,23 @@ const emitCompanyStatusChanged = (req, res) => {
         }
 
         const dbName = clientId.toString();
-        const previousStatus = (req.body.previous_status || "active").toString().toLowerCase();
-        const newStatus = (req.body.new_status || "inactive").toString().toLowerCase();
+        const previousStatus = normalizeCompanyStatus(req.body.previous_status || "active");
+        const newStatus = normalizeCompanyStatus(req.body.new_status || "inactive");
 
         if (previousStatus !== "active" || newStatus !== "inactive") {
-            return res.json({ success: true, skipped: true, message: "No active-to-inactive transition to broadcast" });
+            console.log("Company status changed skipped", {
+                client_id: dbName,
+                previous_status: previousStatus,
+                new_status: newStatus,
+            });
+            return res.json({
+                success: true,
+                skipped: true,
+                message: "No active-to-inactive transition to broadcast",
+                client_id: dbName,
+                previous_status: previousStatus,
+                new_status: newStatus,
+            });
         }
 
         const payload = {
@@ -4172,13 +4204,19 @@ const emitCompanyStatusChanged = (req, res) => {
             changed_at: req.body.changed_at || new Date().toISOString(),
         };
 
-        io.to(`client_${dbName}`).emit("company-status-changed", payload);
-        io.to(`admin_${dbName}`).emit("company-status-changed", payload);
-        io.to(`dispatcher_${dbName}`).emit("company-status-changed", payload);
+        const rooms = [
+            `client_${dbName}`,
+            `admin_${dbName}`,
+            `dispatcher_${dbName}`,
+            dbName,
+        ];
 
-        io.to(`client_${dbName}`).emit("company-inactive-logout", payload);
-        io.to(`admin_${dbName}`).emit("company-inactive-logout", payload);
-        io.to(`dispatcher_${dbName}`).emit("company-inactive-logout", payload);
+        const roomCounts = {};
+        for (const roomName of rooms) {
+            io.to(roomName).emit("company-status-changed", payload);
+            io.to(roomName).emit("company-inactive-logout", payload);
+            roomCounts[roomName] = getRoomClientCount(roomName);
+        }
 
         io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
             message: payload.message,
@@ -4186,7 +4224,18 @@ const emitCompanyStatusChanged = (req, res) => {
             token_revoked: payload.token_revoked,
         });
 
-        return res.json({ success: true });
+        console.log("Company status changed emitted", {
+            client_id: dbName,
+            room_counts: roomCounts,
+            payload,
+        });
+
+        return res.json({
+            success: true,
+            emitted: true,
+            client_id: dbName,
+            room_counts: roomCounts,
+        });
     } catch (error) {
         console.error("Company status changed notification error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });

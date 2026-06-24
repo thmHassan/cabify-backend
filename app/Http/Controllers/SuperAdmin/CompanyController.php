@@ -395,7 +395,7 @@ class CompanyController extends Controller
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
-            $previousStatus = strtolower((string) ($tenant->status ?? ''));
+            $previousStatus = CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
             $newSubscriptionCreate = 0;
 
             if($tenant->subscription_type != $request->subscription_type){
@@ -528,7 +528,9 @@ class CompanyController extends Controller
             $tenant->cms = isset($request->cms) ? $request->cms : $tenant->cms;
             $tenant->lost_found = isset($request->lost_found) ? $request->lost_found : $tenant->lost_found;
             $tenant->accounts = isset($request->accounts) ? $request->accounts : $tenant->accounts;
-            $tenant->status = isset($request->status) ? $request->status : $tenant->status;
+            $tenant->status = isset($request->status)
+                ? CompanyInactiveService::normalizeStatus($request->status)
+                : CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
             $tenant->password = (isset($request->password) && $request->password != NULL) ? Hash::make($request->password) : $tenant->password;
             $tenant->save();
 
@@ -584,10 +586,9 @@ class CompanyController extends Controller
                 }
             });
 
-            if (
-                $previousStatus === 'active'
-                && strtolower((string) $tenant->status) === 'inactive'
-            ) {
+            $newStatus = CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
+
+            if ($previousStatus === 'active' && $newStatus === 'inactive') {
                 CompanyInactiveService::handle($tenant->id, $previousStatus);
             }
 
@@ -1192,7 +1193,7 @@ class CompanyController extends Controller
                 return response()->json(['message' => 'Invalid credentials'], 401);
             }
 
-            if (strtolower((string) ($tenant->data['status'] ?? '')) === 'inactive') {
+            if (CompanyInactiveService::isInactive($tenant->data['status'] ?? '')) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Your company has been deactivated. Please contact the administrator.',
