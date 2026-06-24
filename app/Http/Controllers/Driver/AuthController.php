@@ -18,6 +18,10 @@ use App\Models\DriverDocument;
 use App\Services\DriverSessionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
+use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
+use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenBlacklistedException;
+use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException;
+use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenInvalidException;
 
 class AuthController extends Controller
 {
@@ -201,6 +205,82 @@ class AuthController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function refreshToken(Request $request)
+    {
+        try {
+            $token = $request->bearerToken();
+            if (!$token) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Token not provided',
+                ], 401);
+            }
+
+            $payload = $this->getDriverTokenPayload($token);
+            $driver = CompanyDriver::find($payload->get('sub'));
+
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found',
+                ], 404);
+            }
+
+            $tokenAuthVersion = (int) $payload->get('auth_version', 0);
+            if ($tokenAuthVersion !== (int) ($driver->auth_version ?? 0)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Token revoked',
+                ], 401);
+            }
+
+            $status = strtolower((string) ($driver->status ?? 'pending'));
+            $approvedStatuses = ['accepted', 'approved', 'active'];
+            if (!in_array($status, $approvedStatuses, true)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver is not approved by Company Admin',
+                ], 400);
+            }
+
+            $newToken = auth('driver')
+                ->claims(['auth_version' => (int) ($driver->auth_version ?? 0)])
+                ->setToken($token)
+                ->refresh();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Token refreshed successfully',
+                'token' => $newToken,
+            ]);
+        } catch (TokenExpiredException $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Token expired and can no longer be refreshed',
+            ], 401);
+        } catch (TokenInvalidException $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Token invalid',
+            ], 401);
+        } catch (TokenBlacklistedException $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Token has been revoked',
+            ], 401);
+        } catch (JWTException $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 401);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
             ], 400);
         }
     }
@@ -711,5 +791,18 @@ class AuthController extends Controller
         $data['document'] = $document;
 
         return $data;
+    }
+
+    private function getDriverTokenPayload(string $token)
+    {
+        auth('driver')->setToken($token);
+
+        try {
+            return auth('driver')->payload();
+        } catch (TokenExpiredException $e) {
+            return auth('driver')->manager()
+                ->setRefreshFlow()
+                ->decode(auth('driver')->getToken(), false);
+        }
     }
 }

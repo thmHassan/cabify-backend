@@ -328,6 +328,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/verify-password', [DriverAuthController::class, 'verifyPassword']);
     Route::post('/driver/set-password', [DriverAuthController::class, 'setPassword']);
     Route::post('/driver/change-password', [DriverAuthController::class, 'changePassword']);
+    Route::post('/driver/refresh-token', [DriverAuthController::class, 'refreshToken']);
     Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
 
     Route::group(['middleware' => ['auth.driver.jwt', 'check.app.availibility']], function () {
