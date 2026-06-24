@@ -313,9 +313,10 @@ class AuthController extends Controller
             $token = JWTAuth::fromUser($user);
 
             return response()->json([
+                'success' => 1,
                 'message' => 'Login successful',
                 'token' => $token,
-                'user' => $user
+                'data' => $this->formatDriverProfileData($user),
             ]);
         }
         catch(\Exception $e){
