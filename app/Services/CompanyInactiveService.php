@@ -39,31 +39,20 @@ class CompanyInactiveService
 
     public static function notifySocketLogout(string $tenantId): void
     {
-        $body = [
-            'client_id' => $tenantId,
-            'changed_at' => now()->toISOString(),
-        ];
-
-        $headers = [
-            'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-            'database' => $tenantId,
-        ];
-
-        $baseUrl = rtrim((string) config('services.node_socket.url'), '/');
-
-        self::postSocketLogout($baseUrl . '/company-client-force-logout', $headers, $body, $tenantId, 'company_client');
-        self::postSocketLogout($baseUrl . '/dispatcher-company-inactive-logout', $headers, $body, $tenantId, 'dispatcher');
-    }
-
-    private static function postSocketLogout(string $url, array $headers, array $body, string $tenantId, string $audience): void
-    {
         try {
-            Http::withHeaders($headers)->timeout(5)->post($url, $body);
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                'database' => $tenantId,
+            ])->timeout(5)->post(
+                rtrim((string) config('services.node_socket.url'), '/') . '/company-inactive-logout',
+                [
+                    'client_id' => $tenantId,
+                    'changed_at' => now()->toISOString(),
+                ]
+            );
         } catch (\Throwable $e) {
             Log::warning('Company inactive socket logout call failed', [
                 'tenant_id' => $tenantId,
-                'audience' => $audience,
-                'url' => $url,
                 'error' => $e->getMessage(),
             ]);
         }
