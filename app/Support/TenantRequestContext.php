@@ -17,6 +17,17 @@ class TenantRequestContext
         return static::databaseIdFromToken(static::bearerToken($request));
     }
 
+    public static function centralTenantId(Request $request): ?string
+    {
+        $databaseId = static::databaseId($request);
+
+        if (!filled($databaseId)) {
+            return null;
+        }
+
+        return TenantDatabaseConfigurator::extractTenantId($databaseId);
+    }
+
     public static function databaseIdFromToken(?string $token): ?string
     {
         if (!filled($token)) {

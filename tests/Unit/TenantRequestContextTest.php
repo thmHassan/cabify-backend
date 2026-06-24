@@ -44,4 +44,12 @@ class TenantRequestContextTest extends TestCase
 
         $this->assertSame('tenant:alpha31:' . sha1('abc123'), TenantRequestContext::rateLimitKey($request));
     }
+
+    public function test_central_tenant_id_normalizes_schema_name(): void
+    {
+        $request = Request::create('/api/company/get-api-keys', 'GET');
+        $request->headers->set('database', 'tenant_alpha31');
+
+        $this->assertSame('alpha31', TenantRequestContext::centralTenantId($request));
+    }
 }

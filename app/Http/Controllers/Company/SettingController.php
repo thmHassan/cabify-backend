@@ -42,7 +42,7 @@ class SettingController extends Controller
             if (!isset($settings) || $settings == NULL) {
                 $settings = (new TenantUser)
                     ->setConnection('central')
-                    ->where("id", $request->header('database'))
+                    ->where('id', TenantRequestContext::centralTenantId($request))
                     ->first();
 
                 $data['company_name'] = $settings->data['company_name'];
@@ -72,9 +72,18 @@ class SettingController extends Controller
     public function getApiKeys(Request $request)
     {
         try {
+            $tenantId = TenantRequestContext::centralTenantId($request);
+
+            if (!$tenantId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Database header or database query parameter is missing.',
+                ], 400);
+            }
+
             $tenant = (new CentralTenant)
                 ->setConnection('central')
-                ->where("id", $request->header('database'))
+                ->where('id', $tenantId)
                 ->first();
 
             if (!$tenant) {
@@ -176,9 +185,11 @@ class SettingController extends Controller
                 'new_password' => 'required',
             ]);
 
+            $tenantId = TenantRequestContext::centralTenantId($request);
+
             $settings = (new TenantUser)
                 ->setConnection('central')
-                ->where("id", $request->header('database'))
+                ->where('id', $tenantId)
                 ->first();
 
             if (!Hash::check($request->current_password, $settings->data['password'])) {
@@ -190,7 +201,7 @@ class SettingController extends Controller
 
             $data = (new CentralTenant)
                 ->setConnection('central')
-                ->where("id", $request->header('database'))
+                ->where('id', $tenantId)
                 ->first();
 
             $data->password = Hash::make($request->new_password);
@@ -468,9 +479,11 @@ class SettingController extends Controller
     public function planDetail(Request $request)
     {
         try {
+            $tenantId = TenantRequestContext::centralTenantId($request);
+
             $user = (new TenantUser)
                 ->setConnection('central')
-                ->where("id", $request->header('database'))
+                ->where('id', $tenantId)
                 ->first();
 
             $subscriptionData = (new Subscription)
@@ -493,9 +506,11 @@ class SettingController extends Controller
     public function paymentHistory(Request $request)
     {
         try {
+            $tenantId = TenantRequestContext::centralTenantId($request);
+
             $transactionHistory = (new UserSubscription)
                 ->setConnection('central')
-                ->where("user_id", $request->header('database'))
+                ->where('user_id', $tenantId)
                 ->orderBy("id", "DESC")
                 ->get();
 
@@ -1361,9 +1376,11 @@ class SettingController extends Controller
     public function systemAlert(Request $request)
     {
         try {
+            $tenantId = TenantRequestContext::centralTenantId($request);
+
             $data = (new TenantUser)
                 ->setConnection('central')
-                ->where("id", $request->header('database'))
+                ->where('id', $tenantId)
                 ->first();
 
             $expiryDate = Carbon::parse($data->data['expiry_date']);
