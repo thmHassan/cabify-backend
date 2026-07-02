@@ -2266,7 +2266,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 app.get("/bookings", async (req, res) => {
     try {
         let { status, date, user_id, driver_id, sub_company, search, filter, page = 1, limit = 10 } = req.query;
-
+console.log("Fetching bookings with query:", req.query);
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
         const offset = (pageNum - 1) * limitNum;
@@ -2360,7 +2360,8 @@ app.get("/bookings", async (req, res) => {
                 total_pages: Math.ceil(total / limitNum),
                 hasNext: pageNum * limitNum < total,
                 hasPrev: pageNum > 1
-            }
+            },
+            message: "Bookings fetched successfully by Hassan Raza"
         });
 
     } catch (error) {

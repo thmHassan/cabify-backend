@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use App\Services\FCMService;
 use App\Models\CompanySendNewRide;
 use App\Models\Dispatcher;
+use App\Support\VehicleDispatchFilter;
 
 class AutoDispatchPlotJob implements ShouldQueue
 {
@@ -63,6 +64,10 @@ class AutoDispatchPlotJob implements ShouldQueue
                     ->where('plot_id', $plotId)
                     ->where('online_status', "online")
                     // ->where('device_token', '!=', '')
+                    ->when(
+                        VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking),
+                        fn ($query) => VehicleDispatchFilter::scopeDriversForBooking($query, $booking)
+                    )
                     ->orderBy("priority_plot", "ASC")
                     ->skip($priority)
                     ->take(1)
@@ -126,6 +131,10 @@ class AutoDispatchPlotJob implements ShouldQueue
                     ->where('plot_id', $plotId)
                     ->where('online_status', "online")
                     // ->whereNotNull("device_token")
+                    ->when(
+                        VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking),
+                        fn ($query) => VehicleDispatchFilter::scopeDriversForBooking($query, $booking)
+                    )
                     ->orderBy("priority_plot")
                     ->skip($priority)
                     ->take(1)

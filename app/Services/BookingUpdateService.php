@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CompanyBooking;
 use App\Models\CompanyUser;
+use App\Support\VehicleDispatchFilter;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -142,6 +143,10 @@ class BookingUpdateService
             if ($request->has($field)) {
                 $booking->{$field} = $request->input($field);
             }
+        }
+
+        if ($request->has('vehicle') || $request->has('request_for_vehicle')) {
+            $booking->vehicle = VehicleDispatchFilter::normalizeRequestedVehicle($request);
         }
 
         if ($request->has('multi_days')) {

@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanySendNewRide;
 use App\Models\Dispatcher;
+use App\Support\VehicleDispatchFilter;
 
 class SendBiddingFixedFareNotificationJob implements ShouldQueue
 {
@@ -69,6 +70,10 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
             }
 
             CompanyDriver::where('driving_status', 'idle')->where("plot_id", $plotId)
+                ->when(
+                    VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking),
+                    fn ($query) => VehicleDispatchFilter::scopeDriversForBooking($query, $booking)
+                )
                 ->chunk(100, function ($drivers) use ($booking) {
                     foreach ($drivers as $driver) {
 

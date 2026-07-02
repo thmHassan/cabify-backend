@@ -20,6 +20,7 @@ use App\Events\BookingShownOnDispatcher;
 use App\Models\CompanySendNewRide;
 use App\Models\TenantUser;
 use App\Models\Dispatcher;
+use App\Support\VehicleDispatchFilter;
 
 class AutoDispatchNearestDriverJob implements ShouldQueue
 {
@@ -94,6 +95,10 @@ class AutoDispatchNearestDriverJob implements ShouldQueue
                     )
                     // ->whereNotNull("device_token")
                     ->whereNotIn("id", $this->driverIds)
+                    ->when(
+                        VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking),
+                        fn ($query) => VehicleDispatchFilter::scopeDriversForBooking($query, $booking)
+                    )
                     ->first();        
 
             if(!isset($driver) || $driver == NULL){

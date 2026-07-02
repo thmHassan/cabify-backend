@@ -27,6 +27,7 @@ use App\Models\BookingDispatchCycle;
 use App\Services\SocketApiUrlResolver;
 use App\Support\NearestDispatch;
 use App\Support\PlotDispatch;
+use App\Support\VehicleDispatchFilter;
 use Illuminate\Support\Facades\DB;
 
 class BookingController extends Controller
@@ -121,7 +122,21 @@ class BookingController extends Controller
     public function listRideForBidding(Request $request)
     {
         try {
-            $rideList = CompanyBooking::whereNull("driver")->where("pickup_time", "asap")->where("booking_status", "pending")->orderBy("id", "DESC")->with("userDetail")->get();
+            $driver = auth('driver')->user();
+            $rideList = CompanyBooking::whereNull("driver")
+                ->where("pickup_time", "asap")
+                ->where("booking_status", "pending")
+                ->where(function ($query) use ($driver) {
+                    $query->whereNull('vehicle')
+                        ->orWhere('vehicle', '');
+
+                    if (filled($driver?->assigned_vehicle)) {
+                        $query->orWhere('vehicle', (string) $driver->assigned_vehicle);
+                    }
+                })
+                ->orderBy("id", "DESC")
+                ->with("userDetail")
+                ->get();
 
             return response()->json([
                 'success' => 1,
@@ -208,6 +223,12 @@ class BookingController extends Controller
             $newBid->save();
 
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            if ($booking && !VehicleDispatchFilter::driverMatchesBooking(auth('driver')->user(), $booking)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This job is only available for the selected vehicle type.',
+                ], 403);
+            }
             $vehicle = VehicleType::where("id", auth("driver")->user()->vehicle_type)->first();
 
             Http::withHeaders([
@@ -402,6 +423,13 @@ class BookingController extends Controller
             $driverId = auth('driver')->user()->id;
             $isNearestDispatchOffer = NearestDispatch::isActiveOffer($booking->dispatcher_action);
             $isPlotDispatchOffer = PlotDispatch::isActiveOffer($booking->dispatcher_action);
+
+            if (!VehicleDispatchFilter::driverMatchesBooking(auth('driver')->user(), $booking)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This job is only available for the selected vehicle type.',
+                ], 403);
+            }
 
             if (!$isNearestDispatchOffer && !$isPlotDispatchOffer && $booking->driver && (string) $booking->driver !== (string) $driverId) {
                 return response()->json([

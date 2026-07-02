@@ -63,7 +63,6 @@ router.get("/bookings", async (req, res) => {
 
         let query = `SELECT * FROM bookings WHERE 1=1`;
         const queryParams = [];
-
         if (status) {
             query += ` AND booking_status = ?`;
             queryParams.push(status);
@@ -155,7 +154,8 @@ router.get("/bookings/:id", async (req, res) => {
 
         return res.json({
             success: true,
-            data: bookings[0]
+            data: bookings[0],
+            message: "Booking fetched successfully"
         });
 
     } catch (error) {

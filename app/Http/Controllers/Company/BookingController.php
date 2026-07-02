@@ -24,6 +24,7 @@ use App\Services\PickupPlotResolver;
 use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
+use App\Support\VehicleDispatchFilter;
 
 class BookingController extends Controller
 {
@@ -128,7 +129,7 @@ class BookingController extends Controller
                 'name' => 'required',
                 'phone_no' => 'required',
                 'journey_type' => 'required',
-                'vehicle' => 'required',
+                'vehicle' => 'required_if:request_for_vehicle,yes',
                 'passenger' => 'required',
                 'booking_amount' => 'required',
                 'payment_method' => 'required',
@@ -408,7 +409,7 @@ class BookingController extends Controller
                 'name' => 'sometimes|required',
                 'phone_no' => 'sometimes|required',
                 'journey_type' => 'sometimes|required',
-                'vehicle' => 'sometimes|required',
+                'vehicle' => 'sometimes|required_if:request_for_vehicle,yes',
                 'passenger' => 'sometimes|required',
                 'booking_amount' => 'sometimes|required',
                 'payment_method' => 'sometimes|required',
@@ -556,6 +557,8 @@ class BookingController extends Controller
                 'pickup_point' => 'required',
                 'destination_point' => 'required',
                 'vehicle_id' => 'required'
+            ], [
+                'vehicle_id.required' => 'Please select any vehicle type for fare calculation.',
             ]);
 
             if (isset(auth('tenant')->user()->id)) {
@@ -992,7 +995,7 @@ class BookingController extends Controller
         $newBooking->tel_no = $request->tel_no;
         $newBooking->journey_type = $request->journey_type;
         $newBooking->account = $this->resolveAccountFromRequest($request);
-        $newBooking->vehicle = $request->vehicle;
+        $newBooking->vehicle = VehicleDispatchFilter::normalizeRequestedVehicle($request);
         if ($isScheduled && $request->filled('driver')) {
             $newBooking->pending_driver_id = $request->driver;
             $newBooking->driver = null;
