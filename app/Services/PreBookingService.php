@@ -46,9 +46,16 @@ class PreBookingService
         $now = Carbon::now()->format('Y-m-d H:i:s');
 
         return $query
-            ->where('is_scheduled', true)
-            ->where('pickup_time_type', 'time')
-            ->where('dispatch_released', false)
+            ->where(function (Builder $builder) {
+                $builder
+                    ->where('pickup_time_type', 'time')
+                    ->orWhere('is_scheduled', true);
+            })
+            ->where(function (Builder $builder) {
+                $builder
+                    ->whereNull('dispatch_released')
+                    ->orWhere('dispatch_released', false);
+            })
             ->where('booking_status', 'pending')
             ->where(function ($builder) use ($today, $now) {
                 $builder->whereDate('booking_date', '>', $today)
@@ -62,7 +69,10 @@ class PreBookingService
 
     public function bookingQualifiesAsPreBooking(CompanyBooking $booking): bool
     {
-        if (!$booking->is_scheduled || $booking->pickup_time_type !== 'time' || $booking->dispatch_released) {
+        $isScheduled = $booking->pickup_time_type === 'time' || (bool) $booking->is_scheduled;
+        $dispatchReleased = $booking->dispatch_released === true || $booking->dispatch_released === 1;
+
+        if (!$isScheduled || $dispatchReleased) {
             return false;
         }
 
@@ -91,6 +101,12 @@ class PreBookingService
 
         $releaseAt = $this->resolveDispatchReleaseDateTime($booking);
         if (!$releaseAt) {
+            return;
+        }
+
+        // The sync queue driver executes jobs immediately and ignores delay,
+        // which would release future pre-bookings as soon as they are created.
+        if ($releaseAt->isFuture() && config('queue.default') === 'sync') {
             return;
         }
 

@@ -49,9 +49,8 @@ const preBookingsCondition = (alias = '') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
 
     return `
-    ${column('is_scheduled')} = 1
-    AND ${column('pickup_time_type')} = 'time'
-    AND ${column('dispatch_released')} = 0
+    (${column('pickup_time_type')} = 'time' OR ${column('is_scheduled')} = 1)
+    AND (${column('dispatch_released')} = 0 OR ${column('dispatch_released')} IS NULL)
     AND ${column('booking_status')} = 'pending'
     AND (
         DATE(${column('booking_date')}) > CURDATE()
@@ -65,7 +64,10 @@ const preBookingsCondition = (alias = '') => {
 };
 
 const isPreBookingRow = (booking) => {
-    if (!booking || booking.is_scheduled != 1 || booking.pickup_time_type !== 'time' || booking.dispatch_released == 1) {
+    const isScheduled = booking?.pickup_time_type === 'time' || booking?.is_scheduled == 1;
+    const dispatchReleased = booking?.dispatch_released == 1;
+
+    if (!booking || !isScheduled || dispatchReleased) {
         return false;
     }
 
@@ -2203,6 +2205,8 @@ app.post("/driver/collect-commission", async (req, res) => {
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
+        const dispatcherId = req.query.dispatcher_id;
+        const dispatcherWhere = dispatcherId ? "WHERE dispatcher_id = ?" : "";
 
         const query = `
             SELECT
@@ -2238,9 +2242,10 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                     THEN 1 
                 END) AS recent_jobs
             FROM bookings
+            ${dispatcherWhere}
         `;
 
-        const [[counts]] = await db.query(query);
+        const [[counts]] = await db.query(query, dispatcherId ? [dispatcherId] : []);
 
         return res.json({
             success: true,
@@ -2265,7 +2270,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        let { status, date, user_id, driver_id, sub_company, search, filter, page = 1, limit = 10 } = req.query;
+        let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, page = 1, limit = 10 } = req.query;
 console.log("Fetching bookings with query:", req.query);
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
@@ -2311,6 +2316,7 @@ console.log("Fetching bookings with query:", req.query);
         if (date) { baseQuery += ` AND DATE(b.booking_date) = ?`; params.push(date); }
         if (user_id) { baseQuery += ` AND b.user_id = ?`; params.push(user_id); }
         if (driver_id) { baseQuery += ` AND b.driver = ?`; params.push(driver_id); }
+        if (dispatcher_id) { baseQuery += ` AND b.dispatcher_id = ?`; params.push(dispatcher_id); }
         if (sub_company) { baseQuery += ` AND b.sub_company = ?`; params.push(sub_company); }
         if (search) {
             baseQuery += ` AND (b.booking_id LIKE ? OR b.name LIKE ? OR b.phone_no LIKE ? OR b.email LIKE ? OR d.name LIKE ? OR vt.vehicle_type_name LIKE ?)`;

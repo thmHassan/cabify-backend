@@ -102,29 +102,18 @@ const todaysBookingVisibilitySql = (alias = '') => {
     const col = (name) => (alias ? `${alias}.${name}` : name);
 
     return `(
-    (
-        ${col('is_scheduled')} = 1
-        AND ${col('pickup_time_type')} = 'time'
-        AND ${col('dispatch_released')} = 0
-        AND ${col('booking_status')} = 'pending'
-        AND (
-            DATE(${col('booking_date')}) > CURDATE()
-            OR (
-                DATE(${col('booking_date')}) = CURDATE()
-                AND ${col('pickup_time')} != 'asap'
-                AND TIMESTAMP(${col('booking_date')}, ${col('pickup_time')}) > NOW()
-            )
+    ${col('booking_status')} IN ('pending', 'pending_acceptance', 'started', 'unassigned')
+    AND (
+        (
+            (${plotDispatchHideSql(alias)})
+            AND (${freshAsapAwaitingDispatchHideSql(alias)})
         )
+        OR ${col('booking_status')} = 'unassigned'
+        OR LOWER(${col('dispatcher_action')}) LIKE '%no driver accepted%'
+        OR LOWER(${col('dispatcher_action')}) LIKE '%plot dispatch failed%'
+        OR LOWER(${col('dispatcher_action')}) LIKE '%all plots exhausted%'
+        OR LOWER(${col('dispatcher_action')}) LIKE '%available for manual%'
     )
-    OR (
-        (${plotDispatchHideSql(alias)})
-        AND (${freshAsapAwaitingDispatchHideSql(alias)})
-    )
-    OR ${col('booking_status')} = 'unassigned'
-    OR LOWER(${col('dispatcher_action')}) LIKE '%no driver accepted%'
-    OR LOWER(${col('dispatcher_action')}) LIKE '%plot dispatch failed%'
-    OR LOWER(${col('dispatcher_action')}) LIKE '%all plots exhausted%'
-    OR LOWER(${col('dispatcher_action')}) LIKE '%available for manual%'
 )`;
 };
 

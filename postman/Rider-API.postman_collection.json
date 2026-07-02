@@ -1,0 +1,839 @@
+{
+  "info": {
+    "name": "Cabify Rider API",
+    "_postman_id": "2b12cf56-c31d-4e11-8ea2-31a3ee7d0001",
+    "description": "Rider endpoints extracted from routes/api.php with request methods, sample bodies, and query params based on controller validations.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000/api"
+    },
+    {
+      "key": "tenant_database",
+      "value": "company013"
+    },
+    {
+      "key": "rider_token",
+      "value": ""
+    },
+    {
+      "key": "phone",
+      "value": "3001234567"
+    },
+    {
+      "key": "country_code",
+      "value": "+92"
+    },
+    {
+      "key": "booking_id",
+      "value": "1"
+    },
+    {
+      "key": "bid_id",
+      "value": "1"
+    },
+    {
+      "key": "driver_id",
+      "value": "1"
+    },
+    {
+      "key": "ride_id",
+      "value": "1"
+    },
+    {
+      "key": "vehicle_id",
+      "value": "1"
+    },
+    {
+      "key": "emergency_contact_id",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Public",
+      "item": [
+        {
+          "name": "Rider Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_code\": \"{{country_code}}\",\n  \"phone\": \"{{phone}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/login"
+          }
+        },
+        {
+          "name": "Rider Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Rider\",\n  \"email\": \"testrider@example.com\",\n  \"phone\": \"{{phone}}\",\n  \"country_code\": \"{{country_code}}\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/register"
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_code\": \"{{country_code}}\",\n  \"phone\": \"{{phone}}\",\n  \"otp\": \"1612\",\n  \"device_token\": \"device-token-001\",\n  \"fcm_token\": \"fcm-token-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/verify-otp"
+          }
+        },
+        {
+          "name": "Set Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_code\": \"{{country_code}}\",\n  \"phone\": \"{{phone}}\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/set-password"
+          }
+        },
+        {
+          "name": "Verify Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_code\": \"{{country_code}}\",\n  \"phone\": \"{{phone}}\",\n  \"password\": \"123456\",\n  \"device_token\": \"device-token-001\",\n  \"fcm_token\": \"fcm-token-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/verify-password"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_code\": \"{{country_code}}\",\n  \"phone\": \"{{phone}}\",\n  \"old_password\": \"123456\",\n  \"new_password\": \"1234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/change-password"
+          }
+        },
+        {
+          "name": "Policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" }
+            ],
+            "url": "{{base_url}}/rider/policies"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected",
+      "item": [
+        {
+          "name": "Add Emergency Contact",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Brother\",\n  \"country_code\": \"{{country_code}}\",\n  \"number\": \"3001112233\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/add-emergency-contact"
+          }
+        },
+        {
+          "name": "Edit Emergency Contact",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{emergency_contact_id}}\",\n  \"name\": \"Brother Updated\",\n  \"country_code\": \"{{country_code}}\",\n  \"number\": \"3001112244\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/edit-emergency-contact"
+          }
+        },
+        {
+          "name": "Delete Emergency Contact",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/delete-emergency-contact?id={{emergency_contact_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "delete-emergency-contact"],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{emergency_contact_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Emergency Contact",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/list-emergency-contact"
+          }
+        },
+        {
+          "name": "Create Contact Us",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Need help with booking issue\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/create-contact-us"
+          }
+        },
+        {
+          "name": "FAQs",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/faqs"
+          }
+        },
+        {
+          "name": "Get API Keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/get-api-keys"
+          }
+        },
+        {
+          "name": "Add Wallet Amount",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"500\",\n  \"comment\": \"Top up from app\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/add-wallet-amount"
+          }
+        },
+        {
+          "name": "Balance Transaction",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/balance-transaction"
+          }
+        },
+        {
+          "name": "Vehicle List",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/vehicle-list"
+          }
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driver_id\": \"{{driver_id}}\",\n  \"ride_id\": \"{{ride_id}}\",\n  \"message\": \"I am at pickup point\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/send-message"
+          }
+        },
+        {
+          "name": "Message List",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/message-list"
+          }
+        },
+        {
+          "name": "Message History",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/message-history?ride_id={{ride_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "message-history"],
+              "query": [
+                {
+                  "key": "ride_id",
+                  "value": "{{ride_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Notification List",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/notification-list"
+          }
+        },
+        {
+          "name": "Get Mobile Setting",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/get-mobile-setting"
+          }
+        },
+        {
+          "name": "Create Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Payment Issue\",\n  \"message\": \"Wallet amount not updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/create-ticket"
+          }
+        },
+        {
+          "name": "List Ticket",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/list-ticket"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/logout"
+          }
+        },
+        {
+          "name": "Delete Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"No longer using app\",\n  \"description\": \"Test delete request\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/delete-account"
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/get-profile"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "name", "value": "Updated Rider", "type": "text" },
+                { "key": "email", "value": "updatedrider@example.com", "type": "text" },
+                { "key": "phone_no", "value": "3009998877", "type": "text" },
+                { "key": "address", "value": "Street 1, Islamabad", "type": "text" },
+                { "key": "city", "value": "Islamabad", "type": "text" },
+                { "key": "country_code", "value": "{{country_code}}", "type": "text" },
+                { "key": "device_token", "value": "device-token-001", "type": "text" },
+                { "key": "fcm_token", "value": "fcm-token-001", "type": "text" },
+                { "key": "profile_image", "type": "file", "src": "" }
+              ]
+            },
+            "url": "{{base_url}}/rider/update-profile"
+          }
+        },
+        {
+          "name": "Store Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_token\": \"device-token-001\",\n  \"fcm_token\": \"fcm-token-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/store-token"
+          }
+        },
+        {
+          "name": "Completed Ride",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/completed-ride?date=2026-07-02",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "completed-ride"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2026-07-02",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change Booking Payment Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/change-booking-payment-status?booking_id={{booking_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "change-booking-payment-status"],
+              "query": [
+                {
+                  "key": "booking_id",
+                  "value": "{{booking_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancelled Ride",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/cancelled-ride?date=2026-07-02",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "cancelled-ride"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2026-07-02",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upcoming Ride",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/upcoming-ride?date=2026-07-02",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "upcoming-ride"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2026-07-02",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Current Ride",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": "{{base_url}}/rider/current-ride"
+          }
+        },
+        {
+          "name": "Rate Ride",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_id\": \"{{booking_id}}\",\n  \"rating\": \"5\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/rate-ride"
+          }
+        },
+        {
+          "name": "Get Plot",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": \"33.6844\",\n  \"longitude\": \"73.0479\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/get-plot"
+          }
+        },
+        {
+          "name": "Create Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_type\": \"city\",\n  \"pickup_point\": \"33.6844,73.0479\",\n  \"pickup_plot_id\": \"1\",\n  \"pickup_location\": \"Blue Area, Islamabad\",\n  \"destination_point\": \"33.7008,73.0551\",\n  \"destination_plot_id\": \"2\",\n  \"destination_location\": \"F-10 Markaz, Islamabad\",\n  \"via_point\": [\n    {\n      \"latitude\": \"33.6900\",\n      \"longitude\": \"73.0500\"\n    }\n  ],\n  \"via_location\": [\"Safa Gold Mall\"] ,\n  \"pickup_time\": \"12:30:00\",\n  \"booking_date\": \"2026-07-02\",\n  \"vehicle\": \"{{vehicle_id}}\",\n  \"offered_amount\": \"450\",\n  \"recommended_amount\": \"450\",\n  \"distance\": \"7500\",\n  \"payment_method\": \"cash\",\n  \"note\": \"Call on arrival\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/create-booking"
+          }
+        },
+        {
+          "name": "List Bids",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/list-bids?booking_id={{booking_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "list-bids"],
+              "query": [
+                {
+                  "key": "booking_id",
+                  "value": "{{booking_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change Bid Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bid_id\": \"{{bid_id}}\",\n  \"status\": \"accepted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/change-bid-status"
+          }
+        },
+        {
+          "name": "Cancel Ride",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_id\": \"{{booking_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/cancel-ride"
+          }
+        },
+        {
+          "name": "Cancel Confirm Ride",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_id\": \"{{booking_id}}\",\n  \"cancel_reason\": \"Driver delayed too much\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/cancel-confirm-ride"
+          }
+        },
+        {
+          "name": "Calculate Fare",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_point\": {\n    \"latitude\": \"33.6844\",\n    \"longitude\": \"73.0479\"\n  },\n  \"destination_point\": {\n    \"latitude\": \"33.7008\",\n    \"longitude\": \"73.0551\"\n  },\n  \"via_point\": [\n    {\n      \"latitude\": \"33.6900\",\n      \"longitude\": \"73.0500\"\n    }\n  ],\n  \"vehicle_id\": \"{{vehicle_id}}\",\n  \"journey_type\": \"one_way\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/rider/calculate-fare"
+          }
+        },
+        {
+          "name": "Ride Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "database", "value": "{{tenant_database}}" },
+              { "key": "Authorization", "value": "Bearer {{rider_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rider/ride-detail?ride_id={{ride_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rider", "ride-detail"],
+              "query": [
+                {
+                  "key": "ride_id",
+                  "value": "{{ride_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

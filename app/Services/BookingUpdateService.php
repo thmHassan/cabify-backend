@@ -13,31 +13,40 @@ class BookingUpdateService
 {
     public function __construct(
         private readonly PreBookingService $preBookingService,
-        private readonly BookingReminderService $bookingReminderService
+        private readonly BookingReminderService $bookingReminderService,
+        private readonly BookingDispatchService $bookingDispatchService
     ) {
     }
 
-    public function assertEditable(CompanyBooking $booking): void
+    public function assertEditable(Request $request, CompanyBooking $booking): void
     {
         if ($booking->booking_status !== 'pending') {
             throw ValidationException::withMessages([
                 'booking' => 'Only pending bookings can be edited.',
             ]);
         }
-
-        if ($booking->dispatch_released) {
-            throw ValidationException::withMessages([
-                'booking' => 'Booking cannot be edited after dispatch has been released.',
-            ]);
-        }
     }
 
     public function update(CompanyBooking $booking, Request $request, string $tenantDatabase): CompanyBooking
     {
-        $this->assertEditable($booking);
+        $this->assertEditable($request, $booking);
 
         $this->syncPassengerUser($booking, $request);
+
+        if ($booking->dispatch_released) {
+            $this->applyReleasedBookingSafeFields($booking, $request);
+            $booking->save();
+
+            return $booking->fresh([
+                'driverDetail',
+                'vehicleDetail',
+                'subCompanyDetail',
+                'accountDetail',
+            ]);
+        }
+
         $this->applyFields($booking, $request);
+        $isScheduled = $this->reconcileDispatchState($booking, $request);
 
         if ($request->has('reminder_minutes')) {
             $booking->reminder_minutes = $request->filled('reminder_minutes')
@@ -47,9 +56,11 @@ class BookingUpdateService
 
         $booking->save();
 
-        if ($this->preBookingService->isScheduledBooking($booking) && !$booking->dispatch_released) {
+        if ($isScheduled && !$booking->dispatch_released) {
             $this->preBookingService->scheduleDispatchRelease($booking, $tenantDatabase);
             $this->bookingReminderService->scheduleReminder($booking, $tenantDatabase);
+        } elseif (!$isScheduled && !$booking->dispatch_released) {
+            $this->bookingDispatchService->releaseForDispatch($booking, $tenantDatabase);
         }
 
         return $booking->fresh([
@@ -202,6 +213,44 @@ class BookingUpdateService
         if ($request->has('driver')) {
             $this->applyDriverAssignment($booking, $request);
         }
+    }
+
+    private function applyReleasedBookingSafeFields(CompanyBooking $booking, Request $request): void
+    {
+        $safeFields = [
+            'tel_no',
+            'special_request',
+        ];
+
+        foreach ($safeFields as $field) {
+            if ($request->has($field)) {
+                $booking->{$field} = $request->input($field);
+            }
+        }
+    }
+
+    private function reconcileDispatchState(CompanyBooking $booking, Request $request): bool
+    {
+        $isScheduled = $this->preBookingService->isScheduledBooking($booking);
+
+        if ($isScheduled) {
+            $booking->dispatch_released = false;
+
+            if (!$request->has('driver') && $booking->driver && !$booking->pending_driver_id) {
+                $booking->pending_driver_id = $booking->driver;
+                $booking->driver = null;
+            }
+
+            return true;
+        }
+
+        if (!$request->has('driver') && $booking->pending_driver_id && !$booking->driver) {
+            $booking->driver = $booking->pending_driver_id;
+        }
+
+        $booking->pending_driver_id = null;
+
+        return false;
     }
 
     private function resolvePickupTimeTypeForUpdate(CompanyBooking $booking, Request $request): string
