@@ -389,6 +389,8 @@ class AuthController extends Controller
             'vehicle_registration_date' => 'nullable|date',
             'companyCode' => 'required',
             'documentKeys' => 'required',
+            'documentExpiryDates' => 'nullable',
+            'document_expiry_dates' => 'nullable',
             'documents' => 'required',
             'documents.*' => 'file|max:8192',
             'photo' => 'required|image|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
@@ -418,6 +420,15 @@ class AuthController extends Controller
                 'error' => 1,
                 'message' => 'documentKeys must be a valid JSON array.',
             ], 422);
+        }
+
+        $documentExpiryDates = $this->parseDocumentValues(
+            $request->input('documentExpiryDates', $request->input('document_expiry_dates')),
+            'documentExpiryDates'
+        );
+
+        if ($documentExpiryDates instanceof \Illuminate\Http\JsonResponse) {
+            return $documentExpiryDates;
         }
 
         $uploadedDocuments = $request->file('documents', []);
@@ -479,6 +490,27 @@ class AuthController extends Controller
             $driverDocument->driver_id = $driver->id;
             $driverDocument->document_id = $documentType?->id;
             $driverDocument->document_name = $documentKey;
+            $expiryDate = $this->documentValueForKey($documentExpiryDates, $documentKey, $index);
+
+            if ($documentType?->has_expiry_date === 'yes' && !filled($expiryDate)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => "Expiry date is required for {$documentKey}.",
+                ], 422);
+            }
+
+            if (filled($expiryDate)) {
+                $timestamp = strtotime((string) $expiryDate);
+                if (!$timestamp) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Expiry date for {$documentKey} must be a valid date.",
+                    ], 422);
+                }
+
+                $driverDocument->has_expiry_date = date('Y-m-d', $timestamp);
+            }
+
             $storageField = $this->resolveDriverDocumentStorageField($documentType);
             $driverDocument->{$storageField} = $this->storeDriverFile(
                 $file,
@@ -596,6 +628,36 @@ class AuthController extends Controller
         $key = Str::slug((string) $name, '_');
 
         return $key !== '' ? $key : 'document_' . $id;
+    }
+
+    private function parseDocumentValues($value, string $fieldName)
+    {
+        if (!filled($value)) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        $decoded = json_decode((string) $value, true);
+        if (!is_array($decoded)) {
+            return response()->json([
+                'error' => 1,
+                'message' => "{$fieldName} must be a valid JSON object or array.",
+            ], 422);
+        }
+
+        return $decoded;
+    }
+
+    private function documentValueForKey(array $values, string $documentKey, int $index)
+    {
+        if (array_key_exists($documentKey, $values)) {
+            return $values[$documentKey];
+        }
+
+        return $values[$index] ?? null;
     }
 
     private function resolveDriverRequirementType(CompanyDocumentType $document): string

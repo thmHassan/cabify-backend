@@ -183,6 +183,7 @@
                 { "key": "deviceToken", "value": "driver-device-token-001", "type": "text" },
                 { "key": "fcmToken", "value": "driver-fcm-token-001", "type": "text" },
                 { "key": "documentKeys", "value": "[\"license_front\",\"license_back\",\"vehicle_registration\"]", "type": "text" },
+                { "key": "documentExpiryDates", "value": "{\"license_front\":\"2028-12-31\",\"license_back\":\"2028-12-31\",\"vehicle_registration\":\"2027-06-30\"}", "type": "text" },
                 { "key": "photo", "type": "file", "src": "" },
                 { "key": "documents", "type": "file", "src": "" },
                 { "key": "documents", "type": "file", "src": "" },
