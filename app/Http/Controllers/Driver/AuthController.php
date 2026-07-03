@@ -14,9 +14,12 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanySetting;
+use App\Models\CompanyDocumentType;
+use App\Models\CompanyVehicleType;
 use App\Models\DriverDocument;
 use App\Services\DriverSessionService;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenBlacklistedException;
@@ -25,8 +28,88 @@ use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenInvalidException;
 
 class AuthController extends Controller
 {
+    public function checkAvailability(Request $request)
+    {
+        try {
+            $request->validate([
+                'email' => 'required|email',
+                'phone' => 'nullable',
+                'countryCode' => 'nullable',
+                'country_code' => 'nullable',
+            ]);
+
+            $countryCode = $request->input('countryCode', $request->input('country_code'));
+            $emailTaken = CompanyDriver::where('email', $request->email)->exists();
+            $phoneTaken = false;
+
+            if ($request->filled('phone')) {
+                $phoneQuery = CompanyDriver::where('phone_no', $request->phone);
+                if (filled($countryCode)) {
+                    $phoneQuery->where('country_code', $countryCode);
+                }
+                $phoneTaken = $phoneQuery->exists();
+            }
+
+            return response()->json([
+                'success' => 1,
+                'available' => !$emailTaken && !$phoneTaken,
+                'email_available' => !$emailTaken,
+                'phone_available' => !$phoneTaken,
+                'message' => (!$emailTaken && !$phoneTaken)
+                    ? 'Email and phone are available'
+                    : 'Email or phone is already registered',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    public function documentRequirements(Request $request)
+    {
+        try {
+            $requirements = CompanyDocumentType::orderBy('id', 'ASC')->get()->map(function ($document) {
+                $documentType = $this->resolveDriverRequirementType($document);
+
+                return [
+                    'id' => $document->id,
+                    'key' => $this->driverDocumentKey($document->document_name, $document->id),
+                    'name' => $document->document_name,
+                    'title' => $document->document_name,
+                    'description' => $document->document_name,
+                    'type' => $documentType,
+                    'documentType' => $documentType,
+                    'isRequired' => true,
+                    'requiresExpiry' => $document->has_expiry_date === 'yes',
+                    'isActive' => true,
+                    'sortOrder' => $document->id,
+                    'allowedFormats' => $documentType === 'file'
+                        ? ['pdf', 'jpg', 'jpeg', 'png', 'heic', 'heif']
+                        : ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'],
+                ];
+            })->values();
+
+            return response()->json([
+                'success' => 1,
+                'companyCode' => $request->input('companyCode', $request->input('company_code', $request->header('database'))),
+                'requirements' => $requirements,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
     public function register(Request $request){
         try{
+            if ($this->isAppRegistrationFlow($request)) {
+                return $this->registerFromApp($request);
+            }
+
             $request->validate([
                 'email' => 'required',
                 'phone' => 'required',
@@ -37,30 +120,18 @@ class AuthController extends Controller
                 'device_token' => 'nullable',
             ]);
 
-            $dataCheck = (new TenantUser)
-                ->setConnection('central')
-                ->where("id", $request->header('database'))
-                ->first();
-
-            $countDriver = CompanyDriver::count();
-
-            if($countDriver >= $dataCheck->data['drivers_allowed']){
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
-                    'clientId' => $request->header('database'),
-                    'title' => "Driver Limit",
-                    'description' => "You have reached your driver limits"
-                ]);
-
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'This company already reached to driver limits. Please contact to Admin.'
-                ]);
+            $limitResponse = $this->ensureDriverLimitNotReached($request);
+            if ($limitResponse) {
+                return $limitResponse;
             }
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->orWhere('email', $request->email)->where("country_code", $request->country_code)->first();
-            
+            $user = CompanyDriver::where(function ($query) use ($request) {
+                    $query->where('phone_no', $request->phone)
+                        ->where('country_code', $request->country_code);
+                })
+                ->orWhere('email', $request->email)
+                ->first();
+
             if(isset($user) && $user != NULL){
                 return response()->json([
                     'error' => 1,
@@ -82,36 +153,7 @@ class AuthController extends Controller
             }
             $user->save();
 
-            $otp = rand(1000, 9999);
-            $expiresAt = Carbon::now()->addMinutes(5);
-            $user->otp = $otp;
-            $user->otp_expires_at = $expiresAt;
-            $user->save();
-
-            if ($request->filled('fcm_token') && $request->filled('device_token')) {
-                $tokenRecord = CompanyToken::where('device_token', $request->device_token)->first();
-                if (!$tokenRecord) {
-                    $tokenRecord = new CompanyToken;
-                    $tokenRecord->device_token = $request->device_token;
-                }
-                $tokenRecord->user_id = $user->id;
-                $tokenRecord->user_type = 'driver';
-                $tokenRecord->fcm_token = $request->fcm_token;
-                $tokenRecord->save();
-            }
-
-            $settingData = CompanySetting::orderBy('id', 'DESC')->first();
-            if (isset($user->email) && $user->email != null) {
-                $mailer = \App\Services\MailConfigurationService::resolveMailer($settingData);
-
-                Mail::mailer($mailer)->send('emails.send-otp', [
-                    'name' => $user->name ?? 'User',
-                    'otp' => $otp,
-                ], function ($message) use ($user) {
-                    $message->to($user->email)
-                        ->subject('Registration OTP');
-                });
-            }
+            $this->finalizeDriverRegistration($user, $request);
 
             return response()->json([
                 'success' => 1,
@@ -128,6 +170,10 @@ class AuthController extends Controller
 
     public function login(Request $request){
         try{
+            if ($request->filled('password') && ($request->filled('email') || $request->filled('phone'))) {
+                return $this->loginWithCredentials($request);
+            }
+
             $request->validate([
                 'phone' => 'required',
                 'country_code' => 'required',
@@ -207,6 +253,333 @@ class AuthController extends Controller
                 'message' => $e->getMessage()
             ], 400);
         }
+    }
+
+    private function loginWithCredentials(Request $request)
+    {
+        $request->validate([
+            'email' => 'required_without:phone|email',
+            'phone' => 'required_without:email',
+            'country_code' => 'required_without:email',
+            'password' => 'required',
+            'fcmToken' => 'nullable',
+            'deviceToken' => 'nullable',
+            'fcm_token' => 'nullable',
+            'device_token' => 'nullable',
+        ]);
+
+        $user = $request->filled('email')
+            ? CompanyDriver::where('email', $request->email)->first()
+            : CompanyDriver::where('phone_no', $request->phone)
+                ->where('country_code', $request->country_code)
+                ->first();
+
+        if (!$user) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'User does not exist',
+            ], 400);
+        }
+
+        if (!Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Invalid Password',
+            ], 400);
+        }
+
+        $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
+        $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
+        $user->save();
+
+        $token = JWTAuth::fromUser($user);
+
+        return response()->json([
+            'success' => 1,
+            'message' => 'Login successful',
+            'token' => $token,
+            'data' => $this->formatDriverProfileData($user),
+        ]);
+    }
+
+    private function isAppRegistrationFlow(Request $request): bool
+    {
+        return $request->hasAny([
+            'firstName',
+            'lastName',
+            'confirmPassword',
+            'companyCode',
+            'company_code',
+            'vehicleType',
+            'vehicle_type_id',
+            'documentKeys',
+        ]) || $request->hasFile('documents') || $request->hasFile('photo');
+    }
+
+    private function registerFromApp(Request $request)
+    {
+        $request->validate([
+            'firstName' => 'required|string|max:255',
+            'lastName' => 'required|string|max:255',
+            'email' => 'required|email|unique:drivers,email',
+            'password' => ['required', 'string', 'min:8', 'regex:/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/'],
+            'confirmPassword' => 'required|same:password',
+            'phone' => 'required',
+            'gender' => 'required|string|max:50',
+            'dob' => ['required', 'date', function ($attribute, $value, $fail) {
+                if (Carbon::parse($value)->gt(now()->subYears(18))) {
+                    $fail('Driver must be at least 18 years old.');
+                }
+            }],
+            'address' => 'required|string|max:255',
+            'city' => 'required|string|max:255',
+            'country' => 'required|string|max:255',
+            'countryCode' => 'required|string|max:10',
+            'vehicleType' => 'required_without:vehicle_type_id|nullable|exists:vehicle_types,id',
+            'vehicle_type_id' => 'required_without:vehicleType|nullable|exists:vehicle_types,id',
+            'color' => 'nullable|string|max:100',
+            'seats' => 'nullable|string|max:50',
+            'plate_no' => 'nullable|string|max:100',
+            'vehicle_registration_date' => 'nullable|date',
+            'companyCode' => 'required',
+            'documentKeys' => 'required',
+            'documents' => 'required',
+            'documents.*' => 'file|max:8192',
+            'photo' => 'required|image|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+            'fcmToken' => 'nullable',
+            'deviceToken' => 'nullable',
+        ]);
+
+        $limitResponse = $this->ensureDriverLimitNotReached($request);
+        if ($limitResponse) {
+            return $limitResponse;
+        }
+
+        $phoneExists = CompanyDriver::where('phone_no', $request->phone)
+            ->where('country_code', $request->countryCode)
+            ->exists();
+
+        if ($phoneExists) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'User already exist with this Email or Phone No.'
+            ], 400);
+        }
+
+        $documentKeys = json_decode((string) $request->documentKeys, true);
+        if (!is_array($documentKeys) || $documentKeys === []) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'documentKeys must be a valid JSON array.',
+            ], 422);
+        }
+
+        $uploadedDocuments = $request->file('documents', []);
+        if (count($uploadedDocuments) !== count($documentKeys)) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'documentKeys and documents count must match.',
+            ], 422);
+        }
+
+        $requirements = CompanyDocumentType::orderBy('id', 'ASC')->get();
+        if ($requirements->isEmpty()) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'No active driver document requirements found for this company.',
+            ], 422);
+        }
+
+        $vehicleTypeId = $request->input('vehicle_type_id', $request->input('vehicleType'));
+        $vehicle = CompanyVehicleType::find($vehicleTypeId);
+
+        $driver = new CompanyDriver;
+        $driver->name = trim($request->firstName . ' ' . $request->lastName);
+        $driver->email = $request->email;
+        $driver->phone_no = $request->phone;
+        $driver->country_code = $request->countryCode;
+        $driver->password = Hash::make($request->password);
+        $driver->address = $request->address;
+        $driver->city = $request->city;
+        $driver->country = $request->country;
+        $driver->gender = $request->gender;
+        $driver->date_of_birth = $request->dob;
+        $driver->status = 'pending';
+        $driver->joined_date = now()->toDateString();
+        $driver->assigned_vehicle = (string) $vehicleTypeId;
+        $driver->vehicle_name = $vehicle?->vehicle_type_name;
+        $driver->vehicle_type = $vehicle?->vehicle_type_service;
+        $driver->vehicle_service = $vehicle?->vehicle_type_service;
+        $driver->color = $request->input('color');
+        $driver->seats = $request->input('seats');
+        $driver->plate_no = $request->input('plate_no');
+        $driver->vehicle_registration_date = $request->input('vehicle_registration_date');
+        $driver->fcm_token = $request->input('fcmToken');
+        $driver->device_token = $request->input('deviceToken');
+        $driver->profile_image = $this->storeDriverFile(
+            $request->file('photo'),
+            (string) $request->input('companyCode'),
+            'profile_image'
+        );
+        $driver->save();
+
+        $requirementsByKey = $requirements->keyBy(fn ($document) => $this->driverDocumentKey($document->document_name, $document->id));
+
+        foreach ($uploadedDocuments as $index => $file) {
+            $documentKey = (string) $documentKeys[$index];
+            $documentType = $requirementsByKey->get($documentKey);
+
+            $driverDocument = new DriverDocument;
+            $driverDocument->driver_id = $driver->id;
+            $driverDocument->document_id = $documentType?->id;
+            $driverDocument->document_name = $documentKey;
+            $storageField = $this->resolveDriverDocumentStorageField($documentType);
+            $driverDocument->{$storageField} = $this->storeDriverFile(
+                $file,
+                (string) $request->input('companyCode'),
+                'driver_documents'
+            );
+            $driverDocument->status = 'pending';
+            $driverDocument->save();
+        }
+
+        $this->storeDriverTokenRecord(
+            $driver,
+            $request->input('deviceToken'),
+            $request->input('fcmToken')
+        );
+
+        return response()->json([
+            'success' => 1,
+            'message' => 'Driver registration submitted successfully',
+            'profileVerified' => false,
+            'profileStatus' => 'pending',
+            'accountStatus' => 'pending',
+            'verificationStatus' => 'pending',
+            'data' => $this->formatDriverProfileData($driver->fresh()),
+        ], 201);
+    }
+
+    private function ensureDriverLimitNotReached(Request $request)
+    {
+        $databaseId = $request->input('companyCode', $request->input('company_code', $request->header('database')));
+        $dataCheck = (new TenantUser)
+            ->setConnection('central')
+            ->where('id', $databaseId)
+            ->first();
+
+        if (!$dataCheck) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Company code is invalid.',
+            ], 404);
+        }
+
+        $countDriver = CompanyDriver::count();
+
+        if ($countDriver >= ($dataCheck->data['drivers_allowed'] ?? 0)) {
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+            ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                'clientId' => $databaseId,
+                'title' => 'Driver Limit',
+                'description' => 'You have reached your driver limits'
+            ]);
+
+            return response()->json([
+                'error' => 1,
+                'message' => 'This company already reached to driver limits. Please contact to Admin.'
+            ], 400);
+        }
+
+        return null;
+    }
+
+    private function finalizeDriverRegistration(CompanyDriver $user, Request $request): void
+    {
+        $otp = rand(1000, 9999);
+        $expiresAt = Carbon::now()->addMinutes(5);
+        $user->otp = $otp;
+        $user->otp_expires_at = $expiresAt;
+        $user->save();
+
+        $this->storeDriverTokenRecord($user, $request->input('device_token'), $request->input('fcm_token'));
+
+        $settingData = CompanySetting::orderBy('id', 'DESC')->first();
+        if (isset($user->email) && $user->email != null) {
+            $mailer = \App\Services\MailConfigurationService::resolveMailer($settingData);
+
+            Mail::mailer($mailer)->send('emails.send-otp', [
+                'name' => $user->name ?? 'User',
+                'otp' => $otp,
+            ], function ($message) use ($user) {
+                $message->to($user->email)
+                    ->subject('Registration OTP');
+            });
+        }
+    }
+
+    private function storeDriverTokenRecord(CompanyDriver $user, ?string $deviceToken, ?string $fcmToken): void
+    {
+        if (!filled($deviceToken) || !filled($fcmToken)) {
+            return;
+        }
+
+        $tokenRecord = CompanyToken::where('device_token', $deviceToken)->first();
+        if (!$tokenRecord) {
+            $tokenRecord = new CompanyToken;
+            $tokenRecord->device_token = $deviceToken;
+        }
+        $tokenRecord->user_id = $user->id;
+        $tokenRecord->user_type = 'driver';
+        $tokenRecord->fcm_token = $fcmToken;
+        $tokenRecord->save();
+    }
+
+    private function storeDriverFile($file, string $companyCode, string $folder): string
+    {
+        $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+        $targetFolder = trim($companyCode) . '/' . trim($folder, '/');
+        $file->move(public_path($targetFolder), $filename);
+
+        return $targetFolder . '/' . $filename;
+    }
+
+    private function driverDocumentKey(?string $name, int $id): string
+    {
+        $key = Str::slug((string) $name, '_');
+
+        return $key !== '' ? $key : 'document_' . $id;
+    }
+
+    private function resolveDriverRequirementType(CompanyDocumentType $document): string
+    {
+        return ($document->front_photo === 'yes'
+            || $document->back_photo === 'yes'
+            || $document->profile_photo === 'yes')
+            ? 'image'
+            : 'file';
+    }
+
+    private function resolveDriverDocumentStorageField(?CompanyDocumentType $documentType): string
+    {
+        if (!$documentType) {
+            return 'front_photo';
+        }
+
+        if ($documentType->front_photo === 'yes') {
+            return 'front_photo';
+        }
+
+        if ($documentType->back_photo === 'yes') {
+            return 'back_photo';
+        }
+
+        if ($documentType->profile_photo === 'yes') {
+            return 'profile_photo';
+        }
+
+        return 'front_photo';
     }
 
     public function refreshToken(Request $request)

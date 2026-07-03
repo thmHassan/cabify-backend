@@ -8,7 +8,14 @@ class TenantRequestContext
 {
     public static function databaseId(Request $request): ?string
     {
-        $database = $request->header('database') ?? $request->query('database');
+        $database = $request->header('database')
+            ?? $request->query('database')
+            ?? $request->header('companyCode')
+            ?? $request->header('company_code')
+            ?? $request->query('companyCode')
+            ?? $request->query('company_code')
+            ?? $request->input('companyCode')
+            ?? $request->input('company_code');
 
         if (filled($database)) {
             return trim((string) $database);

@@ -324,6 +324,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
     Route::post('/driver/login', [DriverAuthController::class, 'login']);
     Route::post('/driver/register', [DriverAuthController::class, 'register']);
+    Route::post('/driver/check-availability', [DriverAuthController::class, 'checkAvailability']);
+    Route::get('/driver/document-requirements', [DriverAuthController::class, 'documentRequirements']);
+    Route::get('/driver/public-vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
     Route::post('/driver/verify-password', [DriverAuthController::class, 'verifyPassword']);
     Route::post('/driver/set-password', [DriverAuthController::class, 'setPassword']);
