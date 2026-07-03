@@ -128,7 +128,21 @@ class AuthController extends Controller
                     'type' => $documentType,
                     'documentType' => $documentType,
                     'isRequired' => true,
+                    'requiresFrontPhoto' => $document->front_photo === 'yes',
+                    'requiresBackPhoto' => $document->back_photo === 'yes',
+                    'requiresProfilePhoto' => $document->profile_photo === 'yes',
+                    'requiresIssueDate' => $document->has_issue_date === 'yes',
                     'requiresExpiry' => $document->has_expiry_date === 'yes',
+                    'requiresExpiryDate' => $document->has_expiry_date === 'yes',
+                    'requiresNumberField' => $document->has_number_field === 'yes',
+                    'fields' => [
+                        'front_photo' => $document->front_photo,
+                        'back_photo' => $document->back_photo,
+                        'profile_photo' => $document->profile_photo,
+                        'has_issue_date' => $document->has_issue_date,
+                        'has_expiry_date' => $document->has_expiry_date,
+                        'has_number_field' => $document->has_number_field,
+                    ],
                     'isActive' => true,
                     'sortOrder' => $document->id,
                     'allowedFormats' => $documentType === 'file'
@@ -391,8 +405,20 @@ class AuthController extends Controller
             'documentKeys' => 'required',
             'documentExpiryDates' => 'nullable',
             'document_expiry_dates' => 'nullable',
-            'documents' => 'required',
+            'documentIssueDates' => 'nullable',
+            'document_issue_dates' => 'nullable',
+            'documentNumbers' => 'nullable',
+            'document_numbers' => 'nullable',
+            'documents' => 'nullable',
             'documents.*' => 'file|max:8192',
+            'documentFrontPhotos' => 'nullable',
+            'documentFrontPhotos.*' => 'file|max:8192',
+            'documentBackPhotos' => 'nullable',
+            'documentBackPhotos.*' => 'file|max:8192',
+            'documentProfilePhotos' => 'nullable',
+            'documentProfilePhotos.*' => 'file|max:8192',
+            'documentFiles' => 'nullable',
+            'documentFiles.*' => 'file|max:8192',
             'photo' => 'required|image|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'fcmToken' => 'nullable',
             'deviceToken' => 'nullable',
@@ -431,13 +457,25 @@ class AuthController extends Controller
             return $documentExpiryDates;
         }
 
-        $uploadedDocuments = $request->file('documents', []);
-        if (count($uploadedDocuments) !== count($documentKeys)) {
-            return response()->json([
-                'error' => 1,
-                'message' => 'documentKeys and documents count must match.',
-            ], 422);
+        $documentIssueDates = $this->parseDocumentValues(
+            $request->input('documentIssueDates', $request->input('document_issue_dates')),
+            'documentIssueDates'
+        );
+
+        if ($documentIssueDates instanceof \Illuminate\Http\JsonResponse) {
+            return $documentIssueDates;
         }
+
+        $documentNumbers = $this->parseDocumentValues(
+            $request->input('documentNumbers', $request->input('document_numbers')),
+            'documentNumbers'
+        );
+
+        if ($documentNumbers instanceof \Illuminate\Http\JsonResponse) {
+            return $documentNumbers;
+        }
+
+        $uploadedDocuments = $request->file('documents', []);
 
         $requirements = CompanyDocumentType::orderBy('id', 'ASC')->get();
         if ($requirements->isEmpty()) {
@@ -482,15 +520,54 @@ class AuthController extends Controller
 
         $requirementsByKey = $requirements->keyBy(fn ($document) => $this->driverDocumentKey($document->document_name, $document->id));
 
-        foreach ($uploadedDocuments as $index => $file) {
+        foreach ($documentKeys as $index => $documentKey) {
             $documentKey = (string) $documentKeys[$index];
             $documentType = $requirementsByKey->get($documentKey);
+
+            if (!$documentType) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => "Document requirement not found for {$documentKey}.",
+                ], 422);
+            }
 
             $driverDocument = new DriverDocument;
             $driverDocument->driver_id = $driver->id;
             $driverDocument->document_id = $documentType?->id;
             $driverDocument->document_name = $documentKey;
+            $issueDate = $this->documentValueForKey($documentIssueDates, $documentKey, $index);
             $expiryDate = $this->documentValueForKey($documentExpiryDates, $documentKey, $index);
+            $documentNumber = $this->documentValueForKey($documentNumbers, $documentKey, $index);
+
+            if ($documentType?->has_number_field === 'yes' && !filled($documentNumber)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => "Document number is required for {$documentKey}.",
+                ], 422);
+            }
+
+            if (filled($documentNumber)) {
+                $driverDocument->has_number_field = $documentNumber;
+            }
+
+            if ($documentType?->has_issue_date === 'yes' && !filled($issueDate)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => "Issue date is required for {$documentKey}.",
+                ], 422);
+            }
+
+            if (filled($issueDate)) {
+                $timestamp = strtotime((string) $issueDate);
+                if (!$timestamp) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Issue date for {$documentKey} must be a valid date.",
+                    ], 422);
+                }
+
+                $driverDocument->has_issue_date = date('Y-m-d', $timestamp);
+            }
 
             if ($documentType?->has_expiry_date === 'yes' && !filled($expiryDate)) {
                 return response()->json([
@@ -511,12 +588,64 @@ class AuthController extends Controller
                 $driverDocument->has_expiry_date = date('Y-m-d', $timestamp);
             }
 
-            $storageField = $this->resolveDriverDocumentStorageField($documentType);
-            $driverDocument->{$storageField} = $this->storeDriverFile(
-                $file,
-                (string) $request->input('companyCode'),
-                'driver_documents'
-            );
+            $frontPhoto = $this->documentFileForKey($request, 'documentFrontPhotos', $documentKey, $index);
+            $backPhoto = $this->documentFileForKey($request, 'documentBackPhotos', $documentKey, $index);
+            $profilePhoto = $this->documentFileForKey($request, 'documentProfilePhotos', $documentKey, $index);
+            $genericFile = $this->documentFileForKey($request, 'documentFiles', $documentKey, $index)
+                ?? ($uploadedDocuments[$index] ?? null);
+
+            if ($documentType->front_photo === 'yes') {
+                if (!$frontPhoto && $genericFile && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes') {
+                    $frontPhoto = $genericFile;
+                }
+
+                if (!$frontPhoto) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Front photo is required for {$documentKey}.",
+                    ], 422);
+                }
+
+                $driverDocument->front_photo = $this->storeDriverFile($frontPhoto, (string) $request->input('companyCode'), 'driver_documents');
+            }
+
+            if ($documentType->back_photo === 'yes') {
+                if (!$backPhoto) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Back photo is required for {$documentKey}.",
+                    ], 422);
+                }
+
+                $driverDocument->back_photo = $this->storeDriverFile($backPhoto, (string) $request->input('companyCode'), 'driver_documents');
+            }
+
+            if ($documentType->profile_photo === 'yes') {
+                if (!$profilePhoto) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Profile photo is required for {$documentKey}.",
+                    ], 422);
+                }
+
+                $driverDocument->profile_photo = $this->storeDriverFile($profilePhoto, (string) $request->input('companyCode'), 'driver_documents');
+            }
+
+            if (
+                $documentType->front_photo !== 'yes'
+                && $documentType->back_photo !== 'yes'
+                && $documentType->profile_photo !== 'yes'
+            ) {
+                if (!$genericFile) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Document file is required for {$documentKey}.",
+                    ], 422);
+                }
+
+                $driverDocument->front_photo = $this->storeDriverFile($genericFile, (string) $request->input('companyCode'), 'driver_documents');
+            }
+
             $driverDocument->status = 'pending';
             $driverDocument->save();
         }
@@ -658,6 +787,17 @@ class AuthController extends Controller
         }
 
         return $values[$index] ?? null;
+    }
+
+    private function documentFileForKey(Request $request, string $fieldName, string $documentKey, int $index)
+    {
+        $files = $request->file($fieldName, []);
+
+        if (!is_array($files)) {
+            return null;
+        }
+
+        return $files[$documentKey] ?? $files[$index] ?? null;
     }
 
     private function resolveDriverRequirementType(CompanyDocumentType $document): string

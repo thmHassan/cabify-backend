@@ -35,6 +35,56 @@ class DocumentController extends Controller
                 'document_id' => 'required'
             ]);
 
+            $documentType = CompanyDocumentType::where('id', $request->document_id)->first();
+            if (!$documentType) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Document type not found'
+                ], 404);
+            }
+
+            if ($documentType->front_photo === 'yes' && !$request->hasFile('front_photo')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Front photo is required'
+                ], 422);
+            }
+
+            if ($documentType->back_photo === 'yes' && !$request->hasFile('back_photo')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Back photo is required'
+                ], 422);
+            }
+
+            if ($documentType->profile_photo === 'yes' && !$request->hasFile('profile_photo')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Profile photo is required'
+                ], 422);
+            }
+
+            if ($documentType->has_issue_date === 'yes' && !$request->filled('has_issue_date')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Issue date is required'
+                ], 422);
+            }
+
+            if ($documentType->has_expiry_date === 'yes' && !$request->filled('has_expiry_date')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Expiry date is required'
+                ], 422);
+            }
+
+            if ($documentType->has_number_field === 'yes' && !$request->filled('has_number_field')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Document number is required'
+                ], 422);
+            }
+
             $newDocument = new DriverDocument;
             $newDocument->document_id = $request->document_id;
             $newDocument->driver_id = auth('driver')->user()->id;
@@ -62,11 +112,25 @@ class DocumentController extends Controller
             }
 
             if(isset($request->has_issue_date) && $request->has_issue_date != NULL){
-                $newDocument->has_issue_date = $request->has_issue_date;
+                $issueDate = strtotime((string) $request->has_issue_date);
+                if (!$issueDate) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Issue date must be a valid date'
+                    ], 422);
+                }
+                $newDocument->has_issue_date = date('Y-m-d', $issueDate);
             }
 
             if(isset($request->has_expiry_date) && $request->has_expiry_date != NULL){
-                $newDocument->has_expiry_date = $request->has_expiry_date;
+                $expiryDate = strtotime((string) $request->has_expiry_date);
+                if (!$expiryDate) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Expiry date must be a valid date'
+                    ], 422);
+                }
+                $newDocument->has_expiry_date = date('Y-m-d', $expiryDate);
             }
 
             if(isset($request->has_number_field) && $request->has_number_field != NULL){

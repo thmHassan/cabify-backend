@@ -182,12 +182,14 @@
                 { "key": "vehicle_registration_date", "value": "{{vehicle_registration_date}}", "type": "text" },
                 { "key": "deviceToken", "value": "driver-device-token-001", "type": "text" },
                 { "key": "fcmToken", "value": "driver-fcm-token-001", "type": "text" },
-                { "key": "documentKeys", "value": "[\"license_front\",\"license_back\",\"vehicle_registration\"]", "type": "text" },
-                { "key": "documentExpiryDates", "value": "{\"license_front\":\"2028-12-31\",\"license_back\":\"2028-12-31\",\"vehicle_registration\":\"2027-06-30\"}", "type": "text" },
+                { "key": "documentKeys", "value": "[\"cnic\",\"vehicle_registration\"]", "type": "text" },
+                { "key": "documentNumbers", "value": "{\"cnic\":\"35202-1234567-1\",\"vehicle_registration\":\"REG-98765\"}", "type": "text" },
+                { "key": "documentIssueDates", "value": "{\"cnic\":\"2024-01-01\",\"vehicle_registration\":\"2024-06-30\"}", "type": "text" },
+                { "key": "documentExpiryDates", "value": "{\"cnic\":\"2028-12-31\",\"vehicle_registration\":\"2027-06-30\"}", "type": "text" },
                 { "key": "photo", "type": "file", "src": "" },
-                { "key": "documents", "type": "file", "src": "" },
-                { "key": "documents", "type": "file", "src": "" },
-                { "key": "documents", "type": "file", "src": "" }
+                { "key": "documentFrontPhotos[cnic]", "type": "file", "src": "" },
+                { "key": "documentBackPhotos[cnic]", "type": "file", "src": "" },
+                { "key": "documentFiles[vehicle_registration]", "type": "file", "src": "" }
               ]
             },
             "url": "{{base_url}}/driver/register"
