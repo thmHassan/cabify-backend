@@ -73,6 +73,8 @@ Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 Route::post('/company/logout-all-dispatchers', [DispatcherController::class, 'logoutAllDispatchers']);
 Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
+Route::get('/driver/verify-company-code', [DriverAuthController::class, 'verifyCompanyCode']);
+
 Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/location', [DriverAuthController::class, 'setLocation']);
     Route::post('/driver/get-location', [DriverAuthController::class, 'getLocation']);
@@ -326,6 +328,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/register', [DriverAuthController::class, 'register']);
     Route::post('/driver/check-availability', [DriverAuthController::class, 'checkAvailability']);
     Route::get('/driver/document-requirements', [DriverAuthController::class, 'documentRequirements']);
+    Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
     Route::get('/driver/public-vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
     Route::post('/driver/verify-password', [DriverAuthController::class, 'verifyPassword']);
@@ -378,7 +381,6 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/verify-booking-otp', [DriverBookingController::class, 'verifyBookingOtp']);
         Route::get('/driver/complete-current-ride', [DriverBookingController::class, 'completeCurrentRide']);
 
-        Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
         Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
         Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
         Route::post('/driver/change-vehicle-information', [DriverVehicleController::class, 'changeVehicleInformation']);

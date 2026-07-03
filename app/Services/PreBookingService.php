@@ -43,8 +43,6 @@ class PreBookingService
     public function applyPreBookingsFilter(Builder $query): Builder
     {
         $today = Carbon::today()->toDateString();
-        $now = Carbon::now()->format('Y-m-d H:i:s');
-
         return $query
             ->where(function (Builder $builder) {
                 $builder
@@ -57,14 +55,7 @@ class PreBookingService
                     ->orWhere('dispatch_released', false);
             })
             ->where('booking_status', 'pending')
-            ->where(function ($builder) use ($today, $now) {
-                $builder->whereDate('booking_date', '>', $today)
-                    ->orWhere(function ($inner) use ($today, $now) {
-                        $inner->whereDate('booking_date', $today)
-                            ->where('pickup_time', '!=', 'asap')
-                            ->whereRaw('TIMESTAMP(booking_date, pickup_time) > ?', [$now]);
-                    });
-            });
+            ->whereDate('booking_date', '>', $today);
     }
 
     public function bookingQualifiesAsPreBooking(CompanyBooking $booking): bool
@@ -87,7 +78,7 @@ class PreBookingService
         try {
             $pickupAt = Carbon::parse($booking->booking_date . ' ' . $booking->pickup_time);
 
-            return $pickupAt->isFuture();
+            return $pickupAt->isFuture() && $pickupAt->toDateString() > Carbon::today()->toDateString();
         } catch (\Exception $e) {
             return false;
         }

@@ -52,14 +52,7 @@ const preBookingsCondition = (alias = '') => {
     (${column('pickup_time_type')} = 'time' OR ${column('is_scheduled')} = 1)
     AND (${column('dispatch_released')} = 0 OR ${column('dispatch_released')} IS NULL)
     AND ${column('booking_status')} = 'pending'
-    AND (
-        DATE(${column('booking_date')}) > CURDATE()
-        OR (
-            DATE(${column('booking_date')}) = CURDATE()
-            AND ${column('pickup_time')} != 'asap'
-            AND TIMESTAMP(${column('booking_date')}, ${column('pickup_time')}) > NOW()
-        )
-    )
+    AND DATE(${column('booking_date')}) > CURDATE()
 `;
 };
 
@@ -76,9 +69,10 @@ const isPreBookingRow = (booking) => {
     }
 
     const bookingDateStr = new Date(booking.booking_date).toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
     const pickupAt = new Date(`${bookingDateStr}T${booking.pickup_time}`);
 
-    return pickupAt.getTime() > Date.now();
+    return bookingDateStr > todayStr && pickupAt.getTime() > Date.now();
 };
 
 const plotDriverQueues = new Map();

@@ -29,6 +29,8 @@ class BookingDateFilterTest extends TestCase
             $table->boolean('is_scheduled')->default(false);
             $table->boolean('dispatch_released')->default(false);
             $table->string('booking_status')->default('pending');
+            $table->string('dispatcher_action')->nullable();
+            $table->unsignedBigInteger('driver')->nullable();
             $table->timestamps();
         });
     }
@@ -56,6 +58,8 @@ class BookingDateFilterTest extends TestCase
             'is_scheduled' => $isScheduled,
             'dispatch_released' => $dispatchReleased,
             'booking_status' => $status,
+            'dispatcher_action' => null,
+            'driver' => null,
             'created_at' => ($createdAt ?? now())->toDateTimeString(),
             'updated_at' => now()->toDateTimeString(),
         ]);
@@ -75,7 +79,7 @@ class BookingDateFilterTest extends TestCase
         $this->assertSame(['2025-06-11'], $results);
     }
 
-    public function test_pre_bookings_filter_includes_future_dates_and_todays_future_pickups(): void
+    public function test_pre_bookings_filter_includes_future_dates_only(): void
     {
         $this->insertBooking('2025-06-11', 'pending', null, true, false, '08:00:00');
         $this->insertBooking('2025-06-11', 'pending', null, true, false, '11:00:00');
@@ -92,7 +96,6 @@ class BookingDateFilterTest extends TestCase
             ->all();
 
         $this->assertSame([
-            '2025-06-11 11:00:00',
             '2025-06-13 10:00:00',
             '2025-06-16 10:00:00',
         ], $results);
@@ -108,7 +111,7 @@ class BookingDateFilterTest extends TestCase
         $counts = $this->service->dashboardCounts();
 
         $this->assertSame(2, $counts['todaysBooking']);
-        $this->assertSame(2, $counts['preBookings']);
+        $this->assertSame(1, $counts['preBookings']);
         $this->assertSame(1, $counts['completed']);
     }
 }

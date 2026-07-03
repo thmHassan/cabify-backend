@@ -67,6 +67,52 @@ class AuthController extends Controller
         }
     }
 
+    public function verifyCompanyCode(Request $request)
+    {
+        try {
+            $companyCode = $request->input('companyCode', $request->input('company_code', $request->header('companyCode')));
+
+            if (!filled($companyCode)) {
+                return response()->json([
+                    'error' => 1,
+                    'valid' => false,
+                    'message' => 'Company code is required.',
+                ], 422);
+            }
+
+            $tenant = (new TenantUser)
+                ->setConnection('central')
+                ->where('id', $companyCode)
+                ->first();
+
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'valid' => false,
+                    'companyCode' => $companyCode,
+                    'message' => 'Company code is invalid.',
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => 1,
+                'valid' => true,
+                'companyCode' => $tenant->id,
+                'company' => [
+                    'id' => $tenant->id,
+                    'name' => $tenant->data['company_name'] ?? $tenant->company_name ?? null,
+                ],
+                'message' => 'Company code is valid.',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'valid' => false,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
     public function documentRequirements(Request $request)
     {
         try {
