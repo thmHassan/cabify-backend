@@ -1,5 +1,12 @@
 const DEFAULT_SEARCH_RADIUS_KM = 1;
 
+const toTenantSocketName = (database) => String(database || '').trim().replace(/^tenant/i, '');
+
+const toTenantDbName = (database) => {
+    const value = toTenantSocketName(database);
+    return value ? `tenant${value}` : null;
+};
+
 const pointInPolygon = (lat, lng, polygon) => {
     if (!Array.isArray(polygon) || polygon.length === 0) {
         return false;
@@ -329,23 +336,24 @@ const createWaitingQueueService = ({
             return null;
         }
 
-        const db = getConnection(`tenant${database}`);
-        const queue = await loadPlotQueueFromDb(db, plotId, database);
-        const payload = await buildDriverPayload(db, database, plotId, queue, bookingId);
+        const dbName = toTenantSocketName(database);
+        const db = getConnection(toTenantDbName(dbName));
+        const queue = await loadPlotQueueFromDb(db, plotId, dbName);
+        const payload = await buildDriverPayload(db, dbName, plotId, queue, bookingId);
 
         const response = {
             success: true,
-            database,
+            database: dbName,
             plot_id: payload.plot_id,
             booking_id: payload.booking_id,
             drivers: payload.drivers,
             total_idle_drivers: payload.drivers.length,
         };
 
-        io.to(`driver_${database}`).emit('my-rank-update', response);
-        io.to(`dispatcher_${database}`).emit('my-rank-update', response);
-        io.to(`admin_${database}`).emit('my-rank-update', response);
-        io.to(`client_${database}`).emit('my-rank-update', response);
+        io.to(`driver_${dbName}`).emit('my-rank-update', response);
+        io.to(`dispatcher_${dbName}`).emit('my-rank-update', response);
+        io.to(`admin_${dbName}`).emit('my-rank-update', response);
+        io.to(`client_${dbName}`).emit('my-rank-update', response);
 
         payload.drivers.forEach((driver) => {
             const legacyEvent = {
@@ -355,24 +363,25 @@ const createWaitingQueueService = ({
                 is_reconnecting: driver.is_reconnecting,
             };
 
-            io.to(`dispatcher_${database}`).emit('waiting-driver-rank-updated', legacyEvent);
-            io.to(`admin_${database}`).emit('waiting-driver-rank-updated', legacyEvent);
-            io.to(`client_${database}`).emit('waiting-driver-rank-updated', legacyEvent);
+            io.to(`dispatcher_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
+            io.to(`admin_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
+            io.to(`client_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
         });
 
         return response;
     };
 
     const broadcastAllPlotRankUpdates = async (database, bookingId = null) => {
-        const db = getConnection(`tenant${database}`);
+        const dbName = toTenantSocketName(database);
+        const db = getConnection(toTenantDbName(dbName));
         const plotIds = new Set();
 
         for (const plotKey of plotDriverQueues.keys()) {
-            if (!plotKey.endsWith(`_${database}`)) {
+            if (!plotKey.endsWith(`_${dbName}`)) {
                 continue;
             }
 
-            const plotId = plotKey.slice(0, plotKey.length - (`_${database}`).length);
+            const plotId = plotKey.slice(0, plotKey.length - (`_${dbName}`).length);
             if (plotId) {
                 plotIds.add(plotId);
             }
@@ -389,7 +398,7 @@ const createWaitingQueueService = ({
 
         const responses = [];
         for (const plotId of plotIds) {
-            responses.push(await broadcastPlotRankUpdate(database, plotId, bookingId));
+            responses.push(await broadcastPlotRankUpdate(dbName, plotId, bookingId));
         }
 
         return responses;
@@ -467,7 +476,7 @@ const createWaitingQueueService = ({
 
     const updateDriverRankInQueue = async (database, plotId, driverId, newRank) => {
         const plotKey = plotKeyFor(plotId, database);
-        const db = getConnection(`tenant${database}`);
+        const db = getConnection(toTenantDbName(database));
 
         let queue = plotDriverQueues.get(plotKey) || [];
         if (!queue.length) {

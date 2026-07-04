@@ -98,7 +98,17 @@ let autoDispatchOfferToken = 0;
 
 const tenantSocketKey = (database, id) => {
     if (!database || id === undefined || id === null || id === '') return null;
-    return `${String(database).trim()}:${String(id).trim()}`;
+    return `${toTenantSocketName(database)}:${String(id).trim()}`;
+};
+
+const toTenantSocketName = (database) => {
+    const value = String(database || '').trim();
+    return value.replace(/^tenant/i, '');
+};
+
+const toTenantDbName = (database) => {
+    const value = toTenantSocketName(database);
+    return value ? `tenant${value}` : null;
 };
 
 const setTenantSocket = (map, database, id, socketId) => {
@@ -117,32 +127,36 @@ const deleteTenantSocket = (map, database, id) => {
 };
 
 const emitTenantDriverOffline = (database, payload) => {
-    const eventPayload = { ...payload, database };
-    io.to(`dispatcher_${database}`).emit("driver-offline-event", eventPayload);
-    io.to(`admin_${database}`).emit("driver-offline-event", eventPayload);
-    io.to(`client_${database}`).emit("driver-offline-event", eventPayload);
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit("driver-offline-event", eventPayload);
+    io.to(`admin_${dbName}`).emit("driver-offline-event", eventPayload);
+    io.to(`client_${dbName}`).emit("driver-offline-event", eventPayload);
 };
 
 const emitTenantWaitingDriver = (database, payload) => {
-    const eventPayload = { ...payload, database };
-    io.to(`dispatcher_${database}`).emit("waiting-driver-event", eventPayload);
-    io.to(`admin_${database}`).emit("waiting-driver-event", eventPayload);
-    io.to(`client_${database}`).emit("waiting-driver-event", eventPayload);
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventPayload);
+    io.to(`admin_${dbName}`).emit("waiting-driver-event", eventPayload);
+    io.to(`client_${dbName}`).emit("waiting-driver-event", eventPayload);
 };
 
 const emitTenantOnJobDriver = (database, payload) => {
-    const eventPayload = { ...payload, database };
-    io.to(`dispatcher_${database}`).emit("on-job-driver-event", eventPayload);
-    io.to(`admin_${database}`).emit("on-job-driver-event", eventPayload);
-    io.to(`client_${database}`).emit("on-job-driver-event", eventPayload);
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventPayload);
+    io.to(`admin_${dbName}`).emit("on-job-driver-event", eventPayload);
+    io.to(`client_${dbName}`).emit("on-job-driver-event", eventPayload);
 };
 
 const emitTenantRooms = (database, event, payload) => {
     if (!database || !event) return;
-    const eventPayload = { ...payload, database };
-    io.to(`dispatcher_${database}`).emit(event, eventPayload);
-    io.to(`admin_${database}`).emit(event, eventPayload);
-    io.to(`client_${database}`).emit(event, eventPayload);
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit(event, eventPayload);
+    io.to(`admin_${dbName}`).emit(event, eventPayload);
+    io.to(`client_${dbName}`).emit(event, eventPayload);
 };
 
 const clearAutoDispatchSession = (bookingIdInt) => {
@@ -444,14 +458,14 @@ const broadcastUpdatedQueue = (plotId, database, bookingId = null) => {
 };
 
 const getOrAssignRankForDriver = async (plotId, database, driverId) => {
-    const db = getConnection(`tenant${database}`);
+    const db = getConnection(toTenantDbName(database));
     const rank = await waitingQueue.getOrAssignRank(db, plotId, database, driverId);
     await waitingQueue.broadcastPlotRankUpdate(database, plotId, null);
     return rank;
 };
 
 const removeFromQueue = async (driverId, database, bookingId = null) => {
-    const db = getConnection(`tenant${database}`);
+    const db = getConnection(toTenantDbName(database));
     const changedPlots = await waitingQueue.removeFromQueue(db, driverId, database);
 
     for (const plotId of changedPlots) {
@@ -529,7 +543,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
             cancelled: counts.cancelled
         };
 
-        const dbName = tenantDb.startsWith("tenant") ? tenantDb.replace("tenant", "") : tenantDb;
+        const dbName = toTenantSocketName(tenantDb);
 
         console.log("Broadcasting dashboard cards update to company:", dbName);
 
@@ -1217,7 +1231,7 @@ io.on("connection", (socket) => {
     const userId = socket.handshake.query.user_id || socket.handshake.query.customer_id;
     const clientId = socket.handshake.query.client_id;
     const adminId = socket.handshake.query.admin_id;
-    const database = socket.handshake.query.database;
+    const database = toTenantSocketName(socket.handshake.query.database);
 
     if (database) {
         socket.join(database);
@@ -1238,7 +1252,7 @@ io.on("connection", (socket) => {
 
         (async () => {
             try {
-                const db = getConnection(`tenant${database}`);
+                const db = getConnection(toTenantDbName(database));
 
                 const [rows] = await db.query(
                     `SELECT d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name 
@@ -1324,7 +1338,7 @@ io.on("connection", (socket) => {
 
             if (dbName && driverIdFromData) {
                 try {
-                    const db = getConnection(`tenant${dbName}`);
+                    const db = getConnection(toTenantDbName(dbName));
                     const status = dataArray.driving_status || dataArray.status;
 
                     const onlineStatus = dataArray.online_status;
@@ -1366,7 +1380,7 @@ io.on("connection", (socket) => {
                 io.to(dbName).emit("driver-location-update", driver);
 
                 // Fetch real state from DB
-                const db = getConnection(`tenant${dbName}`);
+                const db = getConnection(toTenantDbName(dbName));
                 const [dbDriverRows] = await db.query(
                     `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name 
                      FROM drivers d
@@ -1443,7 +1457,7 @@ io.on("connection", (socket) => {
 
             if (!dbName || !driverIdFromData || !onlineStatus) return;
 
-            const db = getConnection(`tenant${dbName}`);
+            const db = getConnection(toTenantDbName(dbName));
             const updates = ['online_status = ?', 'updated_at = NOW()'];
             const params = [onlineStatus];
 
@@ -1467,7 +1481,7 @@ io.on("connection", (socket) => {
                 driverId: driverIdFromData,
                 reason: 'explicit_status_socket',
             });
-            await broadcastDashboardCardsUpdate(`tenant${dbName}`);
+            await broadcastDashboardCardsUpdate(toTenantDbName(dbName));
         } catch (err) {
             console.error("[driver-status-change] Error:", err.message);
         }
@@ -1528,7 +1542,7 @@ io.on("connection", (socket) => {
                 return;
             }
 
-            const db = getConnection(`tenant${dbName}`);
+            const db = getConnection(toTenantDbName(dbName));
             const plotId = data?.plot_id || null;
             const bookingId = data?.booking_id || null;
 
@@ -1601,7 +1615,7 @@ io.on("connection", (socket) => {
             if (database) {
                 (async () => {
                     try {
-                        const db = getConnection(`tenant${database}`);
+                        const db = getConnection(toTenantDbName(database));
                         const [rows] = await db.query(
                             "SELECT plot_id, driving_status, online_status FROM drivers WHERE id = ? LIMIT 1",
                             [driverId]
@@ -1637,7 +1651,7 @@ io.on("connection", (socket) => {
 
                 if (database) {
                     try {
-                        const db = getConnection(`tenant${database}`);
+                        const db = getConnection(toTenantDbName(database));
 
                         await db.query(
                             "UPDATE drivers SET online_status = 'offline' WHERE id = ?",
@@ -1676,7 +1690,7 @@ io.on("connection", (socket) => {
 app.use((req, res, next) => {
     const databaseHeader = req.headers['database'];
     if (databaseHeader) {
-        req.tenantDb = `tenant${databaseHeader}`;
+        req.tenantDb = toTenantDbName(databaseHeader);
         console.log(`Using database: ${req.tenantDb}`);
     }
     next();
@@ -1849,7 +1863,7 @@ app.get("/drivers/state", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
-        const database = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace(/^tenant/, '');
+        const database = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
         const db = getConnection(req.tenantDb);
         const snapshot = await buildDriverStateSnapshot(db, database);
 
@@ -1864,14 +1878,14 @@ app.post("/driver-status-change", async (req, res) => {
     try {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'] || req.body?.database;
-            if (dbHeader) req.tenantDb = `tenant${dbHeader}`;
+            if (dbHeader) req.tenantDb = toTenantDbName(dbHeader);
         }
 
         if (!req.tenantDb) {
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
-        const database = req.headers['database'] || req.headers['x-database'] || req.body?.database || req.tenantDb.replace(/^tenant/, '');
+        const database = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.body?.database || req.tenantDb);
         const driverId = req.body?.driver_id || req.body?.driverId || req.body?.id;
         const onlineStatus = req.body?.online_status || req.body?.status;
         const drivingStatus = req.body?.driving_status;
@@ -2160,7 +2174,7 @@ app.get("/driver/commission-entries", async (req, res) => {
                 .json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [settingsRows] = await db.query(
@@ -2286,7 +2300,7 @@ app.post("/driver/collect-commission", async (req, res) => {
                 .json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [settingsRows] = await db.query(
@@ -2673,7 +2687,7 @@ app.put("/bookings/:id", async (req, res) => {
 
         const booking = response.data?.booking;
         const dbName = databaseHeader.toString();
-        const finalDb = `tenant${dbName}`;
+        const finalDb = toTenantDbName(dbName);
 
         if (booking) {
             emitTenantRooms(dbName, "booking-updated-event", booking);
@@ -2692,7 +2706,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
         const { driver_id, assignment_type } = req.body;
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace(/^tenant/, '') : null);
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         if (!driver_id) {
             return res.status(400).json({ success: false, message: "Driver ID is required" });
@@ -2975,7 +2989,7 @@ app.post("/driver/accept-ride", async (req, res) => {
         if (rideId) {
             const bookingIdInt = parseInt(rideId, 10);
             const nearestSession = nearestDispatchSessions.get(String(bookingIdInt));
-            const acceptDbName = req.tenantDb ? req.tenantDb.replace(/^tenant/, '') : (req.headers['database'] || req.headers['x-database']);
+            const acceptDbName = toTenantSocketName(req.tenantDb || req.headers['database'] || req.headers['x-database']);
 
             if (nearestSession) {
                 notifyNearestDriversRideWithdrawn(
@@ -3109,7 +3123,7 @@ app.get("/debug/dispatch-check", async (req, res) => {
             return res.status(400).json({ error: "database query param required" });
         }
 
-        const tenantDb = `tenant${database}`;
+        const tenantDb = toTenantDbName(database);
         const db = getConnection(tenantDb);
 
         // booking info
@@ -3169,7 +3183,7 @@ app.get("/debug/tokens", async (req, res) => {
 
         let tenantDb = database;
         if (!isNaN(database)) {
-            tenantDb = `tenant${database}`;
+            tenantDb = toTenantDbName(database);
         }
 
         const db = getConnection(tenantDb);
@@ -3961,7 +3975,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
             return res.status(400).json({ success: false, message: "booking_id and tenantDb are required" });
         }
 
-        const finalDb = `tenant${tenantDb}`;
+        const finalDb = toTenantDbName(tenantDb);
         const db = getConnection(finalDb);
 
         const [bookings] = await db.query(`
@@ -4048,7 +4062,7 @@ app.post("/send-new-ride", async (req, res) => {
     try {
         const { drivers, booking, tenantDb } = req.body;
         const resolvedTenantDb = tenantDb || req.tenantDb;
-        const dbName = resolvedTenantDb ? String(resolvedTenantDb).replace(/^tenant/, '') : null;
+        const dbName = resolvedTenantDb ? toTenantSocketName(resolvedTenantDb) : null;
         const db = getConnection(resolvedTenantDb);
         let sentCount = 0;
 
@@ -4096,7 +4110,7 @@ app.post("/send-new-ride", async (req, res) => {
 app.post("/send-notification-dispatcher", (req, res) => {
     console.log("mmediate");
     const { dispatchers, booking } = req.body;
-    const dbName = req.headers['database'] || req.headers['x-database'] || req.body?.tenantDb || req.tenantDb?.replace(/^tenant/, '');
+    const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.body?.tenantDb || req.tenantDb);
     let sentCount = 0;
     dispatchers.forEach(dispatcherId => {
         const socketId = getTenantSocket(dispatcherSockets, dbName, dispatcherId);
@@ -4110,7 +4124,7 @@ app.post("/send-notification-dispatcher", (req, res) => {
 
 app.post("/change-cancel-ride", async (req, res) => {
     const { drivers, status, booking } = req.body;
-    const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb?.replace(/^tenant/, '');
+    const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
     const db = getConnection(req.tenantDb);
     let targetUserId = booking.user_id;
     if (!targetUserId) {
@@ -4341,7 +4355,7 @@ app.post("/driver-force-logout", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4349,7 +4363,7 @@ app.post("/driver-force-logout", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
         const db = getConnection(req.tenantDb);
         const driverIdStr = driverId.toString();
 
@@ -4575,7 +4589,7 @@ app.post("/dispatcher-force-logout-all", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4583,7 +4597,7 @@ app.post("/dispatcher-force-logout-all", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
             message: "You have been logged out by admin",
@@ -4682,7 +4696,7 @@ app.post("/on-job-driver", async (req, res) => {
             }
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         const eventData = {
             driver_id: finalDriverId,
@@ -4727,7 +4741,7 @@ app.post("/update-driver-rank", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4739,7 +4753,7 @@ app.post("/update-driver-rank", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing driver_id, plot_id, or rank" });
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
         const result = await applyDriverRankUpdate(dbName, plot_id, driver_id, rank);
 
         if (result.success !== 1) {
@@ -4760,7 +4774,7 @@ app.post("/waiting-driver", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4788,7 +4802,7 @@ app.post("/waiting-driver", async (req, res) => {
 
         const driver = driverRows[0];
         const plotId = driver.plot_id;
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         // ✅ FIX: plot_name already comes from LEFT JOIN — real name like "USA"
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
@@ -5015,7 +5029,7 @@ app.get("/driver/:id/riding-details", async (req, res) => {
             });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [driverRows] = await db.query(
@@ -5334,7 +5348,7 @@ app.post("/account/collect-and-email", async (req, res) => {
             return res.status(400).json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
@@ -5457,7 +5471,7 @@ app.post('/driver/send-invoice', async (req, res) => {
         const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
         if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
@@ -5540,7 +5554,7 @@ app.post('/user/send-invoice', async (req, res) => {
         const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
         if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [userRows] = await db.query("SELECT * FROM users WHERE id = ?", [user_id]);
@@ -5627,7 +5641,7 @@ app.post('/account/send-invoice', async (req, res) => {
             return res.status(400).json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
@@ -5765,7 +5779,7 @@ app.post('/sub-company/send-invoice', async (req, res) => {
             return res.status(400).json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [subCompanyRows] = await db.query("SELECT * FROM sub_companies WHERE id = ?", [sub_company_id]);
@@ -5899,7 +5913,7 @@ app.post('/driver/send-package-history', async (req, res) => {
         const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
         if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
@@ -5996,7 +6010,7 @@ setInterval(async () => {
         const database = parts.slice(1).join('_');
 
         try {
-            const db = getConnection(`tenant${database}`);
+            const db = getConnection(toTenantDbName(database));
             const driverIds = queue.map(d => d.driver_id);
 
             const [drivers] = await db.query(
