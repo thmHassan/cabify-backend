@@ -135,12 +135,9 @@ class BookingController extends Controller
                 'payment_method' => 'required',
                 'driver' => $plotDispatchEnabled ? 'nullable' : 'required_without:booking_system',
                 'booking_system' => $plotDispatchEnabled ? 'nullable' : 'required_without:driver',
+                'bidding_fallback' => 'nullable|in:yes,no,1,0,true,false',
                 'pickup_time_type' => 'nullable|in:asap,time',
             ]);
-
-            if ($plotDispatchEnabled) {
-                $request->merge(['driver' => null]);
-            }
 
             $this->bookingReminderService->validateReminderRequest($request);
 
@@ -1009,6 +1006,7 @@ class BookingController extends Controller
         $newBooking->special_request = $request->special_request;
         $newBooking->payment_reference = $request->payment_reference;
         $newBooking->booking_system = $request->booking_system;
+        $newBooking->bidding_fallback = filter_var($request->input('bidding_fallback', false), FILTER_VALIDATE_BOOLEAN);
         $newBooking->parking_charge = $request->parking_charge;
         $newBooking->waiting_charge = $request->waiting_charge;
         $newBooking->ac_fares = $request->ac_fares;
@@ -1037,7 +1035,7 @@ class BookingController extends Controller
             return;
         }
 
-        if (!$booking->is_scheduled) {
+        if (!$booking->is_scheduled && !$booking->driver) {
             $booking->driver = null;
             $booking->pending_driver_id = null;
         }

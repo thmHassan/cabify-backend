@@ -93,8 +93,18 @@ const createPlotDispatchService = ({
         return DEFAULT_DISPATCH_TIMEOUT_SECONDS * 1000;
     };
 
-    const isBiddingFallbackEnabled = async (db) => {
+    const isBiddingFallbackEnabled = async (db, bookingId = null) => {
         try {
+            if (bookingId) {
+                const [bookingRows] = await db.query(
+                    'SELECT bidding_fallback FROM bookings WHERE id = ? LIMIT 1',
+                    [bookingId]
+                );
+                if (bookingRows[0]?.bidding_fallback === 1 || bookingRows[0]?.bidding_fallback === true || bookingRows[0]?.bidding_fallback === '1') {
+                    return true;
+                }
+            }
+
             const [rows] = await db.query(
                 `SELECT status FROM dispatch_system
                  WHERE dispatch_system = 'auto_dispatch_plot_base'
@@ -270,21 +280,17 @@ const createPlotDispatchService = ({
     };
 
     const broadcastFixedFareBidding = async ({ db, dbName, booking, plotChain }) => {
-        const plotIds = (plotChain || []).map((plotId) => parseInt(plotId, 10)).filter((plotId) => !Number.isNaN(plotId));
-        if (!plotIds.length) return 0;
-
-        const placeholders = plotIds.map(() => '?').join(', ');
         const requestedVehicle = booking?.vehicle && String(booking.vehicle).trim() !== ''
             ? String(booking.vehicle).trim()
             : null;
         const vehicleSql = requestedVehicle ? 'AND d.assigned_vehicle = ?' : '';
-        const params = requestedVehicle ? [...plotIds, requestedVehicle] : plotIds;
+        const params = requestedVehicle ? [requestedVehicle] : [];
         const [drivers] = await db.query(
             `SELECT DISTINCT d.id
              FROM drivers d
              WHERE d.driving_status = 'idle'
                AND d.online_status = 'online'
-               AND d.plot_id IN (${placeholders})
+               AND d.status = 'accepted'
                ${vehicleSql}`,
             params
         );
@@ -366,7 +372,7 @@ const createPlotDispatchService = ({
     const markCycleExhausted = async ({ bookingIdInt, tenantDb, db, dbName, cycleId }) => {
         const cycle = await loadCycle(db, cycleId);
         const plotChain = cycle?.primary_plot_id ? await loadBackupPlotChain(db, cycle.primary_plot_id) : [];
-        const fallbackToBidding = await isBiddingFallbackEnabled(db);
+        const fallbackToBidding = await isBiddingFallbackEnabled(db, bookingIdInt);
         const dispatcherAction = fallbackToBidding ? exhaustedBiddingAction() : exhaustedAction();
 
         await db.query(

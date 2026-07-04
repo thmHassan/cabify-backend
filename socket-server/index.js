@@ -1736,6 +1736,9 @@ const buildDriverStateSnapshot = async (db, database) => {
         const isBusy = String(driver.driving_status || '').toLowerCase() === 'busy';
         const plotId = driver.plot_id;
         const rank = !isBusy && plotId ? await getOrAssignRankForDriver(plotId, database, driver.id) : null;
+        const runtimeKey = tenantSocketKey(database, driver.id);
+        const lastUpdate = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
+        const timeSinceUpdate = Date.now() - lastUpdate;
         const payload = {
             id: driver.id,
             driver_id: driver.id,
@@ -1751,6 +1754,7 @@ const buildDriverStateSnapshot = async (db, database) => {
             online_status: driver.online_status,
             latitude: driver.latitude,
             longitude: driver.longitude,
+            is_reconnecting: lastUpdate > 0 && timeSinceUpdate > RECONNECTING_THRESHOLD_MS && timeSinceUpdate < LOCATION_TIMEOUT_MS,
             database,
         };
 
@@ -6085,8 +6089,10 @@ setInterval(async () => {
     }
 
     for (const database of allDatabases) {
-        const hasReconnecting = Array.from(driverLastLocationTime.entries()).some(([driverIdStr, lastTime]) => {
-            return (now - lastTime) > RECONNECTING_THRESHOLD_MS && (now - lastTime) < LOCATION_TIMEOUT_MS;
+        const hasReconnecting = Array.from(driverLastLocationTime.entries()).some(([driverKey, lastTime]) => {
+            return String(driverKey).startsWith(`${database}:`)
+                && (now - lastTime) > RECONNECTING_THRESHOLD_MS
+                && (now - lastTime) < LOCATION_TIMEOUT_MS;
         });
 
         if (hasReconnecting) {

@@ -155,34 +155,39 @@ class DriverController extends Controller
             $driver->phone_no = isset($request->phone_no) ? $request->phone_no : $driver->phone_no; 
             $driver->address = isset($request->address) ? $request->address : $driver->address;
             $driver->driver_license = isset($request->driver_license) ? $request->driver_license : $driver->driver_license;
-            $driver->assigned_vehicle = isset($request->assigned_vehicle) ? $request->assigned_vehicle : $driver->assigned_vehicle;
+            $assignedVehicleId = $request->filled('assigned_vehicle') ? $request->assigned_vehicle : null;
+            if (!$assignedVehicleId && $request->filled('vehicle_type') && is_numeric($request->vehicle_type)) {
+                $assignedVehicleId = $request->vehicle_type;
+            }
 
-            if (isset($request->assigned_vehicle) && !empty($request->assigned_vehicle)) {
-                $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
+            if ($assignedVehicleId) {
+                $vehicleDetail = CompanyVehicleType::where("id", $assignedVehicleId)->first();
                 if ($vehicleDetail) {
+                    $driver->assigned_vehicle = $assignedVehicleId;
                     $driver->vehicle_name = $vehicleDetail->vehicle_type_name;
                     $driver->vehicle_type = $vehicleDetail->vehicle_type_service;
                     $driver->vehicle_service = $vehicleDetail->vehicle_type_service;
                 }
+            } else {
+                $driver->vehicle_name = $request->filled('vehicle_name') ? $request->vehicle_name : $driver->vehicle_name;
+                $driver->vehicle_type = $request->filled('vehicle_type') ? $request->vehicle_type : $driver->vehicle_type;
+                $driver->vehicle_service = $request->filled('vehicle_service') ? $request->vehicle_service : $driver->vehicle_service;
             }
 
-            $driver->vehicle_name = isset($request->vehicle_name) ? $request->vehicle_name : $driver->vehicle_name;
-            $driver->vehicle_type = isset($request->vehicle_type) ? $request->vehicle_type : $driver->vehicle_type;
-            $driver->vehicle_service = isset($request->vehicle_service) ? $request->vehicle_service : $driver->vehicle_service;
-            $driver->seats = isset($request->seats) ? $request->seats : $driver->seats;
-            $driver->color = isset($request->color) ? $request->color : $driver->color;
-            $driver->plate_no = isset($request->plate_no) ? $request->plate_no : $driver->plate_no;
-            $driver->vehicle_registration_date = isset($request->vehicle_registration_date) ? $request->vehicle_registration_date : $driver->vehicle_registration_date;
+            $driver->seats = $request->filled('seats') ? $request->seats : $driver->seats;
+            $driver->color = $request->filled('color') ? $request->color : $driver->color;
+            $driver->plate_no = $request->filled('plate_no') ? $request->plate_no : $driver->plate_no;
+            $driver->vehicle_registration_date = $request->filled('vehicle_registration_date') ? $request->vehicle_registration_date : $driver->vehicle_registration_date;
 
             $driver->joined_date = isset($request->joined_date) ? $request->joined_date : $driver->joined_date;
             $driver->sub_company = isset($request->sub_company) ? $request->sub_company : $driver->sub_company;
-            $driver->package_id = $request->package_id;
+            $driver->package_id = $request->filled('package_id') ? $request->package_id : $driver->package_id;
             $driver->bank_name = isset($request->bank_name) ? $request->bank_name : $driver->bank_name;
             $driver->bank_account_number = isset($request->bank_account_number) ? $request->bank_account_number : $driver->bank_account_number;
             $driver->account_holder_name = isset($request->account_holder_name) ? $request->account_holder_name : $driver->account_holder_name;
             $driver->bank_phone_no = isset($request->bank_phone_no) ? $request->bank_phone_no : $driver->bank_phone_no;
             $driver->iban_no = isset($request->iban_no) ? $request->iban_no : $driver->iban_no;
-            $driver->dispatcher_id = $request->dispatcher_id;
+            $driver->dispatcher_id = $request->filled('dispatcher_id') ? $request->dispatcher_id : $driver->dispatcher_id;
             $driver->save();
 
             return response()->json([

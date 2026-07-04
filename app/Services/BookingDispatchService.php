@@ -90,6 +90,12 @@ class BookingDispatchService
         $nearestDriverDispatch = !$hasDriver && $this->isNearestDriverDispatchEnabled();
         $plotDispatch = !$hasDriver && $this->isPlotDispatchEnabled();
 
+        if (!$hasDriver && $booking->booking_system === 'bidding') {
+            $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
+
+            return;
+        }
+
         if ((!$hasDriver || $alwaysBroadcast) && !$nearestDriverDispatch && !$plotDispatch) {
             if (VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking)) {
                 $this->notifyEligibleDriversForVehicleRestrictedBooking($booking, $socketApiBaseUrl);
@@ -144,8 +150,37 @@ class BookingDispatchService
         $sendRide->save();
     }
 
+    private function bookingSocketPayload(CompanyBooking $booking, array $extra = []): array
+    {
+        $booking->loadMissing('userDetail');
+
+        return array_merge([
+            'id' => $booking->id,
+            'booking_id' => $booking->booking_id,
+            'pickup_point' => $booking->pickup_point,
+            'destination_point' => $booking->destination_point,
+            'offered_amount' => $booking->offered_amount,
+            'distance' => $booking->distance,
+            'user_id' => $booking->user_id,
+            'user_name' => $booking->name,
+            'name' => $booking->name,
+            'user_profile' => $booking->userDetail->profile_image ?? null,
+            'pickup_location' => $booking->pickup_location,
+            'destination_location' => $booking->destination_location,
+            'note' => $booking->note,
+            'pickup_time' => $booking->pickup_time,
+            'booking_date' => $booking->booking_date,
+        ], $extra);
+    }
+
     private function startAutomaticDispatch(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
+        if ($booking->booking_system === 'bidding') {
+            $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
+
+            return;
+        }
+
         $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
         if ($dispatchSystems->isEmpty()) {
             return;
@@ -202,6 +237,38 @@ class BookingDispatchService
                     'pickup_time' => $booking->pickup_time,
                     'booking_date' => $booking->booking_date,
                 ],
+            ]);
+
+            $sendRide = new CompanySendNewRide;
+            $sendRide->booking_id = $booking->id;
+            $sendRide->driver_id = $driverId;
+            $sendRide->save();
+        }
+    }
+
+    private function notifyBiddingDrivers(CompanyBooking $booking, ?string $socketApiBaseUrl = null): void
+    {
+        $driverIds = CompanyDriver::query()
+            ->where('status', 'accepted')
+            ->where('driving_status', 'idle')
+            ->where('online_status', 'online')
+            ->when(
+                VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking),
+                fn ($query) => VehicleDispatchFilter::scopeDriversForBooking($query, $booking)
+            )
+            ->pluck('id');
+
+        $payload = $this->bookingSocketPayload($booking, [
+            'fixed_fare' => true,
+            'assignment_type' => 'fixed_fare_bidding',
+        ]);
+
+        foreach ($driverIds as $driverId) {
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . $this->internalSecret(),
+            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'send-new-ride'), [
+                'drivers' => [$driverId],
+                'booking' => $payload,
             ]);
 
             $sendRide = new CompanySendNewRide;

@@ -300,7 +300,7 @@ const createWaitingQueueService = ({
                     return null;
                 }
 
-                const lastUpdate = driverLastLocationTime.get(String(driver.id)) || 0;
+                const lastUpdate = driverLastLocationTime.get(`${database}:${driver.id}`) || 0;
                 const timeSince = now - lastUpdate;
                 const isReconnecting = lastUpdate > 0 && timeSince > RECONNECTING_THRESHOLD_MS;
 

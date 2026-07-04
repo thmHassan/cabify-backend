@@ -134,6 +134,7 @@ class BookingUpdateService
             'special_request',
             'payment_reference',
             'booking_system',
+            'bidding_fallback',
             'parking_charge',
             'waiting_charge',
             'ac_fares',
@@ -154,6 +155,10 @@ class BookingUpdateService
             if ($request->has($field)) {
                 $booking->{$field} = $request->input($field);
             }
+        }
+
+        if ($request->has('bidding_fallback')) {
+            $booking->bidding_fallback = filter_var($request->input('bidding_fallback'), FILTER_VALIDATE_BOOLEAN);
         }
 
         if ($request->has('vehicle') || $request->has('request_for_vehicle')) {
@@ -327,6 +332,7 @@ class BookingUpdateService
             'special_request' => $booking->special_request,
             'payment_reference' => $booking->payment_reference,
             'booking_system' => $booking->booking_system,
+            'bidding_fallback' => (bool) $booking->bidding_fallback,
             'parking_charge' => $booking->parking_charge,
             'waiting_charge' => $booking->waiting_charge,
             'ac_fares' => $booking->ac_fares,

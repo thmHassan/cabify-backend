@@ -18,6 +18,7 @@ class CompanyBooking extends Model
         'is_scheduled' => 'boolean',
         'dispatch_released' => 'boolean',
         'reminder_minutes' => 'integer',
+        'bidding_fallback' => 'boolean',
     ];
 
     public function getPreBookingAttribute(): bool
