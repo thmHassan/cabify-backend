@@ -2484,7 +2484,9 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
         const dispatcherId = req.query.dispatcher_id;
-        const dispatcherWhere = dispatcherId ? "WHERE dispatcher_id = ?" : "";
+        const scope = String(req.query.scope || "").toLowerCase();
+        const shouldFilterDispatcher = scope === "mine" && dispatcherId;
+        const dispatcherWhere = shouldFilterDispatcher ? "WHERE dispatcher_id = ?" : "";
 
         const query = `
             SELECT
@@ -2523,7 +2525,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
             ${dispatcherWhere}
         `;
 
-        const [[counts]] = await db.query(query, dispatcherId ? [dispatcherId] : []);
+        const [[counts]] = await db.query(query, shouldFilterDispatcher ? [dispatcherId] : []);
 
         return res.json({
             success: true,
@@ -2548,7 +2550,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, page = 1, limit = 10 } = req.query;
+        let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, scope, page = 1, limit = 10 } = req.query;
 console.log("Fetching bookings with query:", req.query);
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
@@ -2594,7 +2596,7 @@ console.log("Fetching bookings with query:", req.query);
         if (date) { baseQuery += ` AND DATE(b.booking_date) = ?`; params.push(date); }
         if (user_id) { baseQuery += ` AND b.user_id = ?`; params.push(user_id); }
         if (driver_id) { baseQuery += ` AND b.driver = ?`; params.push(driver_id); }
-        if (dispatcher_id) { baseQuery += ` AND b.dispatcher_id = ?`; params.push(dispatcher_id); }
+        if (dispatcher_id && String(scope || "").toLowerCase() === "mine") { baseQuery += ` AND b.dispatcher_id = ?`; params.push(dispatcher_id); }
         if (sub_company) { baseQuery += ` AND b.sub_company = ?`; params.push(sub_company); }
         if (search) {
             baseQuery += ` AND (b.booking_id LIKE ? OR b.name LIKE ? OR b.phone_no LIKE ? OR b.email LIKE ? OR d.name LIKE ? OR vt.vehicle_type_name LIKE ?)`;
