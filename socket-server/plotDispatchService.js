@@ -52,14 +52,21 @@ const createPlotDispatchService = ({
     let globalOfferToken = 0;
 
     const isPlotDispatchActive = (dispatcherAction) => isPlotDispatchInProgress(dispatcherAction);
+    const tenantSocketKey = (database, id) => (
+        database && id !== undefined && id !== null && id !== ''
+            ? `${String(database).trim()}:${String(id).trim()}`
+            : null
+    );
+    const getTenantDriverSocket = (dbName, driverId) => {
+        const key = tenantSocketKey(dbName, driverId);
+        return key ? driverSockets.get(key) : null;
+    };
 
     const emitToCompanyRooms = (dbName, event, payload) => {
-        io.to(`dispatcher_${dbName}`).emit(event, payload);
-        io.to(`admin_${dbName}`).emit(event, payload);
-        io.to(`client_${dbName}`).emit(event, payload);
-        dispatcherSockets.forEach((sid) => io.to(sid).emit(event, payload));
-        adminSockets.forEach((sid) => io.to(sid).emit(event, payload));
-        clientSockets.forEach((sid) => io.to(sid).emit(event, payload));
+        const eventPayload = { ...payload, database: dbName };
+        io.to(`dispatcher_${dbName}`).emit(event, eventPayload);
+        io.to(`admin_${dbName}`).emit(event, eventPayload);
+        io.to(`client_${dbName}`).emit(event, eventPayload);
     };
 
     const emitBookingUpdated = (dbName, booking) => {
@@ -252,8 +259,8 @@ const createPlotDispatchService = ({
         return rows[0] ?? null;
     };
 
-    const notifyDriverOfferWithdrawn = (driverId, bookingIdInt, message = 'This ride is no longer available') => {
-        const driverSocketId = driverSockets.get(String(driverId).trim());
+    const notifyDriverOfferWithdrawn = (dbName, driverId, bookingIdInt, message = 'This ride is no longer available') => {
+        const driverSocketId = getTenantDriverSocket(dbName, driverId);
         if (driverSocketId) {
             io.to(driverSocketId).emit('ride-no-longer-available', {
                 booking_id: bookingIdInt,
@@ -301,7 +308,7 @@ const createPlotDispatchService = ({
                 console.error('[PlotDispatch] Bidding send_new_rides insert error:', e.message);
             }
 
-            const socketId = driverSockets.get(String(driver.id));
+            const socketId = getTenantDriverSocket(dbName, driver.id);
             if (socketId) {
                 io.to(socketId).emit('new-ride', bookingPayload);
                 sentCount++;
@@ -533,7 +540,7 @@ const createPlotDispatchService = ({
         const updatedBooking = updatedRows[0];
         const updatedCycle = await loadCycle(db, cycleId);
 
-        const driverSocketId = driverSockets.get(String(candidate.id).trim());
+        const driverSocketId = getTenantDriverSocket(dbName, candidate.id);
         if (driverSocketId) {
             io.to(driverSocketId).emit('new-ride-request', {
                 booking_id: updatedBooking.id,
@@ -584,8 +591,7 @@ const createPlotDispatchService = ({
         emitBookingUpdated(dbName, updatedBooking);
 
         if (isFreshCycle) {
-            dispatcherSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
-            adminSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
+            emitToCompanyRooms(dbName, 'notification-ride', updatedBooking);
         }
 
         const timeoutId = setTimeout(async () => {
@@ -599,7 +605,7 @@ const createPlotDispatchService = ({
                 if (!currentBooking || currentBooking.booking_status !== 'pending' || currentBooking.driver) return;
                 if (String(currentBooking.pending_driver_id) === String(candidate.id)) {
                     await db.query('UPDATE bookings SET pending_driver_id = NULL WHERE id = ?', [bookingIdInt]);
-                    notifyDriverOfferWithdrawn(candidate.id, bookingIdInt, 'This ride offer expired');
+                    notifyDriverOfferWithdrawn(dbName, candidate.id, bookingIdInt, 'This ride offer expired');
                 }
                 plotDispatchSessions.delete(String(bookingIdInt));
                 await offerNextDriver({
@@ -779,7 +785,7 @@ const createPlotDispatchService = ({
             const notifiedDriverIds = uniqueStrings(parseJsonArray(cycle?.notified_driver_ids));
             notifiedDriverIds.forEach((notifiedId) => {
                 if (String(notifiedId) !== String(driverId)) {
-                    notifyDriverOfferWithdrawn(notifiedId, bookingIdInt, 'This ride has been accepted by another driver');
+                    notifyDriverOfferWithdrawn(dbName, notifiedId, bookingIdInt, 'This ride has been accepted by another driver');
                 }
             });
 
@@ -827,7 +833,7 @@ const createPlotDispatchService = ({
         if (!cycle || cycle.status !== 'in_progress') return { handled: false };
 
         if (String(cycle.current_driver_id) !== String(driverId)) {
-            notifyDriverOfferWithdrawn(driverId, bookingIdInt, 'This ride offer is no longer available');
+            notifyDriverOfferWithdrawn(dbName, driverId, bookingIdInt, 'This ride offer is no longer available');
             return {
                 handled: true,
                 status: 200,

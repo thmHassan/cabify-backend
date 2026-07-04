@@ -597,6 +597,29 @@ class SettingController extends Controller
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->online_status = $request->status;
             $driver->save();
+
+            $tenantId = $request->header('database') ?: $request->header('x-database');
+            $socketUrl = rtrim((string) config('services.node_socket.url'), '/');
+            $socketSecret = (string) config('services.node_socket.internal_secret');
+
+            if ($tenantId && $socketUrl && $socketSecret) {
+                try {
+                    Http::withHeaders([
+                        'Authorization' => 'Bearer ' . $socketSecret,
+                        'database' => $tenantId,
+                    ])->timeout(5)->post($socketUrl . '/driver-status-change', [
+                        'driver_id' => $driver->id,
+                        'status' => $request->status,
+                        'online_status' => $request->status,
+                    ]);
+                } catch (\Throwable $socketException) {
+                    \Log::warning('Driver status socket sync failed', [
+                        'driver_id' => $driver->id,
+                        'tenant_id' => $tenantId,
+                        'error' => $socketException->getMessage(),
+                    ]);
+                }
+            }
             
             return response()->json([
                 'success' => 1,

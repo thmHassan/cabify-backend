@@ -96,6 +96,55 @@ const autoDispatchSessions = new Map();
 const nearestDispatchSessions = new Map();
 let autoDispatchOfferToken = 0;
 
+const tenantSocketKey = (database, id) => {
+    if (!database || id === undefined || id === null || id === '') return null;
+    return `${String(database).trim()}:${String(id).trim()}`;
+};
+
+const setTenantSocket = (map, database, id, socketId) => {
+    const key = tenantSocketKey(database, id);
+    if (key) map.set(key, socketId);
+};
+
+const getTenantSocket = (map, database, id) => {
+    const key = tenantSocketKey(database, id);
+    return key ? map.get(key) : null;
+};
+
+const deleteTenantSocket = (map, database, id) => {
+    const key = tenantSocketKey(database, id);
+    if (key) map.delete(key);
+};
+
+const emitTenantDriverOffline = (database, payload) => {
+    const eventPayload = { ...payload, database };
+    io.to(`dispatcher_${database}`).emit("driver-offline-event", eventPayload);
+    io.to(`admin_${database}`).emit("driver-offline-event", eventPayload);
+    io.to(`client_${database}`).emit("driver-offline-event", eventPayload);
+};
+
+const emitTenantWaitingDriver = (database, payload) => {
+    const eventPayload = { ...payload, database };
+    io.to(`dispatcher_${database}`).emit("waiting-driver-event", eventPayload);
+    io.to(`admin_${database}`).emit("waiting-driver-event", eventPayload);
+    io.to(`client_${database}`).emit("waiting-driver-event", eventPayload);
+};
+
+const emitTenantOnJobDriver = (database, payload) => {
+    const eventPayload = { ...payload, database };
+    io.to(`dispatcher_${database}`).emit("on-job-driver-event", eventPayload);
+    io.to(`admin_${database}`).emit("on-job-driver-event", eventPayload);
+    io.to(`client_${database}`).emit("on-job-driver-event", eventPayload);
+};
+
+const emitTenantRooms = (database, event, payload) => {
+    if (!database || !event) return;
+    const eventPayload = { ...payload, database };
+    io.to(`dispatcher_${database}`).emit(event, eventPayload);
+    io.to(`admin_${database}`).emit(event, eventPayload);
+    io.to(`client_${database}`).emit(event, eventPayload);
+};
+
 const clearAutoDispatchSession = (bookingIdInt) => {
     const key = String(bookingIdInt);
     const session = autoDispatchSessions.get(key);
@@ -162,13 +211,13 @@ const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverI
     return nearestDrivers;
 };
 
-const notifyNearestDriversRideWithdrawn = (notifiedDriverIds, acceptedDriverId, bookingIdInt) => {
+const notifyNearestDriversRideWithdrawn = (dbName, notifiedDriverIds, acceptedDriverId, bookingIdInt) => {
     notifiedDriverIds.forEach((driverId) => {
         if (String(driverId) === String(acceptedDriverId)) {
             return;
         }
 
-        const driverSocketId = driverSockets.get(String(driverId).trim());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driverId);
         if (driverSocketId) {
             io.to(driverSocketId).emit('ride-no-longer-available', {
                 booking_id: bookingIdInt,
@@ -997,7 +1046,7 @@ const nearestDriverDispatch = async ({
         const [updatedRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
         const updatedBooking = updatedRows[0];
 
-        const driverSocketId = driverSockets.get(String(driver.id).trim());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driver.id);
         if (driverSocketId) {
             io.to(driverSocketId).emit('new-ride-request', {
                 booking_id: updatedBooking.id,
@@ -1177,14 +1226,15 @@ io.on("connection", (socket) => {
         console.log(`Socket connected: Role=${role}, ID=${driverId || dispatcherId || userId || adminId || clientId}, DB=${database}`);
     }
 
-    if (role === "dispatcher" && dispatcherId) dispatcherSockets.set(dispatcherId.toString(), socket.id);
-    if ((role === "user" || role === "customer") && userId) userSockets.set(userId.toString(), socket.id);
-    if (role === "client" && clientId) clientSockets.set(clientId.toString(), socket.id);
-    if (role === "admin" && adminId) adminSockets.set(adminId.toString(), socket.id);
+    if (role === "dispatcher" && dispatcherId) setTenantSocket(dispatcherSockets, database, dispatcherId, socket.id);
+    if ((role === "user" || role === "customer") && userId) setTenantSocket(userSockets, database, userId, socket.id);
+    if (role === "client" && clientId) setTenantSocket(clientSockets, database, clientId, socket.id);
+    if (role === "admin" && adminId) setTenantSocket(adminSockets, database, adminId, socket.id);
 
     if (driverId) {
-        driverSockets.set(driverId.toString(), socket.id);
-        driverLastLocationTime.set(driverId.toString(), Date.now());
+        setTenantSocket(driverSockets, database, driverId, socket.id);
+        const driverRuntimeKey = tenantSocketKey(database, driverId);
+        if (driverRuntimeKey) driverLastLocationTime.set(driverRuntimeKey, Date.now());
 
         (async () => {
             try {
@@ -1216,12 +1266,11 @@ io.on("connection", (socket) => {
                         plot_name: plotName,
                         rank: rank,
                         online_status: driver.online_status,
-                        is_reconnecting: false  // ← always false on fresh connect
+                        is_reconnecting: false,
+                        database
                     };
 
-                    io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
-                    io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
-                    io.to(`client_${database}`).emit("waiting-driver-event", emitData);
+                    emitTenantWaitingDriver(database, emitData);
                     socket.emit("waiting-driver-event", emitData);
 
                 } else {
@@ -1233,11 +1282,10 @@ io.on("connection", (socket) => {
                         driver_id: driverId,
                         driver_name: driver.name,
                         online_status: driver.online_status,
-                        driving_status: driver.driving_status
+                        driving_status: driver.driving_status,
+                        database
                     };
-                    io.to(`dispatcher_${database}`).emit("driver-offline-event", offlineData);
-                    io.to(`admin_${database}`).emit("driver-offline-event", offlineData);
-                    io.to(`client_${database}`).emit("driver-offline-event", offlineData);
+                    emitTenantDriverOffline(database, offlineData);
                 }
 
             } catch (err) {
@@ -1257,12 +1305,13 @@ io.on("connection", (socket) => {
             //     driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
             // }
             if (driverIdFromData) {
-                const prevTime = driverLastLocationTime.get(driverIdFromData.toString()) || 0;
+                const runtimeKey = tenantSocketKey(dbName, driverIdFromData);
+                const prevTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const wasReconnecting = prevTime > 0
                     && (Date.now() - prevTime) > RECONNECTING_THRESHOLD_MS
                     && (Date.now() - prevTime) < LOCATION_TIMEOUT_MS;
 
-                driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
+                if (runtimeKey) driverLastLocationTime.set(runtimeKey, Date.now());
 
                 if (wasReconnecting) {
                     const dbName = dataArray.database || socket.handshake.query.database;
@@ -1345,12 +1394,12 @@ io.on("connection", (socket) => {
                             rank: rank,
                             status: dbDriver.driving_status,
                             latitude: dbDriver.latitude,
-                            longitude: dbDriver.longitude
+                            longitude: dbDriver.longitude,
+                            online_status: dbDriver.online_status,
+                            database: dbName
                         };
 
-                        io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
-                        io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
-                        io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+                        emitTenantWaitingDriver(dbName, eventData);
                         socket.emit("waiting-driver-event", eventData);
 
                     } else {
@@ -1369,18 +1418,58 @@ io.on("connection", (socket) => {
                                 rank: null,
                                 status: dbDriver.driving_status,
                                 latitude: dbDriver.latitude,
-                                longitude: dbDriver.longitude
+                                longitude: dbDriver.longitude,
+                                online_status: dbDriver.online_status,
+                                database: dbName
                             };
 
-                            io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
-                            io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
-                            io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
+                            emitTenantOnJobDriver(dbName, eventData);
                         }
                     }
                 }
             }
         } catch (err) {
             console.error("Laravel Socket error:", err.message);
+        }
+    });
+
+    socket.on("driver-status-change", async (data) => {
+        try {
+            const payload = typeof data === "string" ? JSON.parse(data) : (data || {});
+            const dbName = payload.database || socket.handshake.query.database;
+            const driverIdFromData = payload.driver_id || payload.driverId || payload.id || socket.driverId;
+            const onlineStatus = payload.online_status || payload.status;
+            const drivingStatus = payload.driving_status;
+
+            if (!dbName || !driverIdFromData || !onlineStatus) return;
+
+            const db = getConnection(`tenant${dbName}`);
+            const updates = ['online_status = ?', 'updated_at = NOW()'];
+            const params = [onlineStatus];
+
+            if (drivingStatus) {
+                updates.unshift('driving_status = ?');
+                params.unshift(drivingStatus);
+            }
+            if (payload.latitude !== undefined && payload.longitude !== undefined) {
+                updates.unshift('longitude = ?');
+                updates.unshift('latitude = ?');
+                params.unshift(payload.longitude);
+                params.unshift(payload.latitude);
+            }
+
+            params.push(driverIdFromData);
+            await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`, params);
+
+            await emitDriverStatusForTenant({
+                db,
+                database: dbName,
+                driverId: driverIdFromData,
+                reason: 'explicit_status_socket',
+            });
+            await broadcastDashboardCardsUpdate(`tenant${dbName}`);
+        } catch (err) {
+            console.error("[driver-status-change] Error:", err.message);
         }
     });
 
@@ -1487,22 +1576,23 @@ io.on("connection", (socket) => {
         const adminId = socket.handshake.query.admin_id;
 
         if (role === "dispatcher" && dispatcherId) {
-            dispatcherSockets.delete(dispatcherId.toString());
+            deleteTenantSocket(dispatcherSockets, database, dispatcherId);
             console.log(`Dispatcher ${dispatcherId} disconnected`);
         }
-        if (role === "user" && userId) userSockets.delete(userId.toString());
-        if (role === "client" && clientId) clientSockets.delete(clientId.toString());
+        if (role === "user" && userId) deleteTenantSocket(userSockets, database, userId);
+        if (role === "client" && clientId) deleteTenantSocket(clientSockets, database, clientId);
         if (role === "admin" && adminId) {
-            adminSockets.delete(adminId.toString());
+            deleteTenantSocket(adminSockets, database, adminId);
             console.log(`Admin ${adminId} disconnected`);
         }
 
         if (driverId) {
-            driverSockets.delete(driverId.toString());
+            deleteTenantSocket(driverSockets, database, driverId);
+            const driverRuntimeKey = tenantSocketKey(database, driverId);
 
-            if (driverDisconnectTimers.has(driverId.toString())) {
-                clearTimeout(driverDisconnectTimers.get(driverId.toString()));
-                driverDisconnectTimers.delete(driverId.toString());
+            if (driverRuntimeKey && driverDisconnectTimers.has(driverRuntimeKey)) {
+                clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
+                driverDisconnectTimers.delete(driverRuntimeKey);
                 console.log(`[Disconnect] Driver #${driverId} — cancelled previous grace timer`);
             }
 
@@ -1534,16 +1624,16 @@ io.on("connection", (socket) => {
             }
 
             const timer = setTimeout(async () => {
-                driverDisconnectTimers.delete(driverId.toString());
+                if (driverRuntimeKey) driverDisconnectTimers.delete(driverRuntimeKey);
 
-                if (driverSockets.has(driverId.toString())) {
+                if (getTenantSocket(driverSockets, database, driverId)) {
                     console.log(`[GraceTimer] Driver #${driverId} already reconnected — skip offline`);
                     return;
                 }
 
                 console.log(`[GraceTimer] Driver #${driverId} — grace period expired, marking offline`);
 
-                driverLastLocationTime.delete(driverId.toString());
+                if (driverRuntimeKey) driverLastLocationTime.delete(driverRuntimeKey);
 
                 if (database) {
                     try {
@@ -1564,17 +1654,7 @@ io.on("connection", (socket) => {
                         if (plotId) broadcastUpdatedQueue(plotId, database);
                         await broadcastFullQueueToDrivers(database);
 
-                        io.to(`dispatcher_${database}`).emit("driver-offline-event", {
-                            driver_id: driverId,
-                            online_status: "offline",
-                            reason: "15 min grace period expired"
-                        });
-                        io.to(`admin_${database}`).emit("driver-offline-event", {
-                            driver_id: driverId,
-                            online_status: "offline",
-                            reason: "15 min grace period expired"
-                        });
-                        io.to(`client_${database}`).emit("driver-offline-event", {
+                        emitTenantDriverOffline(database, {
                             driver_id: driverId,
                             online_status: "offline",
                             reason: "15 min grace period expired"
@@ -1588,7 +1668,7 @@ io.on("connection", (socket) => {
                 }
             }, DISCONNECT_GRACE_MS);
 
-            driverDisconnectTimers.set(driverId.toString(), timer);
+            if (driverRuntimeKey) driverDisconnectTimers.set(driverRuntimeKey, timer);
         }
     });
 });
@@ -1637,6 +1717,199 @@ app.use(async (req, res, next) => {
         }
     }
     next();
+});
+
+const buildDriverStateSnapshot = async (db, database) => {
+    const [rows] = await db.query(
+        `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                p.name AS plot_name
+         FROM drivers d
+         LEFT JOIN plots p ON d.plot_id = p.id
+         WHERE d.online_status = 'online'
+         ORDER BY d.plot_id ASC, d.updated_at ASC, d.id ASC`
+    );
+
+    const waiting = [];
+    const onJob = [];
+
+    for (const driver of rows) {
+        const isBusy = String(driver.driving_status || '').toLowerCase() === 'busy';
+        const plotId = driver.plot_id;
+        const rank = !isBusy && plotId ? await getOrAssignRankForDriver(plotId, database, driver.id) : null;
+        const payload = {
+            id: driver.id,
+            driver_id: driver.id,
+            driverName: driver.name,
+            driver_name: driver.name,
+            name: driver.name,
+            plot: plotId,
+            plot_id: plotId,
+            plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : 'N/A'),
+            rank,
+            status: driver.driving_status || 'idle',
+            driving_status: driver.driving_status || 'idle',
+            online_status: driver.online_status,
+            latitude: driver.latitude,
+            longitude: driver.longitude,
+            database,
+        };
+
+        if (isBusy) onJob.push(payload);
+        else waiting.push(payload);
+    }
+
+    return { waiting, onJob };
+};
+
+const emitDriverStatusForTenant = async ({ db, database, driverId, reason = 'status_change' }) => {
+    const [rows] = await db.query(
+        `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                p.name AS plot_name
+         FROM drivers d
+         LEFT JOIN plots p ON d.plot_id = p.id
+         WHERE d.id = ? LIMIT 1`,
+        [driverId]
+    );
+
+    if (!rows.length) return null;
+
+    const driver = rows[0];
+    const runtimeKey = tenantSocketKey(database, driver.id);
+    const plotId = driver.plot_id;
+    const onlineStatus = String(driver.online_status || '').toLowerCase();
+    const drivingStatus = String(driver.driving_status || 'idle').toLowerCase();
+
+    if (runtimeKey && driverDisconnectTimers.has(runtimeKey)) {
+        clearTimeout(driverDisconnectTimers.get(runtimeKey));
+        driverDisconnectTimers.delete(runtimeKey);
+    }
+
+    if (onlineStatus !== 'online') {
+        await removeFromQueue(driver.id, database);
+        if (runtimeKey) driverLastLocationTime.delete(runtimeKey);
+        if (plotId) broadcastUpdatedQueue(plotId, database);
+        await broadcastFullQueueToDrivers(database);
+        emitTenantDriverOffline(database, {
+            driver_id: driver.id,
+            driver_name: driver.name,
+            online_status: 'offline',
+            driving_status: driver.driving_status,
+            reason,
+        });
+        return { state: 'offline', driver };
+    }
+
+    if (runtimeKey) driverLastLocationTime.set(runtimeKey, Date.now());
+
+    if (drivingStatus === 'busy') {
+        await removeFromQueue(driver.id, database);
+        if (plotId) broadcastUpdatedQueue(plotId, database);
+        emitTenantOnJobDriver(database, {
+            driver_id: driver.id,
+            driverName: driver.name,
+            driver_name: driver.name,
+            plot: plotId,
+            plot_id: plotId,
+            plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : 'N/A'),
+            status: driver.driving_status,
+            driving_status: driver.driving_status,
+            online_status: driver.online_status,
+            latitude: driver.latitude,
+            longitude: driver.longitude,
+        });
+        return { state: 'busy', driver };
+    }
+
+    const rank = plotId ? await getOrAssignRankForDriver(plotId, database, driver.id) : '-';
+    emitTenantWaitingDriver(database, {
+        driver_id: driver.id,
+        driverName: driver.name,
+        driver_name: driver.name,
+        plot: plotId,
+        plot_id: plotId,
+        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : 'N/A'),
+        rank,
+        status: driver.driving_status || 'idle',
+        driving_status: driver.driving_status || 'idle',
+        online_status: driver.online_status,
+        latitude: driver.latitude,
+        longitude: driver.longitude,
+        is_reconnecting: false,
+    });
+    return { state: 'waiting', driver };
+};
+
+app.get("/drivers/state", async (req, res) => {
+    try {
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const database = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace(/^tenant/, '');
+        const db = getConnection(req.tenantDb);
+        const snapshot = await buildDriverStateSnapshot(db, database);
+
+        return res.json({ success: true, data: snapshot });
+    } catch (error) {
+        console.error("Driver state snapshot error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+app.post("/driver-status-change", async (req, res) => {
+    try {
+        if (!req.tenantDb) {
+            const dbHeader = req.headers['database'] || req.headers['x-database'] || req.body?.database;
+            if (dbHeader) req.tenantDb = `tenant${dbHeader}`;
+        }
+
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const database = req.headers['database'] || req.headers['x-database'] || req.body?.database || req.tenantDb.replace(/^tenant/, '');
+        const driverId = req.body?.driver_id || req.body?.driverId || req.body?.id;
+        const onlineStatus = req.body?.online_status || req.body?.status;
+        const drivingStatus = req.body?.driving_status;
+        const latitude = req.body?.latitude;
+        const longitude = req.body?.longitude;
+
+        if (!driverId || !onlineStatus) {
+            return res.status(400).json({ success: false, message: "Missing driver_id or online_status" });
+        }
+
+        const db = getConnection(req.tenantDb);
+        const updates = ['online_status = ?', 'updated_at = NOW()'];
+        const params = [onlineStatus];
+
+        if (drivingStatus) {
+            updates.unshift('driving_status = ?');
+            params.unshift(drivingStatus);
+        }
+        if (latitude !== undefined && longitude !== undefined) {
+            updates.unshift('longitude = ?');
+            updates.unshift('latitude = ?');
+            params.unshift(longitude);
+            params.unshift(latitude);
+        }
+
+        params.push(driverId);
+        await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`, params);
+
+        const result = await emitDriverStatusForTenant({
+            db,
+            database,
+            driverId,
+            reason: 'explicit_status_change',
+        });
+
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+
+        return res.json({ success: true, data: result });
+    } catch (error) {
+        console.error("Driver status change error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
 });
 
 async function calculatePostPaidEntries(driver, settings, db) {
@@ -2399,12 +2672,7 @@ app.put("/bookings/:id", async (req, res) => {
         const finalDb = `tenant${dbName}`;
 
         if (booking) {
-            io.to(`dispatcher_${dbName}`).emit("booking-updated-event", booking);
-            io.to(`admin_${dbName}`).emit("booking-updated-event", booking);
-            io.to(`client_${dbName}`).emit("booking-updated-event", booking);
-            dispatcherSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
-            adminSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
-            clientSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
+            emitTenantRooms(dbName, "booking-updated-event", booking);
             await broadcastDashboardCardsUpdate(finalDb);
         }
 
@@ -2420,6 +2688,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
         const { driver_id, assignment_type } = req.body;
+        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace(/^tenant/, '') : null);
 
         if (!driver_id) {
             return res.status(400).json({ success: false, message: "Driver ID is required" });
@@ -2523,7 +2792,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             console.error("Store notification failed (non-fatal):", storeError.message);
         }
 
-        const driverSocketId = driverSockets.get(driver_id.toString());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driver_id);
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
@@ -2533,7 +2802,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
+        emitTenantRooms(dbName, "notification-ride", updatedBooking);
 
         return res.json({
             success: true,
@@ -2702,9 +2971,11 @@ app.post("/driver/accept-ride", async (req, res) => {
         if (rideId) {
             const bookingIdInt = parseInt(rideId, 10);
             const nearestSession = nearestDispatchSessions.get(String(bookingIdInt));
+            const acceptDbName = req.tenantDb ? req.tenantDb.replace(/^tenant/, '') : (req.headers['database'] || req.headers['x-database']);
 
             if (nearestSession) {
                 notifyNearestDriversRideWithdrawn(
+                    acceptDbName,
                     nearestSession.notifiedDriverIds ?? [],
                     driverId,
                     bookingIdInt
@@ -3758,12 +4029,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
         };
 
         const dbName = tenantDb.toString();
-        io.to(`dispatcher_${dbName}`).emit("booking-updated-event", formattedBooking);
-        io.to(`admin_${dbName}`).emit("booking-updated-event", formattedBooking);
-        io.to(`client_${dbName}`).emit("booking-updated-event", formattedBooking);
-        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
-        adminSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
-        clientSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
+        emitTenantRooms(dbName, "booking-updated-event", formattedBooking);
 
         await broadcastDashboardCardsUpdate(finalDb);
 
@@ -3777,7 +4043,9 @@ app.post("/bookings/notify-updated", async (req, res) => {
 app.post("/send-new-ride", async (req, res) => {
     try {
         const { drivers, booking, tenantDb } = req.body;
-        const db = getConnection(tenantDb || req.tenantDb);
+        const resolvedTenantDb = tenantDb || req.tenantDb;
+        const dbName = resolvedTenantDb ? String(resolvedTenantDb).replace(/^tenant/, '') : null;
+        const db = getConnection(resolvedTenantDb);
         let sentCount = 0;
 
         for (const driverId of drivers) {
@@ -3795,7 +4063,7 @@ app.post("/send-new-ride", async (req, res) => {
                 console.error("Notification error in /send-new-ride:", notifErr.message);
             }
 
-            const socketId = driverSockets.get(driverId.toString());
+            const socketId = getTenantSocket(driverSockets, dbName, driverId);
             if (socketId) {
                 if (isAccepted) {
                     io.to(socketId).emit("new-ride", booking);
@@ -3824,11 +4092,12 @@ app.post("/send-new-ride", async (req, res) => {
 app.post("/send-notification-dispatcher", (req, res) => {
     console.log("mmediate");
     const { dispatchers, booking } = req.body;
+    const dbName = req.headers['database'] || req.headers['x-database'] || req.body?.tenantDb || req.tenantDb?.replace(/^tenant/, '');
     let sentCount = 0;
     dispatchers.forEach(dispatcherId => {
-        const socketId = dispatcherSockets.get(dispatcherId.toString());
+        const socketId = getTenantSocket(dispatcherSockets, dbName, dispatcherId);
         if (socketId) {
-            io.to(socketId).emit("notification-ride", booking);
+            io.to(socketId).emit("notification-ride", { ...booking, database: dbName });
             sentCount++;
         }
     });
@@ -3837,6 +4106,7 @@ app.post("/send-notification-dispatcher", (req, res) => {
 
 app.post("/change-cancel-ride", async (req, res) => {
     const { drivers, status, booking } = req.body;
+    const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb?.replace(/^tenant/, '');
     const db = getConnection(req.tenantDb);
     let targetUserId = booking.user_id;
     if (!targetUserId) {
@@ -3892,7 +4162,7 @@ app.post("/change-cancel-ride", async (req, res) => {
 
     let sentCount = 0;
     drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
+        const socketId = getTenantSocket(driverSockets, dbName, driverId);
         if (socketId) {
             io.to(socketId).emit("driver-ride-status-event", { status, booking });
             sentCount++;
@@ -3904,10 +4174,9 @@ app.post("/change-cancel-ride", async (req, res) => {
         booking: booking,
         message: req.body.cancelled_by === 'user' ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} has been cancelled`
     };
-    dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
-    adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+    emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
     drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
+        const socketId = getTenantSocket(driverSockets, dbName, driverId);
         if (socketId) {
             io.to(socketId).emit("booking-cancelled-event", cancelNotif);
         }
@@ -4090,11 +4359,12 @@ app.post("/driver-force-logout", async (req, res) => {
         const driverName = rows[0]?.name;
 
         await removeFromQueue(driverId, dbName);
-        driverLastLocationTime.delete(driverIdStr);
+        const driverRuntimeKey = tenantSocketKey(dbName, driverIdStr);
+        if (driverRuntimeKey) driverLastLocationTime.delete(driverRuntimeKey);
 
-        if (driverDisconnectTimers.has(driverIdStr)) {
-            clearTimeout(driverDisconnectTimers.get(driverIdStr));
-            driverDisconnectTimers.delete(driverIdStr);
+        if (driverRuntimeKey && driverDisconnectTimers.has(driverRuntimeKey)) {
+            clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
+            driverDisconnectTimers.delete(driverRuntimeKey);
         }
 
         if (plotId) {
@@ -4102,7 +4372,7 @@ app.post("/driver-force-logout", async (req, res) => {
         }
         await broadcastFullQueueToDrivers(dbName);
 
-        const driverSocketId = driverSockets.get(driverIdStr);
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driverIdStr);
         if (driverSocketId) {
             io.to(driverSocketId).emit("driver-forced-offline", {
                 driver_id: driverId,
@@ -4408,23 +4678,24 @@ app.post("/on-job-driver", async (req, res) => {
             }
         }
 
+        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
+
         const eventData = {
             driver_id: finalDriverId,
             driverName: finalDriverName,
             driver_name: finalDriverName,
-            status: 'busy'
+            status: 'busy',
+            driving_status: 'busy',
+            database: dbName,
         };
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
 
-        const socketId = clientSockets.get(clientId?.toString());
+        const socketId = getTenantSocket(clientSockets, dbName, clientId);
         if (socketId) {
             io.to(socketId).emit("on-job-driver-event", eventData);
         }
 
         if (dbName) {
-            io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
-            io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
-            io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
+            emitTenantOnJobDriver(dbName, eventData);
 
             if (finalDriverId) {
                 const [plotRows] = await db.query('SELECT plot_id FROM drivers WHERE id = ? LIMIT 1', [finalDriverId]);
@@ -4497,7 +4768,8 @@ app.post("/waiting-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [driverRows] = await db.query(
-            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot, d.updated_at
+            `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                    p.name AS plot_name, d.priority_plot, d.updated_at
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              WHERE d.id = ? 
@@ -4512,6 +4784,7 @@ app.post("/waiting-driver", async (req, res) => {
 
         const driver = driverRows[0];
         const plotId = driver.plot_id;
+        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
 
         // ✅ FIX: plot_name already comes from LEFT JOIN — real name like "USA"
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
@@ -4532,23 +4805,26 @@ app.post("/waiting-driver", async (req, res) => {
             driverName: driver.name,
             driver_name: driver.name,
             plot: plotId,
+            plot_id: plotId,
             plot_name: plotName,   // ✅ Real name e.g. "USA"
-            rank: rank
+            rank: rank,
+            status: driver.driving_status,
+            driving_status: driver.driving_status,
+            online_status: driver.online_status,
+            latitude: driver.latitude,
+            longitude: driver.longitude,
+            database: dbName,
         };
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
-
-        const socketId = clientSockets.get(clientId?.toString());
+        const socketId = getTenantSocket(clientSockets, dbName, clientId);
         if (socketId) {
             io.to(socketId).emit("waiting-driver-event", eventData);
         }
 
         if (dbName) {
-            io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
-            io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
-            io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+            emitTenantWaitingDriver(dbName, eventData);
 
-            const driverSocketId = driverSockets.get(driver_id.toString());
+            const driverSocketId = getTenantSocket(driverSockets, dbName, driver_id);
             if (driverSocketId) {
                 io.to(driverSocketId).emit("waiting-driver-event", eventData);
             }
@@ -4595,7 +4871,7 @@ app.post("/send-reminder", (req, res) => {
     };
 
     if (clientId) {
-        const socketId = clientSockets.get(clientId.toString());
+        const socketId = getTenantSocket(clientSockets, dbName, clientId);
         if (socketId) {
             io.to(socketId).emit("send-reminder", payload);
         }
@@ -4608,7 +4884,7 @@ app.post("/send-reminder", (req, res) => {
     }
 
     if (driver_id) {
-        const driverSocketId = driverSockets.get(driver_id.toString());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driver_id);
         if (driverSocketId) {
             io.to(driverSocketId).emit("send-reminder", payload);
         }
@@ -5728,9 +6004,10 @@ setInterval(async () => {
 
             for (const item of [...queue]) {
                 const driverIdStr = item.driver_id;
+                const runtimeKey = tenantSocketKey(database, driverIdStr);
                 const driverDb = drivers.find(d => d.id.toString() === driverIdStr);
 
-                const lastLocationTime = driverLastLocationTime.get(driverIdStr) || 0;
+                const lastLocationTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const isTimeout = lastLocationTime > 0 && (now - lastLocationTime) > LOCATION_TIMEOUT_MS;
 
                 let shouldRemove = false;
@@ -5753,7 +6030,7 @@ setInterval(async () => {
                 if (shouldRemove) {
                     console.log(`[QueueCheck] Removing driver #${driverIdStr} from ${plotKey}: ${reason}`);
                     await removeFromQueue(driverIdStr, database);
-                    driverLastLocationTime.delete(driverIdStr);
+                    if (runtimeKey) driverLastLocationTime.delete(runtimeKey);
                     queueChanged = true;
 
                     if (isTimeout) {
@@ -5764,7 +6041,7 @@ setInterval(async () => {
                             );
                             console.log(`[QueueCheck] Driver #${driverIdStr} → offline (15 min location timeout)`);
 
-                            const driverSocketId = driverSockets.get(driverIdStr);
+                            const driverSocketId = getTenantSocket(driverSockets, database, driverIdStr);
                             if (driverSocketId) {
                                 io.to(driverSocketId).emit("driver-forced-offline", {
                                     driver_id: driverIdStr,
@@ -5836,7 +6113,8 @@ setInterval(async () => {
         for (const [plotKey, queue] of plotDriverQueues.entries()) {
             if (!plotKey.endsWith(`_${database}`)) continue;
             for (const item of queue) {
-                const lastTime = driverLastLocationTime.get(item.driver_id) || 0;
+                const runtimeKey = tenantSocketKey(database, item.driver_id);
+                const lastTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const timeSince = now - lastTime;
                 if (timeSince > RECONNECTING_THRESHOLD_MS && timeSince < LOCATION_TIMEOUT_MS) {
                     hasReconnectingDriver = true;
