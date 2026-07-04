@@ -112,9 +112,9 @@ class DriverController extends Controller
                         ->where(fn ($q) => $q->where('country_code', $request->country_code))
                         ->ignore($request->id),
                 ],
-                'address' => 'required|max:255',
-                'driver_license' => 'required|max:255',
-                'joined_date' => 'required',
+                'address' => 'nullable|max:255',
+                'driver_license' => 'nullable|max:255',
+                'joined_date' => 'nullable',
                 'profile_image' => 'nullable|image|mimes:jpg,jpeg,png,gif,webp|max:5120',
             ]);
             
@@ -151,10 +151,10 @@ class DriverController extends Controller
             $driver->name = isset($request->name) ? $request->name : $driver->name;
             $driver->email = isset($request->email) ? $request->email : $driver->email;
             $driver->country_code = isset($request->country_code) ? $request->country_code : $driver->country_code; 
-            $driver->password = isset($request->password) ? Hash::make($request->password) : $driver->password; 
+            $driver->password = $request->filled('password') ? Hash::make($request->password) : $driver->password;
             $driver->phone_no = isset($request->phone_no) ? $request->phone_no : $driver->phone_no; 
-            $driver->address = isset($request->address) ? $request->address : $driver->address;
-            $driver->driver_license = isset($request->driver_license) ? $request->driver_license : $driver->driver_license;
+            $driver->address = $request->filled('address') ? $request->address : $driver->address;
+            $driver->driver_license = $request->filled('driver_license') ? $request->driver_license : $driver->driver_license;
             $assignedVehicleId = $request->filled('assigned_vehicle') ? $request->assigned_vehicle : null;
             if (!$assignedVehicleId && $request->filled('vehicle_type') && is_numeric($request->vehicle_type)) {
                 $assignedVehicleId = $request->vehicle_type;
@@ -164,7 +164,7 @@ class DriverController extends Controller
                 $vehicleDetail = CompanyVehicleType::where("id", $assignedVehicleId)->first();
                 if ($vehicleDetail) {
                     $driver->assigned_vehicle = $assignedVehicleId;
-                    $driver->vehicle_name = $vehicleDetail->vehicle_type_name;
+                    $driver->vehicle_name = $request->filled('vehicle_name') ? $request->vehicle_name : $vehicleDetail->vehicle_type_name;
                     $driver->vehicle_type = $vehicleDetail->vehicle_type_service;
                     $driver->vehicle_service = $vehicleDetail->vehicle_type_service;
                 }
@@ -179,8 +179,8 @@ class DriverController extends Controller
             $driver->plate_no = $request->filled('plate_no') ? $request->plate_no : $driver->plate_no;
             $driver->vehicle_registration_date = $request->filled('vehicle_registration_date') ? $request->vehicle_registration_date : $driver->vehicle_registration_date;
 
-            $driver->joined_date = isset($request->joined_date) ? $request->joined_date : $driver->joined_date;
-            $driver->sub_company = isset($request->sub_company) ? $request->sub_company : $driver->sub_company;
+            $driver->joined_date = $request->filled('joined_date') ? $request->joined_date : $driver->joined_date;
+            $driver->sub_company = $request->filled('sub_company') ? $request->sub_company : $driver->sub_company;
             $driver->package_id = $request->filled('package_id') ? $request->package_id : $driver->package_id;
             $driver->bank_name = isset($request->bank_name) ? $request->bank_name : $driver->bank_name;
             $driver->bank_account_number = isset($request->bank_account_number) ? $request->bank_account_number : $driver->bank_account_number;
