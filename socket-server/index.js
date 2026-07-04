@@ -43,14 +43,56 @@ const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
 
-const preBookingsCondition = (alias = '') => {
+const formatDateInTimezone = (date = new Date(), timeZone = 'UTC') => {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+
+    const parts = Object.fromEntries(
+        formatter
+            .formatToParts(date)
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, part.value])
+    );
+
+    return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
+const sqlDateLiteral = (dateString) => `'${String(dateString).replace(/[^0-9-]/g, '')}'`;
+
+const getTenantTimezone = async (db) => {
+    try {
+        const [rows] = await db.query(
+            "SELECT company_timezone FROM settings WHERE company_timezone IS NOT NULL AND company_timezone != '' ORDER BY id DESC LIMIT 1"
+        );
+        return rows?.[0]?.company_timezone || process.env.APP_TIMEZONE || 'UTC';
+    } catch (error) {
+        console.warn('[Timezone] Could not load tenant timezone:', error.message);
+        return process.env.APP_TIMEZONE || 'UTC';
+    }
+};
+
+const getTenantTodayDate = async (db) => {
+    const timezone = await getTenantTimezone(db);
+    try {
+        return formatDateInTimezone(new Date(), timezone);
+    } catch (error) {
+        console.warn(`[Timezone] Invalid tenant timezone "${timezone}", falling back to UTC`);
+        return formatDateInTimezone(new Date(), 'UTC');
+    }
+};
+
+const preBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
 
     return `
     (${column('pickup_time_type')} = 'time' OR ${column('is_scheduled')} = 1)
     AND (${column('dispatch_released')} = 0 OR ${column('dispatch_released')} IS NULL)
     AND ${column('booking_status')} = 'pending'
-    AND DATE(${column('booking_date')}) > CURDATE()
+    AND DATE(${column('booking_date')}) > ${todayExpression}
 `;
 };
 
@@ -522,18 +564,20 @@ const storeNotification = async (db, { user_type, user_id, title, message }) => 
 const broadcastDashboardCardsUpdate = async (tenantDb) => {
     try {
         const db = getConnection(tenantDb);
+        const todayDate = await getTenantTodayDate(db);
+        const todaySql = sqlDateLiteral(todayDate);
 
         const query = `
             SELECT
                 COUNT(CASE 
-                    WHEN DATE(booking_date) = CURDATE()
+                    WHEN DATE(booking_date) = ${todaySql}
                     AND (dispatcher_action IS NULL OR dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
                     AND ${todaysBookingVisibilitySql()}
                     THEN 1 
                 END) AS todays_booking,
 
                 COUNT(CASE 
-                    WHEN ${preBookingsCondition()}
+                    WHEN ${preBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS pre_bookings,
 
@@ -2483,6 +2527,8 @@ app.post("/driver/collect-commission", async (req, res) => {
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
+        const todayDate = await getTenantTodayDate(db);
+        const todaySql = sqlDateLiteral(todayDate);
         const dispatcherId = req.query.dispatcher_id;
         const scope = String(req.query.scope || "").toLowerCase();
         const shouldFilterDispatcher = scope === "mine" && dispatcherId;
@@ -2491,14 +2537,14 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
         const query = `
             SELECT
                 COUNT(CASE 
-                    WHEN DATE(booking_date) = CURDATE()
+                    WHEN DATE(booking_date) = ${todaySql}
                     AND (dispatcher_action IS NULL OR dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
                     AND ${todaysBookingVisibilitySql()}
                     THEN 1 
                 END) AS todays_booking,
 
                 COUNT(CASE 
-                    WHEN ${preBookingsCondition()}
+                    WHEN ${preBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS pre_bookings,
 
@@ -2557,6 +2603,8 @@ console.log("Fetching bookings with query:", req.query);
         const offset = (pageNum - 1) * limitNum;
 
         const db = getConnection(req.tenantDb);
+        const todayDate = await getTenantTodayDate(db);
+        const todaySql = sqlDateLiteral(todayDate);
 
         let baseQuery = `
             FROM bookings b
@@ -2570,12 +2618,12 @@ console.log("Fetching bookings with query:", req.query);
         if (filter) {
             switch (filter) {
                 case 'todays_booking':
-                    baseQuery += ` AND DATE(b.booking_date) = CURDATE()`;
+                    baseQuery += ` AND DATE(b.booking_date) = ${todaySql}`;
                     baseQuery += ` AND (b.dispatcher_action IS NULL OR b.dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')`;
                     baseQuery += ` AND ${todaysBookingVisibilitySql('b')}`;
                     break;
                 case 'pre_bookings':
-                    baseQuery += ` AND ${preBookingsCondition('b')}`;
+                    baseQuery += ` AND ${preBookingsCondition('b', todaySql)}`;
                     break;
                 case 'completed':
                     baseQuery += ` AND b.booking_status = 'completed'`;
