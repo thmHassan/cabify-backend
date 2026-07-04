@@ -17,8 +17,6 @@ const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 const { PLOT_DISPATCH_ACTIVE_PREFIX } = require("./plotDispatchService");
 const { todaysBookingVisibilitySql } = require("./plotDispatchMessages");
 
-console.log("Loaded VIP Token:", process.env.VIP_WEBHOOK_TOKEN);
-
 const app = express();
 
 const SOCKET_API_CORS = {
@@ -296,7 +294,7 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
     const { booking_status, driver, dispatcher_action } = rows[0];
 
     if (plotDispatch.isPlotDispatchActive(dispatcher_action)) {
-        return plotDispatch.handlePlotDispatchReject({ bookingIdInt, driverId });
+        return plotDispatch.handlePlotDispatchReject({ bookingIdInt, tenantDb, driverId });
     }
 
     if (booking_status !== "pending") {

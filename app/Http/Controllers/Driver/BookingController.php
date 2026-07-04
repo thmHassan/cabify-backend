@@ -423,6 +423,10 @@ class BookingController extends Controller
             $driverId = auth('driver')->user()->id;
             $isNearestDispatchOffer = NearestDispatch::isActiveOffer($booking->dispatcher_action);
             $isPlotDispatchOffer = PlotDispatch::isActiveOffer($booking->dispatcher_action);
+            $isPlotBiddingFallback = BookingDispatchCycle::where('booking_id', $booking->id)
+                ->where('status', 'exhausted')
+                ->where('fallback_to_bidding', true)
+                ->exists();
 
             if (!VehicleDispatchFilter::driverMatchesBooking(auth('driver')->user(), $booking)) {
                 return response()->json([
@@ -431,7 +435,7 @@ class BookingController extends Controller
                 ], 403);
             }
 
-            if (!$isNearestDispatchOffer && !$isPlotDispatchOffer && $booking->driver && (string) $booking->driver !== (string) $driverId) {
+            if (!$isNearestDispatchOffer && !$isPlotDispatchOffer && !$isPlotBiddingFallback && $booking->driver && (string) $booking->driver !== (string) $driverId) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Ride already accepted by another driver',
@@ -476,7 +480,7 @@ class BookingController extends Controller
 
             $newStatus = $this->resolveStatusAfterDriverAccept($booking, $isNearestDispatchOffer);
 
-            $claimed = DB::transaction(function () use ($booking, $driverId, $bookingAmount, $newStatus, $isNearestDispatchOffer, $isPlotDispatchOffer) {
+            $claimed = DB::transaction(function () use ($request, $booking, $driverId, $bookingAmount, $newStatus, $isNearestDispatchOffer, $isPlotDispatchOffer, $isPlotBiddingFallback) {
                 if ($isPlotDispatchOffer) {
                     $cycle = BookingDispatchCycle::where('booking_id', $booking->id)
                         ->where('status', 'in_progress')
@@ -487,46 +491,87 @@ class BookingController extends Controller
                         return false;
                     }
 
-                    $notifiedDriverIds = $cycle->notified_driver_ids ?? [];
-                    if (!in_array((string) $driverId, array_map('strval', $notifiedDriverIds), true)) {
-                        $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
-                            ->where('driver_id', $driverId)
-                            ->exists();
-                        if (!$wasNotified) {
-                            return false;
-                        }
+                    if ((string) $cycle->current_driver_id !== (string) $driverId) {
+                        return false;
                     }
 
-                    $cycle->update(['status' => 'accepted']);
+                    if ($cycle->offer_expires_at && $cycle->offer_expires_at->isPast()) {
+                        return false;
+                    }
+
+                    if ($request->filled('offer_token') && (int) $request->input('offer_token') !== (int) $cycle->offer_token) {
+                        return false;
+                    }
+
+                    $cycle->update([
+                        'status' => 'accepted',
+                        'current_driver_id' => $driverId,
+                        'offer_expires_at' => null,
+                    ]);
+                } elseif ($isPlotBiddingFallback) {
+                    $cycle = BookingDispatchCycle::where('booking_id', $booking->id)
+                        ->where('status', 'exhausted')
+                        ->where('fallback_to_bidding', true)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$cycle) {
+                        return false;
+                    }
+
+                    $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
+                        ->where('driver_id', $driverId)
+                        ->exists();
+
+                    if (!$wasNotified) {
+                        return false;
+                    }
+
+                    $cycle->update([
+                        'status' => 'accepted',
+                        'current_driver_id' => $driverId,
+                        'current_driver_rank' => null,
+                        'offer_expires_at' => null,
+                    ]);
                 }
 
                 return (bool) CompanyBooking::where('id', $booking->id)
                     ->where('booking_status', 'pending')
-                    ->where(function ($query) use ($driverId, $isNearestDispatchOffer, $isPlotDispatchOffer) {
-                        if ($isNearestDispatchOffer || $isPlotDispatchOffer) {
+                    ->where(function ($query) use ($driverId, $isNearestDispatchOffer, $isPlotDispatchOffer, $isPlotBiddingFallback) {
+                        if ($isPlotDispatchOffer) {
+                            $query->where('pending_driver_id', $driverId)
+                                ->whereNull('driver');
+                        } elseif ($isNearestDispatchOffer) {
                             $query->where(function ($inner) use ($driverId) {
                                 $inner->whereNull('driver')->orWhere('driver', $driverId);
                             });
+                        } elseif ($isPlotBiddingFallback) {
+                            $query->whereNull('driver');
                         } else {
                             $query->whereNull('driver')->orWhere('driver', $driverId);
                         }
                     })
                     ->update([
                         'driver' => $driverId,
+                        'pending_driver_id' => null,
                         'booking_amount' => $bookingAmount,
                         'booking_status' => $newStatus,
                         'dispatcher_action' => $isNearestDispatchOffer
                             ? "Nearest dispatch — accepted by driver #{$driverId}"
                             : ($isPlotDispatchOffer
                                 ? PlotDispatch::acceptedAction($driverId)
-                                : $booking->dispatcher_action),
+                                : ($isPlotBiddingFallback
+                                    ? "Fixed-fare bidding fallback — accepted by driver #{$driverId}"
+                                    : $booking->dispatcher_action)),
                     ]);
             });
 
             if (!$claimed) {
                 return response()->json([
                     'error' => 1,
-                    'message' => 'Ride already accepted by another driver',
+                    'message' => ($isPlotDispatchOffer || $isPlotBiddingFallback)
+                        ? 'Ride no longer available'
+                        : 'Ride already accepted by another driver',
                 ], 409);
             }
 
@@ -677,16 +722,19 @@ class BookingController extends Controller
                 ], 404);
             }
 
-            if ($booking->booking_status !== 'pending') {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Ride is no longer available',
-                ], 400);
-            }
-
             $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
                 ->where('driver_id', $driverId)
                 ->exists();
+
+            if ($booking->booking_status !== 'pending') {
+                return response()->json([
+                    'success' => 1,
+                    'message' => $wasNotified
+                        ? 'Ride is no longer available'
+                        : 'Ride is no longer available',
+                    'skipped' => true,
+                ]);
+            }
 
             if ((string) $booking->driver !== (string) $driverId && !$wasNotified) {
                 return response()->json([

@@ -10,11 +10,6 @@ const REQUIRED_ENVS = [
     "DB_PASSWORD"
 ];
 
-REQUIRED_ENVS.forEach((key) => {
-    console.log(`${key}:`, process.env[key]);
-});
-
-
 for (const key of REQUIRED_ENVS) {
     if (process.env[key] === undefined || process.env[key] === null) {
         console.error(`Missing ENV variable: ${key}`);

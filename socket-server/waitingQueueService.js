@@ -117,7 +117,7 @@ const createWaitingQueueService = ({
 
         for (const entry of queue) {
             await db.query(
-                `INSERT INTO plot_driver_queues (plot_id, driver_id, rank, created_at, updated_at)
+                `INSERT INTO plot_driver_queues (plot_id, driver_id, \`rank\`, created_at, updated_at)
                  VALUES (?, ?, ?, NOW(), NOW())`,
                 [plotId, entry.driver_id, entry.rank]
             );
@@ -129,7 +129,7 @@ const createWaitingQueueService = ({
 
         try {
             const [rows] = await db.query(
-                'SELECT driver_id, rank FROM plot_driver_queues WHERE plot_id = ? ORDER BY rank ASC, id ASC',
+                'SELECT driver_id, `rank` FROM plot_driver_queues WHERE plot_id = ? ORDER BY `rank` ASC, id ASC',
                 [plotId]
             );
 
@@ -166,10 +166,6 @@ const createWaitingQueueService = ({
     const resolvePlotIdFromBooking = async (db, booking) => {
         if (booking?.pickup_plot_id) {
             return parseInt(booking.pickup_plot_id, 10);
-        }
-
-        if (booking?.destination_plot_id) {
-            return parseInt(booking.destination_plot_id, 10);
         }
 
         if (!booking?.pickup_point || !String(booking.pickup_point).includes(',')) {
