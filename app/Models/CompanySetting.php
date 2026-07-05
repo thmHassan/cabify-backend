@@ -10,6 +10,7 @@ class CompanySetting extends Model
     use HasFactory;
 
     public const DEFAULT_SEARCH_RADIUS_KM = 1;
+    public const DEFAULT_DISPATCH_TIMEOUT_SECONDS = 30;
     public const DEFAULT_RELEASE_LEAD_MINUTES = 60;
     public const DEFAULT_RELEASE_MODE = 'auto_then_bidding';
     public const RELEASE_MODES = [
@@ -49,6 +50,14 @@ class CompanySetting extends Model
         $parsed = (float) $radius;
 
         return $parsed >= 1 ? $parsed : static::DEFAULT_SEARCH_RADIUS_KM;
+    }
+
+    public static function resolveDispatchTimeoutSeconds(?self $settings = null): int
+    {
+        $settings = $settings ?? static::orderBy('id', 'DESC')->first();
+        $seconds = (int) ($settings?->dispatch_timeout ?? static::DEFAULT_DISPATCH_TIMEOUT_SECONDS);
+
+        return $seconds > 0 ? $seconds : static::DEFAULT_DISPATCH_TIMEOUT_SECONDS;
     }
 
     public function autoReleaseEnabled(): bool

@@ -53,9 +53,11 @@ class SettingController extends Controller
                 $data['company_timezone'] = $settings->data['time_zone'];
                 $data['company_description'] = "";
                 $data['search_radius'] = CompanySetting::resolveSearchRadiusKm();
+                $data['dispatch_timeout'] = CompanySetting::resolveDispatchTimeoutSeconds();
                 $data = (object) $data;
             } else {
                 $data->search_radius = CompanySetting::resolveSearchRadiusKm($settings);
+                $data->dispatch_timeout = CompanySetting::resolveDispatchTimeoutSeconds($settings);
             }
             return response()->json([
                 'success' => 1,
@@ -139,6 +141,9 @@ class SettingController extends Controller
 
                 $rules['search_radius'] = 'required|numeric|min:1';
             }
+            if ($request->has('dispatch_timeout') && $request->dispatch_timeout !== null && $request->dispatch_timeout !== '') {
+                $rules['dispatch_timeout'] = 'required|integer|min:5|max:300';
+            }
 
             $request->validate($rules);
 
@@ -161,6 +166,9 @@ class SettingController extends Controller
 
             if ($nearestDriverDispatchEnabled && $request->has('search_radius') && $request->search_radius !== null && $request->search_radius !== '') {
                 $settings->search_radius = $request->search_radius;
+            }
+            if ($request->has('dispatch_timeout') && $request->dispatch_timeout !== null && $request->dispatch_timeout !== '') {
+                $settings->dispatch_timeout = (int) $request->dispatch_timeout;
             }
 
             $settings->save();

@@ -154,7 +154,7 @@ const LOCATION_TIMEOUT_MS = 15 * 60 * 1000;
 const RECONNECTING_THRESHOLD_MS = 10 * 1000;
 
 const AUTO_DISPATCH_TIMEOUT_MS = 30000;
-const NEAREST_DISPATCH_TIMEOUT_MS = 90000;
+const DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS = 30;
 const NEAREST_DISPATCH_ACTIVE_PREFIX = 'NEAREST_DISPATCH_ACTIVE|';
 const ACTIVE_DISPATCH_HIDE_PREFIXES = [NEAREST_DISPATCH_ACTIVE_PREFIX, PLOT_DISPATCH_ACTIVE_PREFIX];
 const activeDispatchHideSql = (alias = '') => {
@@ -300,6 +300,24 @@ const getNearestSearchRadiusKm = async (db) => {
     }
 
     return searchRadius;
+};
+
+const getNearestDispatchTimeoutMs = async (db) => {
+    try {
+        const [settingsRows] = await db.query(
+            'SELECT dispatch_timeout FROM settings ORDER BY id DESC LIMIT 1'
+        );
+        if (settingsRows.length && settingsRows[0].dispatch_timeout) {
+            const seconds = parseInt(settingsRows[0].dispatch_timeout, 10);
+            if (!Number.isNaN(seconds) && seconds > 0) {
+                return seconds * 1000;
+            }
+        }
+    } catch (e) {
+        console.error('[NearestDispatch] Timeout setting fetch error:', e.message);
+    }
+
+    return DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS * 1000;
 };
 
 const isTruthyDbValue = (value) => (
@@ -1078,12 +1096,14 @@ const advanceNearestDispatchAfterDriverSkip = async ({
     lat,
     lng,
     searchRadius,
+    timeoutMs = null,
     driverId,
     reason,
 }) => {
+    const timeoutSeconds = Math.round((timeoutMs || DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS * 1000) / 1000);
     const actionMessage = reason === 'reject'
         ? `Nearest dispatch — driver #${driverId} rejected the ride`
-        : `Nearest dispatch — driver #${driverId} did not respond within ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s`;
+        : `Nearest dispatch — driver #${driverId} did not respond within ${timeoutSeconds}s`;
 
     try {
         await db.query(
@@ -1413,6 +1433,8 @@ const nearestDriverDispatch = async ({
         if (searchRadius === null) {
             searchRadius = await getNearestSearchRadiusKm(db);
         }
+        const dispatchTimeoutMs = await getNearestDispatchTimeoutMs(db);
+        const dispatchTimeoutSeconds = Math.round(dispatchTimeoutMs / 1000);
 
         let nearestDrivers = cachedDrivers;
         if (!nearestDrivers) {
@@ -1462,7 +1484,7 @@ const nearestDriverDispatch = async ({
             booking.booking_amount === null || booking.booking_amount === undefined || booking.booking_amount == 0
         ) ? (booking.offered_amount ?? null) : booking.booking_amount;
 
-        const actionMessage = `${NEAREST_DISPATCH_ACTIVE_PREFIX}Request sent to driver #${driver.id} (${distanceKm}km away, radius=${searchRadius}km) — waiting up to ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s`;
+        const actionMessage = `${NEAREST_DISPATCH_ACTIVE_PREFIX}Request sent to driver #${driver.id} (${distanceKm}km away, radius=${searchRadius}km) — waiting up to ${dispatchTimeoutSeconds}s`;
 
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending', dispatcher_action = ? WHERE id = ?`,
@@ -1481,23 +1503,11 @@ const nearestDriverDispatch = async ({
                 booking: updatedBooking,
                 distance_km: distanceKm,
                 search_radius: searchRadius,
-                expires_in_seconds: NEAREST_DISPATCH_TIMEOUT_MS / 1000,
+                expires_in_seconds: dispatchTimeoutSeconds,
             });
             console.log(`[NearestDispatch] Socket sent to driver #${driver.id}`);
         } else {
             console.log(`[NearestDispatch] Driver #${driver.id} not in socket map — FCM only`);
-        }
-
-        try {
-            await sendNotificationToDriver(
-                db,
-                driver.id,
-                'New Ride Nearby',
-                `You have a new ride request (${distanceKm}km away)`,
-                { booking_id: String(updatedBooking.id), type: 'new_ride' }
-            );
-        } catch (e) {
-            console.error(`[NearestDispatch] FCM error for driver #${driver.id}:`, e.message);
         }
 
         try {
@@ -1514,7 +1524,7 @@ const nearestDriverDispatch = async ({
                 booking_id: bookingIdInt,
                 driver_count: nearestDrivers.length,
                 search_radius: searchRadius,
-                expires_in_seconds: NEAREST_DISPATCH_TIMEOUT_MS / 1000,
+                expires_in_seconds: dispatchTimeoutSeconds,
                 booking: updatedBooking,
             });
         }
@@ -1528,13 +1538,14 @@ const nearestDriverDispatch = async ({
             lat,
             lng,
             searchRadius,
+            dispatchTimeoutMs,
             driverIndex,
             triedDriverIds: [...triedDriverIds],
             drivers: nearestDrivers,
             currentDriverId: driver.id,
         };
 
-        console.log(`[NearestDispatch] ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s timeout for driver #${driver.id}`);
+        console.log(`[NearestDispatch] ${dispatchTimeoutSeconds}s timeout for driver #${driver.id}`);
 
         const timeoutId = setTimeout(async () => {
             try {
@@ -1572,6 +1583,7 @@ const nearestDriverDispatch = async ({
                         lat: sessionState.lat,
                         lng: sessionState.lng,
                         searchRadius: sessionState.searchRadius,
+                        timeoutMs: sessionState.dispatchTimeoutMs,
                         driverId: driver.id,
                         reason: 'timeout',
                     });
@@ -1579,9 +1591,19 @@ const nearestDriverDispatch = async ({
             } catch (e) {
                 console.error('[NearestDispatch] Timeout error:', e.message);
             }
-        }, NEAREST_DISPATCH_TIMEOUT_MS);
+        }, dispatchTimeoutMs);
 
         nearestDispatchSessions.set(String(bookingIdInt), { ...sessionState, timeoutId });
+
+        sendNotificationToDriver(
+            db,
+            driver.id,
+            'New Ride Nearby',
+            `You have a new ride request (${distanceKm}km away)`,
+            { booking_id: String(updatedBooking.id), type: 'new_ride' }
+        ).catch((e) => {
+            console.error(`[NearestDispatch] FCM error for driver #${driver.id}:`, e.message);
+        });
     } catch (error) {
         console.error('[NearestDispatch] FATAL:', error.message);
         console.error(error.stack);
