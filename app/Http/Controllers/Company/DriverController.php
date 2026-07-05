@@ -28,6 +28,7 @@ class DriverController extends Controller
             $request->validate([
                 'name' => 'required|max:255',
                 'email' => 'required|email|unique:drivers,email',
+                'password' => 'required|string|min:6',
                 'phone_no' => [
                     'required',
                     'max:255',
@@ -37,7 +38,7 @@ class DriverController extends Controller
                 ],
                 'address' => 'required|max:255',
                 'driver_license' => 'required|max:255',
-                'joined_date' => 'required'
+                'joined_date' => 'nullable|date'
             ]);
 
             $dataCheck = (new TenantUser)
@@ -67,6 +68,7 @@ class DriverController extends Controller
             $driver = new CompanyDriver;
             $driver->name = $request->name;
             $driver->email = $request->email;
+            $driver->password = Hash::make($request->password);
             $driver->country_code = $request->country_code;
             $driver->phone_no = $request->phone_no;
             $driver->address = $request->address;
@@ -75,8 +77,8 @@ class DriverController extends Controller
             $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
             $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
             $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
-            $driver->status = "pending";
-            $driver->joined_date = $request->joined_date;
+            $driver->status = "accepted";
+            $driver->joined_date = $request->filled('joined_date') ? $request->joined_date : now()->toDateString();
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
             $driver->dispatcher_id = $request->dispatcher_id;
