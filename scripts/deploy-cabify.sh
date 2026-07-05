@@ -81,6 +81,7 @@ deploy_backend() {
     npm install --omit=dev
     cd \"\$release\"
     bash scripts/restore-public-upload-symlinks.sh \"\$release\"
+    bash scripts/restore-shared-storage-symlinks.sh \"\$release\"
     sudo chown -R www-data:www-data \"\$release/storage\" \"\$release/bootstrap/cache\"
     sudo find \"\$release/storage\" \"\$release/bootstrap/cache\" -type d -exec chmod 2775 {} +
     sudo find \"\$release/storage\" \"\$release/bootstrap/cache\" -type f -exec chmod 664 {} +
@@ -95,6 +96,7 @@ deploy_backend() {
     sudo nginx -t
     sudo systemctl reload nginx
     sudo -u www-data test -w /var/www/shared/cabify/backend/public/testcompany134/front_photo
+    sudo -u www-data test -r \"\$release/storage/app/firebase/firebase.json\"
   "
 }
 
@@ -134,4 +136,5 @@ remote "set -e
   echo dispatcher=\$(readlink -f /var/www/html/dispatcher.cabifyit.com)
   sudo -u dev pm2 describe project-socket | grep status || true
   sudo -u www-data test -w /var/www/shared/cabify/backend/public/testcompany134/front_photo
+  sudo -u www-data test -r /var/www/html/backend.cabifyit.com/storage/app/firebase/firebase.json
 "
