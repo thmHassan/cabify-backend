@@ -87,6 +87,8 @@ const getTenantTodayDate = async (db) => {
 
 const TERMINAL_BOOKING_STATUSES = ['completed', 'no_show', 'cancelled'];
 const terminalStatusesSqlList = TERMINAL_BOOKING_STATUSES.map((status) => `'${status}'`).join(', ');
+const ACTIVE_RIDE_STATUSES = ['pending_acceptance', 'ongoing', 'arrived', 'started'];
+const activeRideStatusesSqlList = ACTIVE_RIDE_STATUSES.map((status) => `'${status}'`).join(', ');
 
 const nonTerminalBookingCondition = (alias = '') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
@@ -162,6 +164,7 @@ const activeDispatchHideSql = (alias = '') => {
         .join(' AND ');
 };
 const DEFAULT_NEAREST_SEARCH_RADIUS_KM = 1;
+const RECONNECTING_ELIGIBILITY_MINUTES = 15;
 const autoDispatchSessions = new Map();
 const nearestDispatchSessions = new Map();
 let autoDispatchOfferToken = 0;
@@ -299,32 +302,176 @@ const getNearestSearchRadiusKm = async (db) => {
     return searchRadius;
 };
 
-const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverIds = []) => {
+const isTruthyDbValue = (value) => (
+    value === true
+    || value === 1
+    || value === '1'
+    || String(value || '').toLowerCase() === 'yes'
+    || String(value || '').toLowerCase() === 'true'
+);
+
+const nearestDriverBiddingFallbackEnabled = async (db, booking) => {
+    if (isTruthyDbValue(booking?.bidding_fallback)) {
+        return true;
+    }
+
+    try {
+        const [rows] = await db.query(
+            `SELECT id FROM dispatch_system
+             WHERE status = 'enable'
+             AND dispatch_system = 'auto_dispatch_nearest_driver'
+             AND steps = 'put_in_bidding_panel'
+             LIMIT 1`
+        );
+        return rows.length > 0;
+    } catch (error) {
+        console.error('[NearestDispatch] Bidding fallback setting lookup error:', error.message);
+        return false;
+    }
+};
+
+const buildActiveRideExclusion = (driverAlias = 'd', currentBookingId = null) => {
+    const params = [];
+    const bookingClauses = [];
+    if (currentBookingId) {
+        bookingClauses.push('b.id <> ?');
+        params.push(currentBookingId);
+    }
+    bookingClauses.push(`(b.driver = ${driverAlias}.id OR b.pending_driver_id = ${driverAlias}.id)`);
+    bookingClauses.push(`b.booking_status IN (${activeRideStatusesSqlList})`);
+
+    return {
+        sql: `
+        AND NOT EXISTS (
+            SELECT 1
+            FROM bookings b
+            WHERE ${bookingClauses.join('\n            AND ')}
+        )`,
+        params,
+    };
+};
+
+const buildRequestedVehicleFilter = (booking, driverAlias = 'd') => {
+    if (!booking?.vehicle) {
+        return { sql: '', params: [] };
+    }
+
+    return {
+        sql: `AND ${driverAlias}.assigned_vehicle = ?`,
+        params: [String(booking.vehicle)],
+    };
+};
+
+const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverIds = [], currentBookingId = null, booking = null) => {
     let excludeClause = '';
-    let queryParams = [lat, lng, lat];
+    let excludeParams = [];
+    const activeRideExclusion = buildActiveRideExclusion('d', currentBookingId);
+    const vehicleFilter = buildRequestedVehicleFilter(booking, 'd');
 
     if (excludeDriverIds.length > 0) {
-        excludeClause = `AND id NOT IN (${excludeDriverIds.map(() => '?').join(',')})`;
-        queryParams = [lat, lng, lat, ...excludeDriverIds];
+        excludeClause = `AND d.id NOT IN (${excludeDriverIds.map(() => '?').join(',')})`;
+        excludeParams = [...excludeDriverIds];
     }
 
     const [nearestDrivers] = await db.query(`
-        SELECT *,
+        SELECT d.*,
             (6371 * acos(
-                cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?))
-                + sin(radians(?)) * sin(radians(latitude))
+                cos(radians(?)) * cos(radians(d.latitude)) * cos(radians(d.longitude) - radians(?))
+                + sin(radians(?)) * sin(radians(d.latitude))
             )) AS distance
-        FROM drivers
-        WHERE driving_status = 'idle'
-        AND online_status = 'online'
-        AND latitude IS NOT NULL
-        AND longitude IS NOT NULL
+        FROM drivers d
+        WHERE d.driving_status = 'idle'
+        AND (
+            d.online_status = 'online'
+            OR (d.online_status = 'reconnecting' AND d.updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
+        )
+        AND d.latitude IS NOT NULL
+        AND d.longitude IS NOT NULL
+        ${activeRideExclusion.sql}
+        ${vehicleFilter.sql}
         ${excludeClause}
         HAVING distance IS NOT NULL AND distance <= ?
         ORDER BY distance ASC
-    `, [...queryParams, searchRadius]);
+    `, [
+        lat,
+        lng,
+        lat,
+        RECONNECTING_ELIGIBILITY_MINUTES,
+        ...activeRideExclusion.params,
+        ...vehicleFilter.params,
+        ...excludeParams,
+        searchRadius,
+    ]);
 
     return nearestDrivers;
+};
+
+const fetchBiddingFallbackDrivers = async (db, booking) => {
+    const activeRideExclusion = buildActiveRideExclusion('d', booking?.id);
+    const vehicleFilter = buildRequestedVehicleFilter(booking, 'd');
+
+    const [drivers] = await db.query(`
+        SELECT d.id
+        FROM drivers d
+        WHERE d.status = 'accepted'
+        AND d.driving_status = 'idle'
+        AND (
+            d.online_status = 'online'
+            OR (d.online_status = 'reconnecting' AND d.updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
+        )
+        ${activeRideExclusion.sql}
+        ${vehicleFilter.sql}
+        ORDER BY d.id ASC
+    `, [
+        RECONNECTING_ELIGIBILITY_MINUTES,
+        ...activeRideExclusion.params,
+        ...vehicleFilter.params,
+    ]);
+
+    return drivers.map((driver) => driver.id);
+};
+
+const notifyBiddingFallbackDrivers = async (db, dbName, booking) => {
+    const driverIds = await fetchBiddingFallbackDrivers(db, booking);
+    const payload = {
+        ...booking,
+        fixed_fare: true,
+        assignment_type: 'fixed_fare_bidding',
+    };
+
+    for (const driverId of driverIds) {
+        try {
+            await sendNotificationToDriver(
+                db,
+                driverId,
+                'New Ride Available',
+                'You have a new ride request',
+                { booking_id: String(booking.id), type: 'new_ride' }
+            );
+        } catch (error) {
+            console.error(`[NearestDispatch] Bidding fallback FCM error for driver #${driverId}:`, error.message);
+        }
+
+        const socketId = getTenantSocket(driverSockets, dbName, driverId);
+        if (socketId) {
+            io.to(socketId).emit('new-ride-request', {
+                booking_id: booking.id,
+                message: 'You have a new ride request',
+                booking: payload,
+            });
+        }
+
+        try {
+            await db.query(
+                'INSERT INTO send_new_rides (booking_id, driver_id, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
+                [booking.id, driverId]
+            );
+        } catch (error) {
+            console.error(`[NearestDispatch] Bidding fallback send_new_rides insert error for driver #${driverId}:`, error.message);
+        }
+    }
+
+    return driverIds.length;
 };
 
 const parseServicePlotPolygon = (plot) => {
@@ -438,6 +585,79 @@ const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName, me
     await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
 
     console.log(`[AutoDispatch] Fallback to manual dispatch for booking #${bookingIdInt}`);
+};
+
+const fallbackNearestDispatchToBidding = async ({ bookingIdInt, tenantDb, db, dbName, message }) => {
+    clearAutoDispatchSession(bookingIdInt);
+    clearNearestDispatchSession(bookingIdInt);
+
+    try {
+        await db.query(
+            `UPDATE bookings
+             SET driver = NULL,
+                 pending_driver_id = NULL,
+                 booking_status = 'pending',
+                 booking_system = 'bidding',
+                 bidding_fallback = 1,
+                 dispatcher_action = ?
+             WHERE id = ?`,
+            [message, bookingIdInt]
+        );
+    } catch (error) {
+        console.error('[NearestDispatch] Bidding fallback DB update error:', error.message);
+        await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName, message });
+        return;
+    }
+
+    let updatedBooking = null;
+    try {
+        const [updatedRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        updatedBooking = updatedRows[0];
+    } catch (error) {
+        console.error('[NearestDispatch] Bidding fallback fetch error:', error.message);
+    }
+
+    if (!updatedBooking || !io) {
+        return;
+    }
+
+    const driverCount = await notifyBiddingFallbackDrivers(db, dbName, updatedBooking);
+    const payload = {
+        booking_id: bookingIdInt,
+        message,
+        booking: updatedBooking,
+        fallback: 'bidding',
+        driver_count: driverCount,
+    };
+
+    emitTenantRooms(dbName, 'notification-ride', updatedBooking);
+    emitTenantRooms(dbName, 'new-booking-event', updatedBooking);
+    io.to(`dispatcher_${dbName}`).emit('nearest-dispatch-bidding-fallback', payload);
+    io.to(`admin_${dbName}`).emit('nearest-dispatch-bidding-fallback', payload);
+    io.to(`client_${dbName}`).emit('nearest-dispatch-bidding-fallback', payload);
+
+    await broadcastDashboardCardsUpdate(tenantDb);
+    await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
+
+    console.log(`[NearestDispatch] Fallback to bidding for booking #${bookingIdInt}; notified ${driverCount} driver(s)`);
+};
+
+const fallbackNearestDispatchAfterExhaustion = async ({ bookingIdInt, tenantDb, db, dbName, message }) => {
+    let booking = null;
+    try {
+        const [bookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        booking = bookingRows[0];
+    } catch (error) {
+        console.error('[NearestDispatch] Exhaustion booking fetch error:', error.message);
+    }
+
+    if (booking && (await nearestDriverBiddingFallbackEnabled(db, booking))) {
+        await fallbackNearestDispatchToBidding({ bookingIdInt, tenantDb, db, dbName, message });
+        return 'bidding';
+    }
+
+    await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName, message });
+    return 'manual';
 };
 
 const advanceAutoDispatchAfterDriverSkip = async ({
@@ -894,7 +1114,7 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
 
     if (!session) {
         const [rows] = await db.query(
-            'SELECT booking_status, driver, dispatcher_action FROM bookings WHERE id = ?',
+            'SELECT * FROM bookings WHERE id = ?',
             [bookingIdInt]
         );
         if (!rows.length) {
@@ -932,7 +1152,7 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
         const lat = parseFloat(latStr.trim());
         const lng = parseFloat(lngStr.trim());
         const searchRadius = await getNearestSearchRadiusKm(db);
-        const drivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius);
+        const drivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius, [], bookingIdInt, rows[0]);
         const driverIndex = drivers.findIndex((item) => String(item.id) === String(driverId));
 
         clearNearestDispatchSession(bookingIdInt);
@@ -947,12 +1167,18 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
         emitTenantRooms(dbName, 'job-rejected-by-driver', rejectEvent);
 
         if (driverIndex < 0 || driverIndex + 1 >= drivers.length) {
-            console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → manual fallback`);
-            await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName });
+            const message = 'Nearest driver dispatch completed — all nearby drivers exhausted. Booking is available for bidding or manual dispatch.';
+            console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → fallback`);
+            const fallback = await fallbackNearestDispatchAfterExhaustion({ bookingIdInt, tenantDb, db, dbName, message });
             return {
                 handled: true,
                 status: 200,
-                body: { success: true, message: 'All nearby drivers exhausted — moved to manual dispatch list' },
+                body: {
+                    success: true,
+                    message: fallback === 'bidding'
+                        ? 'All nearby drivers exhausted — moved to bidding panel'
+                        : 'All nearby drivers exhausted — moved to manual dispatch list',
+                },
             };
         }
 
@@ -1040,18 +1266,25 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
     clearNearestDispatchSession(bookingIdInt);
 
     if (sessionState.driverIndex + 1 >= sessionState.drivers.length) {
-        console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → manual fallback`);
-        await fallbackToManualDispatch({
+        const message = 'Nearest driver dispatch completed — all nearby drivers exhausted. Booking is available for bidding or manual dispatch.';
+        console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → fallback`);
+        const fallback = await fallbackNearestDispatchAfterExhaustion({
             bookingIdInt,
             tenantDb,
             db,
             dbName: sessionState.dbName,
+            message,
         });
 
         return {
             handled: true,
             status: 200,
-            body: { success: true, message: 'All nearby drivers exhausted — moved to manual dispatch list' },
+            body: {
+                success: true,
+                message: fallback === 'bidding'
+                    ? 'All nearby drivers exhausted — moved to bidding panel'
+                    : 'All nearby drivers exhausted — moved to manual dispatch list',
+            },
         };
     }
 
@@ -1183,7 +1416,15 @@ const nearestDriverDispatch = async ({
 
         let nearestDrivers = cachedDrivers;
         if (!nearestDrivers) {
-            nearestDrivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius, triedDriverIds);
+            nearestDrivers = await fetchNearbyIdleDrivers(
+                db,
+                lat,
+                lng,
+                searchRadius,
+                triedDriverIds,
+                bookingIdInt,
+                booking
+            );
         }
 
         console.log(`[NearestDispatch] Pickup: lat=${lat} lng=${lng} radius=${searchRadius}km`);
@@ -1199,13 +1440,14 @@ const nearestDriverDispatch = async ({
             const reason = !nearestDrivers.length
                 ? `no idle drivers within ${searchRadius}km`
                 : `all ${nearestDrivers.length} nearby driver(s) exhausted`;
-            console.log(`[NearestDispatch] ${reason} → manual fallback`);
-            await fallbackToManualDispatch({
+            const message = `Nearest driver dispatch completed — ${reason}. Booking is available for bidding or manual dispatch.`;
+            console.log(`[NearestDispatch] ${reason} → fallback`);
+            await fallbackNearestDispatchAfterExhaustion({
                 bookingIdInt,
                 tenantDb,
                 db,
                 dbName,
-                message: `Nearest driver dispatch completed — ${reason}. Booking is available for manual dispatch.`,
+                message,
             });
             return;
         }
