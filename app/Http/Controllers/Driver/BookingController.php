@@ -1045,14 +1045,21 @@ class BookingController extends Controller
                 $booking->driver_pickup_time = now()->format('Y-m-d H:i:s');
                 $booking->save();
 
+                $driverId = $booking->driver ?: auth('driver')->user()->id;
+                if ($driverId) {
+                    CompanyDriver::where("id", $driverId)->update(["driving_status" => "busy"]);
+                }
+
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
                 ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "ride_started",
                             'booking' => [
                                 'id' => $booking->id,
                                 'booking_id' => $booking->booking_id,
+                                'driver' => $driverId,
                                 'pickup_point' => $booking->pickup_point,
                                 'destination_point' => $booking->destination_point,
                                 'offered_amount' => $booking->offered_amount,
@@ -1115,6 +1122,8 @@ class BookingController extends Controller
             $booking->driver_dropoff_time = now()->format('Y-m-d H:i:s');
             $booking->save();
 
+            $driverId = $booking->driver ?: auth('driver')->user()->id;
+
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 'database' => $request->header('database'),
@@ -1124,6 +1133,7 @@ class BookingController extends Controller
                         'booking' => [
                             'id' => $booking->id,
                             'booking_id' => $booking->booking_id,
+                            'driver' => $driverId,
                             'pickup_point' => $booking->pickup_point,
                             'destination_point' => $booking->destination_point,
                             'offered_amount' => $booking->offered_amount,
@@ -1164,16 +1174,18 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyDriver::where("id", auth('driver')->user()->id)->first();
-            $driver->driving_status = "idle";
-            $driver->save();
+            $driver = CompanyDriver::where("id", $driverId)->first();
+            if ($driver) {
+                $driver->driving_status = "idle";
+                $driver->save();
+            }
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
                 'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
-                'driver_id' => auth('driver')->user()->id,
+                'driver_id' => $driverId,
             ]);
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();

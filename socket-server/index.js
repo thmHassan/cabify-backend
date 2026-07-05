@@ -4353,12 +4353,54 @@ app.post("/waiting-time-event", (req, res) => {
     return res.json({ success: true });
 });
 
+const reconcileDriverStatusForRideEvent = async ({ db, database, booking, status }) => {
+    if (!db || !booking?.id) return { driverId: booking?.driver || null };
+
+    const [bookingRows] = await db.query(
+        "SELECT id, booking_id, driver, booking_status FROM bookings WHERE id = ? LIMIT 1",
+        [booking.id]
+    );
+    const persistedBooking = bookingRows[0] || {};
+    const driverId = booking.driver || persistedBooking.driver;
+    if (!driverId) return { driverId: null };
+
+    const activeStatuses = ["arrived_driver", "ride_started"];
+    const terminalStatuses = ["complete_current_ride", "no_show", "driver_no_show", "cancel_confirm_ride", "cancel_ride"];
+
+    let nextDriverStatus = null;
+    if (activeStatuses.includes(status)) {
+        nextDriverStatus = "busy";
+    } else if (terminalStatuses.includes(status)) {
+        const [activeRows] = await db.query(
+            `SELECT COUNT(*) AS active_count
+             FROM bookings
+             WHERE driver = ?
+               AND id <> ?
+               AND booking_status IN ('ongoing', 'arrived', 'started')`,
+            [driverId, booking.id]
+        );
+        nextDriverStatus = Number(activeRows[0]?.active_count || 0) > 0 ? "busy" : "idle";
+    }
+
+    if (nextDriverStatus) {
+        await db.query("UPDATE drivers SET driving_status = ?, updated_at = NOW() WHERE id = ?", [nextDriverStatus, driverId]);
+        await emitDriverStatusForTenant({
+            db,
+            database,
+            driverId,
+            reason: `ride_${status}`,
+        });
+    }
+
+    return { driverId, driverStatus: nextDriverStatus };
+};
+
 app.post("/change-ride-status", async (req, res) => {
     const { userId, status, booking } = req.body;
     const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
     const normalizedStatus = status === "driver_no_show" ? "no_show" : status;
+    const db = req.tenantDb ? getConnection(req.tenantDb) : null;
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
-        const db = getConnection(req.tenantDb);
         const targetUserId = userId || booking.user_id;
 
         if (targetUserId) {
@@ -4409,6 +4451,9 @@ app.post("/change-ride-status", async (req, res) => {
             status === "ride_started" ? "started" :
             status === "complete_current_ride" ? "completed" :
             normalizedStatus;
+        const driverState = db
+            ? await reconcileDriverStatusForRideEvent({ db, database: dbName, booking, status })
+            : { driverId: booking.driver };
 
         const statusPayload = {
             id: booking.id,
@@ -4417,8 +4462,8 @@ app.post("/change-ride-status", async (req, res) => {
             booking_status: bookingStatus,
             status: bookingStatus,
             database: dbName,
-            booking: { ...booking, booking_status: bookingStatus, database: dbName },
-            driver_id: booking.driver,
+            booking: { ...booking, driver: driverState.driverId || booking.driver, booking_status: bookingStatus, database: dbName },
+            driver_id: driverState.driverId || booking.driver,
             driver_name: booking.driverDetail?.name || booking.driver_name,
             message: bookingStatus === "no_show"
                 ? `Booking #${booking.booking_id} marked as no show`
