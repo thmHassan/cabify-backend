@@ -1210,33 +1210,45 @@ class SettingController extends Controller
                 ],
             ];
 
+            $knownDispatchSystems = array_merge(array_keys($map), ['manual_dispatch_only']);
+            $selectedDispatchSystem = $request->input('selected_dispatch_system');
+            $selectedDispatchSystem = in_array($selectedDispatchSystem, $knownDispatchSystems, true)
+                ? $selectedDispatchSystem
+                : null;
+
+            if ($selectedDispatchSystem) {
+                CompanyDispatchSystem::where('dispatch_system', '!=', $selectedDispatchSystem)
+                    ->update(['status' => 'disable']);
+            }
+
             foreach ($map as $dispatchSystem => $steps) {
 
                 if (!$request->has($dispatchSystem)) {
                     continue;
                 }
 
+                $systemIsSelected = !$selectedDispatchSystem || $selectedDispatchSystem === $dispatchSystem;
                 $priority = $request->$dispatchSystem['priority'] ?? null;
 
                 foreach ($steps as $step) {
-
-                    if (!isset($request->$dispatchSystem[$step])) {
-                        continue;
-                    }
-
                     CompanyDispatchSystem::where('dispatch_system', $dispatchSystem)
                         ->where('steps', $step)
                         ->update([
-                            'status' => $request->$dispatchSystem[$step],
+                            'status' => $systemIsSelected
+                                ? ($request->$dispatchSystem[$step] ?? 'disable')
+                                : 'disable',
                             'priority' => $priority,
                         ]);
                 }
             }
 
             if ($request->has('manual_dispatch_only')) {
+                $manualIsSelected = !$selectedDispatchSystem || $selectedDispatchSystem === 'manual_dispatch_only';
                 CompanyDispatchSystem::where('dispatch_system', 'manual_dispatch_only')
                     ->update([
-                        'status' => $request->manual_dispatch_only['status'],
+                        'status' => $manualIsSelected
+                            ? $request->manual_dispatch_only['status']
+                            : 'disable',
                         'priority' => $request->manual_dispatch_only['priority'],
                     ]);
             }

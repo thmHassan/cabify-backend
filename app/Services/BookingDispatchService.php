@@ -11,6 +11,7 @@ use App\Models\CompanySetting;
 use App\Models\WalletTransaction;
 use App\Support\PlotDispatch;
 use App\Support\VehicleDispatchFilter;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Http;
 
 class BookingDispatchService
@@ -18,6 +19,10 @@ class BookingDispatchService
     public function releaseForDispatch(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         if ($booking->dispatch_released) {
+            if ($this->shouldRepairReleasedScheduledBooking($booking)) {
+                $this->startAutomaticDispatch($booking, $tenantDatabase, $socketApiBaseUrl);
+            }
+
             return;
         }
 
@@ -94,16 +99,23 @@ class BookingDispatchService
         ?string $socketApiBaseUrl = null
     ): void {
         $hasDriver = !empty($booking->driver);
-        $nearestDriverDispatch = !$hasDriver && $this->isNearestDriverDispatchEnabled();
-        $plotDispatch = !$hasDriver && $this->isPlotDispatchEnabled();
+        $dispatchSystem = $this->primaryDispatchSystem();
+        $nearestDriverDispatch = !$hasDriver && $dispatchSystem === 'auto_dispatch_nearest_driver';
+        $plotDispatch = !$hasDriver && $dispatchSystem === 'auto_dispatch_plot_base';
 
-        if (!$hasDriver && $booking->booking_system === 'bidding') {
+        if (!$hasDriver && $dispatchSystem === 'bidding') {
             $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
 
             return;
         }
 
-        if ((!$hasDriver || $alwaysBroadcast) && !$nearestDriverDispatch && !$plotDispatch) {
+        $shouldShowOnManualPanel =
+            (!$hasDriver || $alwaysBroadcast)
+            && !$nearestDriverDispatch
+            && !$plotDispatch
+            && !in_array($dispatchSystem, ['bidding', 'bidding_fixed_fare_plot_base'], true);
+
+        if ($shouldShowOnManualPanel) {
             if (VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking)) {
                 $this->notifyEligibleDriversForVehicleRestrictedBooking($booking, $socketApiBaseUrl);
             } else {
@@ -186,7 +198,14 @@ class BookingDispatchService
             ? app(PreBookingService::class)->normalizeReleaseMode($booking->dispatch_release_mode)
             : null;
 
-        if ($releaseMode === PreBookingService::RELEASE_MODE_BIDDING || $booking->booking_system === 'bidding') {
+        $dispatchSystem = $this->primaryDispatchSystem();
+        if (!$dispatchSystem || $dispatchSystem === 'manual_dispatch_only') {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - available for manual dispatch.');
+            $booking->save();
+            return;
+        }
+
+        if ($releaseMode === PreBookingService::RELEASE_MODE_BIDDING || $dispatchSystem === 'bidding') {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to bidding.');
             $booking->save();
             $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
@@ -200,27 +219,64 @@ class BookingDispatchService
             $booking->save();
         }
 
-        $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
-        if ($dispatchSystems->isEmpty()) {
-            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - available for manual dispatch.');
-            $booking->save();
-            return;
-        }
-
-        $dispatchSystem = $dispatchSystems->first()->dispatch_system;
-
         if ($dispatchSystem === 'auto_dispatch_plot_base') {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to auto dispatch.');
+            $booking->save();
+
             Http::withHeaders([
                 'database' => $tenantDatabase,
                 'Accept' => 'application/json',
             ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-auto-dispatch'));
         } elseif ($dispatchSystem === 'bidding_fixed_fare_plot_base') {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to fixed fare bidding.');
+            $booking->save();
+
             SendBiddingFixedFareNotificationJob::dispatch($booking->id, null, 0, $tenantDatabase);
         } elseif ($dispatchSystem === 'auto_dispatch_nearest_driver') {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to nearest driver dispatch.');
+            $booking->save();
+
             Http::withHeaders([
                 'database' => $tenantDatabase,
                 'Accept' => 'application/json',
             ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-nearest-dispatch'));
+        } else {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - available for manual dispatch.');
+            $booking->save();
+        }
+    }
+
+    private function shouldRepairReleasedScheduledBooking(CompanyBooking $booking): bool
+    {
+        if (!$booking->dispatch_released || !$booking->is_scheduled || $booking->booking_status !== 'pending') {
+            return false;
+        }
+
+        if ($booking->driver || $booking->pending_driver_id) {
+            return false;
+        }
+
+        if (!app(PreBookingService::class)->releaseModeAllowsAutomaticRelease($booking->dispatch_release_mode)) {
+            return false;
+        }
+
+        if (!$booking->dispatch_release_at || $this->dispatchReleaseAtIsFuture($booking->dispatch_release_at)) {
+            return false;
+        }
+
+        $action = strtolower((string) $booking->dispatcher_action);
+
+        return str_contains($action, 'scheduled for auto release');
+    }
+
+    private function dispatchReleaseAtIsFuture(CarbonInterface|string $releaseAt): bool
+    {
+        try {
+            return app(PreBookingService::class)
+                ->parseStoredDateTimeToUtc($releaseAt)
+                ->isFuture();
+        } catch (\Exception $e) {
+            return true;
         }
     }
 
@@ -336,12 +392,12 @@ class BookingDispatchService
 
     private function primaryDispatchSystem(): ?string
     {
-        $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
-        if ($dispatchSystems->isEmpty()) {
-            return null;
-        }
-
-        return $dispatchSystems->first()->dispatch_system;
+        return CompanyDispatchSystem::query()
+            ->select('dispatch_system')
+            ->where('status', 'enable')
+            ->groupBy('dispatch_system')
+            ->orderByRaw('MIN(priority) ASC')
+            ->value('dispatch_system');
     }
 
     private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void

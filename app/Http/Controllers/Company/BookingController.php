@@ -20,11 +20,15 @@ use App\Services\BookingDispatchService;
 use App\Services\BookingLocationResolver;
 use App\Services\BookingReminderService;
 use App\Services\BookingUpdateService;
+use App\Services\DuePreBookingReleaseService;
 use App\Services\PickupPlotResolver;
 use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
+use App\Support\TenantRequestContext;
 use App\Support\MapsApi;
 use App\Support\VehicleDispatchFilter;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class BookingController extends Controller
 {
@@ -35,7 +39,8 @@ class BookingController extends Controller
         private readonly BookingDispatchService $bookingDispatchService,
         private readonly BookingUpdateService $bookingUpdateService,
         private readonly PickupPlotResolver $pickupPlotResolver,
-        private readonly BookingLocationResolver $bookingLocationResolver
+        private readonly BookingLocationResolver $bookingLocationResolver,
+        private readonly DuePreBookingReleaseService $duePreBookingReleaseService
     ) {
     }
 
@@ -868,6 +873,8 @@ class BookingController extends Controller
     public function bookingList(Request $request)
     {
         try {
+            $this->releaseDuePreBookingsBeforeListing($request);
+
             $query = CompanyBooking::orderBy('booking_date', 'DESC')->orderBy('id', 'DESC');
 
             if ($request->filled('filter')) {
@@ -905,6 +912,32 @@ class BookingController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function releaseDuePreBookingsBeforeListing(Request $request): void
+    {
+        $tenantDatabase = TenantRequestContext::databaseId($request);
+        if (!$tenantDatabase) {
+            return;
+        }
+
+        $cacheKey = 'due_pre_booking_release:list:' . sha1($tenantDatabase);
+        if (!Cache::add($cacheKey, true, now()->addSeconds(20))) {
+            return;
+        }
+
+        try {
+            $this->duePreBookingReleaseService->releaseDueForCurrentTenant(
+                $tenantDatabase,
+                SocketApiUrlResolver::resolve($request),
+                25
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Panel due pre-booking release sweep failed', [
+                'tenant' => $tenantDatabase,
+                'error' => $e->getMessage(),
             ]);
         }
     }

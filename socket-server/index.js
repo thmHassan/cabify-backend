@@ -15,6 +15,7 @@ const { getMailFrom } = require("./utils/Emailconfig");
 const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 const { PLOT_DISPATCH_ACTIVE_PREFIX } = require("./plotDispatchService");
+const { createWaitingQueueService, pointInPolygon } = require("./waitingQueueService");
 
 const app = express();
 
@@ -326,6 +327,43 @@ const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverI
     return nearestDrivers;
 };
 
+const parseServicePlotPolygon = (plot) => {
+    if (!plot?.features) return null;
+
+    try {
+        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
+        const geometry = features.geometry || features;
+        let coordinates = geometry.coordinates;
+
+        if (typeof coordinates === 'string') {
+            coordinates = JSON.parse(coordinates);
+        }
+
+        if (!Array.isArray(coordinates)) return null;
+
+        return Array.isArray(coordinates[0]?.[0]) ? coordinates[0] : coordinates;
+    } catch (error) {
+        console.error('[NearestDispatch] Failed to parse service plot:', error.message);
+        return null;
+    }
+};
+
+const findServicePlotForPickup = async (db, lat, lng) => {
+    try {
+        const [plots] = await db.query('SELECT id, name, features FROM plots ORDER BY id DESC');
+        for (const plot of plots) {
+            const polygon = parseServicePlotPolygon(plot);
+            if (polygon && pointInPolygon(lat, lng, polygon)) {
+                return plot;
+            }
+        }
+    } catch (error) {
+        console.error('[NearestDispatch] Service plot lookup error:', error.message);
+    }
+
+    return null;
+};
+
 const notifyNearestDriversRideWithdrawn = (dbName, notifiedDriverIds, acceptedDriverId, bookingIdInt) => {
     notifiedDriverIds.forEach((driverId) => {
         if (String(driverId) === String(acceptedDriverId)) {
@@ -347,14 +385,14 @@ const isNearestDispatchActive = (dispatcherAction) => (
     && dispatcherAction.startsWith(NEAREST_DISPATCH_ACTIVE_PREFIX)
 );
 
-const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName }) => {
+const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName, message: fallbackMessage = null }) => {
     clearAutoDispatchSession(bookingIdInt);
     clearNearestDispatchSession(bookingIdInt);
     if (typeof plotDispatch !== 'undefined') {
         plotDispatch.clearPlotDispatchSession(bookingIdInt);
     }
 
-    const message = 'Auto dispatch completed — no driver accepted. Booking is available for manual dispatch.';
+    const message = fallbackMessage || 'Auto dispatch completed — no driver accepted. Booking is available for manual dispatch.';
 
     try {
         await db.query(
@@ -521,7 +559,6 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
     };
 };
 
-const { createWaitingQueueService } = require("./waitingQueueService");
 const { createPlotDispatchService } = require("./plotDispatchService");
 
 const waitingQueue = createWaitingQueueService({
@@ -1088,9 +1125,12 @@ const nearestDriverDispatch = async ({
 
         if (!booking.pickup_point || !booking.pickup_point.includes(',')) {
             console.log('[NearestDispatch] No valid pickup_point on booking');
-            io.to(`dispatcher_${dbName}`).emit('nearest-dispatch-failed', {
-                booking_id: bookingIdInt,
-                message: 'No pickup coordinates on booking',
+            await fallbackToManualDispatch({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                message: 'Nearest driver dispatch stopped — pickup coordinates are missing. Booking is available for manual dispatch.',
             });
             return;
         }
@@ -1099,6 +1139,42 @@ const nearestDriverDispatch = async ({
             const [latStr, lngStr] = booking.pickup_point.split(',');
             lat = parseFloat(latStr.trim());
             lng = parseFloat(lngStr.trim());
+        }
+
+        if (Number.isNaN(lat) || Number.isNaN(lng)) {
+            console.log('[NearestDispatch] Invalid pickup coordinates on booking');
+            await fallbackToManualDispatch({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                message: 'Nearest driver dispatch stopped — pickup coordinates are invalid. Booking is available for manual dispatch.',
+            });
+            return;
+        }
+
+        if (isFreshStart) {
+            const servicePlot = await findServicePlotForPickup(db, lat, lng);
+            if (!servicePlot) {
+                console.log('[NearestDispatch] Pickup is outside all service plots → manual dispatch');
+                await fallbackToManualDispatch({
+                    bookingIdInt,
+                    tenantDb,
+                    db,
+                    dbName,
+                    message: 'Nearest driver dispatch stopped — pickup is outside configured service plots. Booking is available for manual dispatch.',
+                });
+                return;
+            }
+
+            if (!booking.pickup_plot_id) {
+                try {
+                    await db.query('UPDATE bookings SET pickup_plot_id = ? WHERE id = ?', [servicePlot.id, bookingIdInt]);
+                    booking.pickup_plot_id = servicePlot.id;
+                } catch (error) {
+                    console.error('[NearestDispatch] pickup_plot_id update error:', error.message);
+                }
+            }
         }
 
         if (searchRadius === null) {
@@ -1124,7 +1200,13 @@ const nearestDriverDispatch = async ({
                 ? `no idle drivers within ${searchRadius}km`
                 : `all ${nearestDrivers.length} nearby driver(s) exhausted`;
             console.log(`[NearestDispatch] ${reason} → manual fallback`);
-            await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName });
+            await fallbackToManualDispatch({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                message: `Nearest driver dispatch completed — ${reason}. Booking is available for manual dispatch.`,
+            });
             return;
         }
 
