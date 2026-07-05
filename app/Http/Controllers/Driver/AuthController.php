@@ -21,6 +21,7 @@ use App\Services\DriverSessionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenBlacklistedException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException;
@@ -341,7 +342,19 @@ class AuthController extends Controller
             ], 400);
         }
 
-        if (!Hash::check($request->password, $user->password)) {
+        $storedPassword = (string) ($user->password ?? '');
+        $storedPasswordIsBcrypt = preg_match('/^\$2[ayb]\$/', $storedPassword) === 1;
+
+        if ($storedPasswordIsBcrypt) {
+            if (!Hash::check($request->password, $storedPassword)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Password',
+                ], 400);
+            }
+        } elseif ($storedPassword !== '' && hash_equals($storedPassword, (string) $request->password)) {
+            $user->password = Hash::make($request->password);
+        } else {
             return response()->json([
                 'error' => 1,
                 'message' => 'Invalid Password',
@@ -381,7 +394,11 @@ class AuthController extends Controller
         $request->validate([
             'firstName' => 'required|string|max:255',
             'lastName' => 'required|string|max:255',
-            'email' => 'required|email|unique:drivers,email',
+            'email' => [
+                'required',
+                'email',
+                Rule::unique('drivers', 'email')->whereNull('deleted_at'),
+            ],
             'password' => ['required', 'string', 'min:8', 'regex:/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/'],
             'confirmPassword' => 'required|same:password',
             'phone' => 'required',

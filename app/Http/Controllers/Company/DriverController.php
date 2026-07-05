@@ -27,13 +27,18 @@ class DriverController extends Controller
         try {
             $request->validate([
                 'name' => 'required|max:255',
-                'email' => 'required|email|unique:drivers,email',
+                'email' => [
+                    'required',
+                    'email',
+                    Rule::unique('drivers', 'email')->whereNull('deleted_at'),
+                ],
                 'password' => 'required|string|min:6',
                 'phone_no' => [
                     'required',
                     'max:255',
-                    Rule::unique('drivers')->where(function ($query) use ($request) {
-                        return $query->where('country_code', $request->country_code);
+                    Rule::unique('drivers', 'phone_no')->where(function ($query) use ($request) {
+                        return $query->where('country_code', $request->country_code)
+                            ->whereNull('deleted_at');
                     }),
                 ],
                 'address' => 'required|max:255',
@@ -105,13 +110,16 @@ class DriverController extends Controller
                 'email' => [
                     'required',
                     'email',
-                    Rule::unique('drivers')->ignore($request->id),
+                    Rule::unique('drivers', 'email')
+                        ->whereNull('deleted_at')
+                        ->ignore($request->id),
                 ],
                 'phone_no' => [
                     'required',
                     'max:255',
                     Rule::unique('drivers', 'phone_no')
-                        ->where(fn ($q) => $q->where('country_code', $request->country_code))
+                        ->where(fn ($q) => $q->where('country_code', $request->country_code)
+                            ->whereNull('deleted_at'))
                         ->ignore($request->id),
                 ],
                 'address' => 'nullable|max:255',
