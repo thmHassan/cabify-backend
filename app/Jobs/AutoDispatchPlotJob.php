@@ -172,8 +172,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                             // event(new BookingShownOnDispatcher($booking));
                             $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
                             Http::withHeaders([
-                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-notification-dispatcher', [
                                 'dispatchers' => $dispatchers,
                                 'booking' => [
                                     'id' => $booking->id,
@@ -200,8 +200,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                             // event(new BookingShownOnDispatcher($booking));
                             $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
                             Http::withHeaders([
-                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-notification-dispatcher', [
                                 'dispatchers' => $dispatchers,
                                 'booking' => [
                                     'id' => $booking->id,
@@ -228,8 +228,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                             // event(new BookingShownOnDispatcher($booking));
                             $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
                             Http::withHeaders([
-                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-notification-dispatcher', [
                                 'dispatchers' => $dispatchers,
                                 'booking' => [
                                     'id' => $booking->id,
@@ -256,8 +256,8 @@ class AutoDispatchPlotJob implements ShouldQueue
                             // event(new BookingShownOnDispatcher($booking));
                             $dispatchers = Dispatcher::where("status", "active")->orderBy("id", "DESC")->pluck("id");
                             Http::withHeaders([
-                                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                            ])->post(env('NODE_SOCKET_URL') . '/send-notification-dispatcher', [
+                                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-notification-dispatcher', [
                                 'dispatchers' => $dispatchers,
                                 'booking' => [
                                     'id' => $booking->id,
@@ -293,8 +293,8 @@ class AutoDispatchPlotJob implements ShouldQueue
             }
 
             $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/send-new-ride', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-new-ride', [
                 'drivers' => [$driver->id],
                 'booking' => [
                     'id' => $booking->id,

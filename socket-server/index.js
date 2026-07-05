@@ -5149,9 +5149,14 @@ app.post("/dispatcher-force-logout-all", async (req, res) => {
 
 app.post("/change-driver-ride-status", async (req, res) => {
     const { driverId, status, booking } = req.body;
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         let targetUserId = booking.user_id;
-        const db = getConnection(req.tenantDb);
+        const db = req.tenantDb ? getConnection(req.tenantDb) : null;
+
+        if (!db) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
 
         if (!targetUserId) {
             try {

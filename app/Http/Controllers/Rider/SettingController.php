@@ -301,9 +301,9 @@ class SettingController extends Controller
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/driver-message-notification', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-message-notification', [
                 'driverId' => $request->driver_id,
                 'database' => $request->header('database'),
                 'chat' => $chat

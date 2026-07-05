@@ -14,7 +14,7 @@ class FCMService
 
     protected static function credentialsPath(): string
     {
-        return env('FIREBASE_CREDENTIALS_PATH') ?: storage_path('app/firebase/firebase.json');
+        return config('services.firebase.credentials_path') ?: storage_path('app/firebase/firebase.json');
     }
 
     protected static function getAccessToken(): ?string
@@ -91,9 +91,15 @@ class FCMService
                     ->toArray();
             }
 
+            $projectId = config('services.firebase.project_id');
+            if (!$projectId) {
+                Log::error('FCM project id is not configured');
+                return null;
+            }
+
             $response = Http::withToken($accessToken)
                 ->post(
-                    'https://fcm.googleapis.com/v1/projects/' . env('FIREBASE_PROJECT_ID') . '/messages:send',
+                    'https://fcm.googleapis.com/v1/projects/' . $projectId . '/messages:send',
                     [
                         'message' => $message
                     ]

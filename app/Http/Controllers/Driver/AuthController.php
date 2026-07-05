@@ -694,8 +694,8 @@ class AuthController extends Controller
 
         if ($countDriver >= ($dataCheck->data['drivers_allowed'] ?? 0)) {
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                 'clientId' => $databaseId,
                 'title' => 'Driver Limit',
                 'description' => 'You have reached your driver limits'

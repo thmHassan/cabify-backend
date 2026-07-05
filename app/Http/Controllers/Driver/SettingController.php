@@ -302,9 +302,9 @@ class SettingController extends Controller
             $booking = CompanyBooking::where("id", $request->ride_id)->first();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/user-message-notification', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/user-message-notification', [
                 'userId' => $request->user_id,
                 'database' => $request->header('database'),
                 'chat' => $chat

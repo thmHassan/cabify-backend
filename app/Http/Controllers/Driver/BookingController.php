@@ -232,9 +232,9 @@ class BookingController extends Controller
             $vehicle = VehicleType::where("id", auth("driver")->user()->vehicle_type)->first();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/place-bid', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/place-bid', [
                         'userId' => $booking->user_id,
                         'bid' => [
                             'amount' => $newBid->amount,
@@ -314,17 +314,17 @@ class BookingController extends Controller
                 $booking->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/driver/cancel-ride', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver/cancel-ride', [
                             'ride_id' => $booking->id,
                             'cancel_reason' => $request->cancel_reason,
                         ]);
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "cancel_confirm_ride",
                             'database' => $request->header('database'),
@@ -384,9 +384,9 @@ class BookingController extends Controller
             $driver->save();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
                         'clientId' => $request->header('database'),
                         'driver_id' => auth("driver")->user()->id,
                     ]);
@@ -806,13 +806,16 @@ class BookingController extends Controller
             $driver->save();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                'database' => $request->header('database'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                         'userId' => $booking->user_id,
                         'status' => "arrived_driver",
+                        'database' => $request->header('database'),
                         'booking' => [
                             'id' => $booking->id,
                             'booking_id' => $booking->booking_id,
+                            'driver' => $booking->driver ?: auth("driver")->user()->id,
                             'pickup_point' => $booking->pickup_point,
                             'destination_point' => $booking->destination_point,
                             'offered_amount' => $booking->offered_amount,
@@ -880,10 +883,12 @@ class BookingController extends Controller
                 $waitingRecord->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/waiting-time-event', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-time-event', [
                     'userId' => $booking->user_id,
                     'status' => "start",
+                    'database' => $request->header('database'),
                     'booking' => [
                         'id' => $booking->id,
                         'booking_id' => $booking->booking_id,
@@ -918,10 +923,12 @@ class BookingController extends Controller
                 $waitingRecord->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/waiting-time-event', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-time-event', [
                     'userId' => $booking->user_id,
                     'status' => "stop",
+                    'database' => $request->header('database'),
                     'booking' => [
                         'id' => $booking->id,
                         'booking_id' => $booking->booking_id,
@@ -980,11 +987,12 @@ class BookingController extends Controller
             $driver->save();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                 'userId' => $booking->user_id,
                 'status' => "driver_no_show",
+                'database' => $request->header('database'),
                 'booking' => [
                     'id' => $booking->id,
                     'booking_id' => $booking->booking_id,
@@ -1053,11 +1061,12 @@ class BookingController extends Controller
                 }
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "ride_started",
+                            'database' => $request->header('database'),
                             'booking' => [
                                 'id' => $booking->id,
                                 'booking_id' => $booking->booking_id,
@@ -1127,11 +1136,12 @@ class BookingController extends Controller
             $driverId = $booking->driver ?: auth('driver')->user()->id;
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                         'userId' => $booking->user_id,
                         'status' => "complete_current_ride",
+                        'database' => $request->header('database'),
                         'booking' => [
                             'id' => $booking->id,
                             'booking_id' => $booking->booking_id,
@@ -1183,9 +1193,9 @@ class BookingController extends Controller
             }
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
                 'driver_id' => $driverId,
             ]);

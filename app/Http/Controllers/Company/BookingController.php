@@ -512,7 +512,7 @@ class BookingController extends Controller
 
     private function canEditBooking(Request $request): bool
     {
-        if ($request->bearerToken() === env('NODE_INTERNAL_SECRET')) {
+        if ($request->bearerToken() === config('services.node_socket.internal_secret')) {
             return true;
         }
 

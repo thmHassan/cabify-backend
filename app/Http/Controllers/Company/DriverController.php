@@ -55,8 +55,8 @@ class DriverController extends Controller
 
             if ($countDriver >= $dataCheck->data['drivers_allowed']) {
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                             'clientId' => $request->header('database'),
                             'title' => "Driver Limit",
                             'description' => "You have reached your driver limits"
@@ -1105,9 +1105,9 @@ class DriverController extends Controller
 
             try {
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/driver-message-notification', [
+                ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-message-notification', [
                     'driverId' => $request->driver_id,
                     'database' => $request->header('database'),
                     'chat' => $chatPayload,
@@ -1154,9 +1154,9 @@ class DriverController extends Controller
 
             try {
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/driver-force-logout', [
+                ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-force-logout', [
                     'driverId' => $request->driver_id,
                     'auth_version' => $driver->auth_version,
                 ]);
@@ -1336,8 +1336,8 @@ class DriverController extends Controller
 
 //             if ($countDriver >= $dataCheck->data['drivers_allowed']) {
 //                 Http::withHeaders([
-//                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-//                 ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+//                     'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+//                 ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
 //                             'clientId' => $request->header('database'),
 //                             'title' => "Driver Limit",
 //                             'description' => "You have reached your driver limits"
