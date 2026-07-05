@@ -342,19 +342,7 @@ class AuthController extends Controller
             ], 400);
         }
 
-        $storedPassword = (string) ($user->password ?? '');
-        $storedPasswordIsBcrypt = preg_match('/^\$2[ayb]\$/', $storedPassword) === 1;
-
-        if ($storedPasswordIsBcrypt) {
-            if (!Hash::check($request->password, $storedPassword)) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Invalid Password',
-                ], 400);
-            }
-        } elseif ($storedPassword !== '' && hash_equals($storedPassword, (string) $request->password)) {
-            $user->password = Hash::make($request->password);
-        } else {
+        if (!$this->passwordMatchesAndUpgrade($user, (string) $request->password)) {
             return response()->json([
                 'error' => 1,
                 'message' => 'Invalid Password',
@@ -367,11 +355,14 @@ class AuthController extends Controller
 
         $token = JWTAuth::fromUser($user);
 
+        $profileData = $this->formatDriverProfileData($user);
+
         return response()->json([
             'success' => 1,
             'message' => 'Login successful',
             'token' => $token,
-            'data' => $this->formatDriverProfileData($user),
+            'data' => $profileData,
+            'user' => $profileData,
         ]);
     }
 
@@ -940,21 +931,24 @@ class AuthController extends Controller
                 ]);
             }
 
-             if (!Hash::check($request->password, $user->password)){
-                return response()->json(['error' => 1, 'message' => 'Invalid Password']);
+            if (!$this->passwordMatchesAndUpgrade($user, (string) $request->password)){
+                return response()->json(['error' => 1, 'message' => 'Invalid Password'], 400);
             }
             
-            $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
-            $user->fcm_token = $request->fcm_token;
+            $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
+            $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
             $user->save();
 
             $token = JWTAuth::fromUser($user);
+
+            $profileData = $this->formatDriverProfileData($user);
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Login successful',
                 'token' => $token,
-                'data' => $this->formatDriverProfileData($user),
+                'data' => $profileData,
+                'user' => $profileData,
             ]);
         }
         catch(\Exception $e){
@@ -1430,6 +1424,23 @@ class AuthController extends Controller
         $data['document'] = $document;
 
         return $data;
+    }
+
+    private function passwordMatchesAndUpgrade(CompanyDriver $user, string $plainPassword): bool
+    {
+        $storedPassword = (string) ($user->password ?? '');
+        $storedPasswordIsBcrypt = preg_match('/^\$2[ayb]\$/', $storedPassword) === 1;
+
+        if ($storedPasswordIsBcrypt) {
+            return Hash::check($plainPassword, $storedPassword);
+        }
+
+        if ($storedPassword !== '' && hash_equals($storedPassword, $plainPassword)) {
+            $user->password = Hash::make($plainPassword);
+            return true;
+        }
+
+        return false;
     }
 
     private function getDriverTokenPayload(string $token)
