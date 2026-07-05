@@ -47,6 +47,7 @@ class BookingUpdateService
 
         $this->applyFields($booking, $request);
         $isScheduled = $this->reconcileDispatchState($booking, $request);
+        $this->preBookingService->applyDispatchReleaseDefaults($booking, $request);
 
         if ($request->has('reminder_minutes')) {
             $booking->reminder_minutes = $request->filled('reminder_minutes')
@@ -305,6 +306,9 @@ class BookingUpdateService
             'is_scheduled' => (bool) $booking->is_scheduled,
             'pre_booking' => $booking->pre_booking,
             'dispatch_released' => (bool) $booking->dispatch_released,
+            'dispatch_release_at' => optional($booking->dispatch_release_at)->format('Y-m-d H:i:s'),
+            'dispatch_release_mode' => $booking->dispatch_release_mode,
+            'dispatch_release_override' => (bool) $booking->dispatch_release_override,
             'reminder_minutes' => $booking->reminder_minutes,
             'booking_date' => $booking->booking_date,
             'booking_type' => $booking->booking_type,

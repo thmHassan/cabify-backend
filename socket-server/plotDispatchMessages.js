@@ -37,7 +37,10 @@ const missingPickupPlotAction = () => (
     'Pickup is outside all service plots. Manual dispatch required.'
 );
 
-const acceptedAction = (driverId) => `Plot-based dispatch — accepted by driver #${driverId}`;
+const acceptedAction = (driverName, driverId = null) => {
+    const label = driverName || (driverId ? `driver #${driverId}` : 'driver');
+    return `Plot-based dispatch - accepted by ${label}`;
+};
 
 const isPlotDispatchInProgress = (dispatcherAction) => {
     if (typeof dispatcherAction !== 'string' || dispatcherAction === '') {

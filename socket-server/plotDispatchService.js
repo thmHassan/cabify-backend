@@ -5,6 +5,7 @@ const {
     exhaustedAction,
     exhaustedBiddingAction,
     missingPickupPlotAction,
+    acceptedAction,
     isPlotDispatchInProgress,
 } = require('./plotDispatchMessages');
 
@@ -893,6 +894,12 @@ const createPlotDispatchService = ({
             }
             const [driverRows] = await db.query('SELECT id, name, profile_image FROM drivers WHERE id = ?', [driverId]);
             const driver = driverRows[0] ?? {};
+            const acceptedMessage = acceptedAction(driver.name, driverId);
+            await db.query(
+                'UPDATE bookings SET dispatcher_action = ? WHERE id = ?',
+                [acceptedMessage, bookingIdInt]
+            );
+            booking.dispatcher_action = acceptedMessage;
             const cycle = await loadCycleByBooking(db, bookingIdInt);
             const notifiedDriverIds = uniqueStrings(parseJsonArray(cycle?.notified_driver_ids));
             notifiedDriverIds.forEach((notifiedId) => {
@@ -908,7 +915,7 @@ const createPlotDispatchService = ({
                 driver_profile_image: driver.profile_image ?? null,
                 dispatcher_action: booking.dispatcher_action,
                 booking,
-                message: `Driver #${driverId} accepted the ride`,
+                message: driver.name ? `${driver.name} accepted the ride` : `Driver #${driverId} accepted the ride`,
             };
 
             emitToCompanyRooms(dbName, 'job-accepted-by-driver', eventData);

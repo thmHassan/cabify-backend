@@ -25,6 +25,13 @@ class BookingDispatchService
             return;
         }
 
+        if (!app(PreBookingService::class)->releaseModeAllowsAutomaticRelease($booking->dispatch_release_mode)) {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - held for manual review.');
+            $booking->save();
+
+            return;
+        }
+
         if ($booking->pending_driver_id && !$booking->driver) {
             $booking->driver = $booking->pending_driver_id;
             $booking->pending_driver_id = null;
@@ -175,14 +182,28 @@ class BookingDispatchService
 
     private function startAutomaticDispatch(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
-        if ($booking->booking_system === 'bidding') {
+        $releaseMode = $booking->dispatch_release_mode
+            ? app(PreBookingService::class)->normalizeReleaseMode($booking->dispatch_release_mode)
+            : null;
+
+        if ($releaseMode === PreBookingService::RELEASE_MODE_BIDDING || $booking->booking_system === 'bidding') {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to bidding.');
+            $booking->save();
             $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
 
             return;
         }
 
+        if ($releaseMode === PreBookingService::RELEASE_MODE_AUTO_THEN_BIDDING) {
+            $booking->booking_system = 'auto_dispatch';
+            $booking->bidding_fallback = true;
+            $booking->save();
+        }
+
         $dispatchSystems = CompanyDispatchSystem::where('status', 'enable')->orderBy('priority', 'ASC')->get();
         if ($dispatchSystems->isEmpty()) {
+            $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - available for manual dispatch.');
+            $booking->save();
             return;
         }
 
@@ -201,6 +222,17 @@ class BookingDispatchService
                 'Accept' => 'application/json',
             ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-nearest-dispatch'));
         }
+    }
+
+    private function withCreatorLog(CompanyBooking $booking, string $message): string
+    {
+        $current = trim((string) $booking->dispatcher_action);
+
+        if (preg_match('/^(Created by [^.]+\\.)/i', $current, $matches)) {
+            return trim($matches[1] . ' ' . $message);
+        }
+
+        return $message;
     }
 
     private function notifyEligibleDriversForVehicleRestrictedBooking(CompanyBooking $booking, ?string $socketApiBaseUrl = null): void

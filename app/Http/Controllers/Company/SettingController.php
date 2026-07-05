@@ -1241,6 +1241,28 @@ class SettingController extends Controller
                     ]);
             }
 
+            if ($request->has('auto_release')) {
+                $release = $request->input('auto_release', []);
+                $settings = CompanySetting::orderBy('id', 'DESC')->first() ?? new CompanySetting;
+
+                if (array_key_exists('enabled', $release)) {
+                    $settings->auto_release_enabled = filter_var($release['enabled'], FILTER_VALIDATE_BOOLEAN);
+                }
+
+                if (array_key_exists('lead_minutes', $release)) {
+                    $settings->default_release_lead_minutes = max(0, min((int) $release['lead_minutes'], 1440));
+                }
+
+                if (array_key_exists('mode', $release)) {
+                    $mode = strtolower(trim((string) $release['mode']));
+                    $settings->default_release_mode = in_array($mode, CompanySetting::RELEASE_MODES, true)
+                        ? $mode
+                        : CompanySetting::DEFAULT_RELEASE_MODE;
+                }
+
+                $settings->save();
+            }
+
             $tenantId = TenantRequestContext::databaseId($request);
             if ($tenantId) {
                 $this->notifyDispatchSettingsChanged($request, $tenantId);
@@ -1291,10 +1313,12 @@ class SettingController extends Controller
     {
         try {
             $data = CompanyDispatchSystem::orderBy("id", "ASC")->get();
+            $settings = CompanySetting::orderBy('id', 'DESC')->first();
 
             return response()->json([
                 'success' => 1,
-                'data' => $data
+                'data' => $data,
+                'release_settings' => CompanySetting::resolveReleaseSettings($settings),
             ]);
         } catch (\Exception $e) {
             return response()->json([
