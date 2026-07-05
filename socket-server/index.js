@@ -4563,18 +4563,21 @@ app.post("/send-notification-dispatcher", (req, res) => {
 });
 
 app.post("/change-cancel-ride", async (req, res) => {
-    const { drivers, status, booking } = req.body;
+    const { status, booking } = req.body;
+    const drivers = Array.isArray(req.body.drivers) ? req.body.drivers : [];
     const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
     const db = getConnection(req.tenantDb);
-    let targetUserId = booking.user_id;
-    if (!targetUserId) {
-        try {
-            const [rows] = await db.query("SELECT user_id FROM bookings WHERE id = ?", [booking.id]);
-            if (rows.length > 0) targetUserId = rows[0].user_id;
-        } catch (dbErr) {
-            console.error("Error fetching user_id for notification:", dbErr.message);
-        }
+
+    let persistedBooking = null;
+    try {
+        const [rows] = await db.query("SELECT user_id, driver FROM bookings WHERE id = ?", [booking.id]);
+        persistedBooking = rows[0] || null;
+    } catch (dbErr) {
+        console.error("Error fetching booking for cancellation notification:", dbErr.message);
     }
+
+    let targetUserId = booking.user_id || persistedBooking?.user_id;
+    const assignedDriverId = booking.driver || persistedBooking?.driver || null;
 
     if (targetUserId) {
         try {
@@ -4596,30 +4599,33 @@ app.post("/change-cancel-ride", async (req, res) => {
         }
     }
 
-    if (drivers && drivers.length > 0) {
+    if (assignedDriverId) {
         const driverNotifTitle = "Ride Cancelled";
         const driverNotifMessage = req.body.cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} has been cancelled`;
 
-        for (const driverId of drivers) {
-            try {
-                await sendNotificationToDriver(db, driverId, driverNotifTitle, driverNotifMessage, {
-                    booking_id: String(booking.id),
-                    type: "ride_cancelled"
-                });
-                await storeNotification(db, {
-                    user_type: 'driver',
-                    user_id: driverId,
-                    title: driverNotifTitle,
-                    message: driverNotifMessage
-                });
-            } catch (driverNotifErr) {
-                console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
-            }
+        try {
+            await sendNotificationToDriver(db, assignedDriverId, driverNotifTitle, driverNotifMessage, {
+                booking_id: String(booking.id),
+                type: "ride_cancelled"
+            });
+            await storeNotification(db, {
+                user_type: 'driver',
+                user_id: assignedDriverId,
+                title: driverNotifTitle,
+                message: driverNotifMessage
+            });
+        } catch (driverNotifErr) {
+            console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
         }
     }
 
     let sentCount = 0;
-    drivers.forEach(driverId => {
+    const socketDriverIds = Array.from(new Set([
+        ...drivers.map((driverId) => String(driverId)),
+        ...(assignedDriverId ? [String(assignedDriverId)] : []),
+    ].filter(Boolean)));
+
+    socketDriverIds.forEach(driverId => {
         const socketId = getTenantSocket(driverSockets, dbName, driverId);
         if (socketId) {
             io.to(socketId).emit("driver-ride-status-event", { status, booking });
@@ -4637,7 +4643,7 @@ app.post("/change-cancel-ride", async (req, res) => {
         message: req.body.cancelled_by === 'user' ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} has been cancelled`
     };
     emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
-    drivers.forEach(driverId => {
+    socketDriverIds.forEach(driverId => {
         const socketId = getTenantSocket(driverSockets, dbName, driverId);
         if (socketId) {
             io.to(socketId).emit("booking-cancelled-event", cancelNotif);
@@ -4846,7 +4852,7 @@ app.post("/change-ride-status", async (req, res) => {
 
 app.post("/user-message-notification", (req, res) => {
     const { userId, chat } = req.body;
-    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
     const socketId = getTenantSocket(userSockets, dbName, userId);
     if (socketId) {
         io.to(socketId).emit("user-message-event", { ...chat, database: dbName });
@@ -4861,7 +4867,7 @@ app.post("/driver-message-notification", (req, res) => {
         return res.status(400).json({ success: false, message: "Missing driverId or chat" });
     }
 
-    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
     const socketId = getTenantSocket(driverSockets, dbName, driverId);
     let delivered = false;
 

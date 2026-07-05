@@ -715,6 +715,7 @@ class DriverController extends Controller
                     $document->save();
                 }
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, 'approved');
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 
@@ -765,6 +766,7 @@ class DriverController extends Controller
                 }
 
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, 'rejected');
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 // if(isset($user->email) && $user->email != NULL){
@@ -811,6 +813,7 @@ class DriverController extends Controller
                 $document->save();
 
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, (string) $request->status);
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 // if(isset($user->email) && $user->email != NULL){
@@ -855,6 +858,7 @@ class DriverController extends Controller
                 $driver = CompanyDriver::where("id", $request->driver_id)->first();
                 $driver->document_approved_office = 1;
                 $driver->save();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, 'approved');
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 // if(isset($driver->email) && $driver->email != NULL){
@@ -943,6 +947,57 @@ class DriverController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    private function notifyDriverDocumentStatus(Request $request, int $driverId, string $status): void
+    {
+        if ($driverId <= 0) {
+            return;
+        }
+
+        $normalizedStatus = match (strtolower($status)) {
+            'verified', 'approve', 'approved' => 'approved',
+            'failed', 'reject', 'rejected' => 'rejected',
+            default => strtolower($status),
+        };
+
+        $title = 'Document Status Updated';
+        $message = "Your document status has been {$normalizedStatus}.";
+
+        $notification = new CompanyNotification;
+        $notification->user_type = 'driver';
+        $notification->user_id = $driverId;
+        $notification->title = $title;
+        $notification->message = $message;
+        $notification->status = 'unread';
+        $notification->save();
+
+        $dataCheck = (new TenantUser)
+            ->setConnection('central')
+            ->where('id', $request->header('database'))
+            ->first();
+
+        $pushEnabled = !isset($dataCheck) || ($dataCheck->data['push_notification'] ?? 'enable') === 'enable';
+        if (!$pushEnabled) {
+            return;
+        }
+
+        $tokens = CompanyToken::where('user_id', $driverId)
+            ->where('user_type', 'driver')
+            ->get();
+
+        foreach ($tokens as $token) {
+            FCMService::sendToDevice(
+                $token->fcm_token,
+                $title,
+                $message,
+                [
+                    'type' => 'document_status',
+                    'status' => $normalizedStatus,
+                    'notification_id' => (string) $notification->id,
+                ]
+            );
         }
     }
 
@@ -1051,8 +1106,10 @@ class DriverController extends Controller
             try {
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'database' => $request->header('database'),
                 ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/driver-message-notification', [
                     'driverId' => $request->driver_id,
+                    'database' => $request->header('database'),
                     'chat' => $chatPayload,
                 ]);
             } catch (\Exception $socketException) {

@@ -302,8 +302,10 @@ class SettingController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'database' => $request->header('database'),
             ])->post(env('NODE_SOCKET_URL') . '/driver-message-notification', [
                 'driverId' => $request->driver_id,
+                'database' => $request->header('database'),
                 'chat' => $chat
             ]);
 
