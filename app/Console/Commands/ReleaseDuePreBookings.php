@@ -46,7 +46,7 @@ class ReleaseDuePreBookings extends Command
                             ->orWhere('dispatch_released', false);
                     })
                     ->whereNotNull('dispatch_release_at')
-                    ->where('dispatch_release_at', '<=', Carbon::now())
+                    ->where('dispatch_release_at', '<=', Carbon::now('UTC'))
                     ->where(function ($query) {
                         $query->whereNull('dispatch_release_mode')
                             ->orWhere('dispatch_release_mode', '!=', 'manual_review');

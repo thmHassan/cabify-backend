@@ -1051,7 +1051,7 @@ class BookingController extends Controller
         if ($this->preBookingService->isScheduledBooking($booking)) {
             if ($booking->pending_driver_id) {
                 $releaseText = $booking->dispatch_release_at
-                    ? ' Driver selected - scheduled for release at ' . Carbon::parse($booking->dispatch_release_at)->format('d M H:i') . '.'
+                    ? ' Driver selected - scheduled for release at ' . $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at, 'd M H:i') . '.'
                     : ' Driver selected - held until manual release.';
 
                 return $prefix . $releaseText;
@@ -1059,7 +1059,7 @@ class BookingController extends Controller
 
             if ($booking->dispatch_release_at && $booking->dispatch_release_mode !== PreBookingService::RELEASE_MODE_MANUAL_REVIEW) {
                 return $prefix . ' No driver selected - scheduled for auto release at '
-                    . Carbon::parse($booking->dispatch_release_at)->format('d M H:i')
+                    . $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at, 'd M H:i')
                     . '.';
             }
 
@@ -1100,7 +1100,7 @@ class BookingController extends Controller
             'booking_date' => $booking->booking_date,
             'pickup_time' => $booking->pickup_time,
             'reminder_minutes' => $booking->reminder_minutes,
-            'dispatch_release_at' => optional($booking->dispatch_release_at)->format('Y-m-d H:i:s'),
+            'dispatch_release_at' => $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at),
             'dispatch_release_mode' => $booking->dispatch_release_mode,
             'dispatch_release_override' => (bool) $booking->dispatch_release_override,
             'dispatch_released' => (bool) $booking->dispatch_released,

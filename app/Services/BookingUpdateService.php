@@ -306,7 +306,7 @@ class BookingUpdateService
             'is_scheduled' => (bool) $booking->is_scheduled,
             'pre_booking' => $booking->pre_booking,
             'dispatch_released' => (bool) $booking->dispatch_released,
-            'dispatch_release_at' => optional($booking->dispatch_release_at)->format('Y-m-d H:i:s'),
+            'dispatch_release_at' => $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at),
             'dispatch_release_mode' => $booking->dispatch_release_mode,
             'dispatch_release_override' => (bool) $booking->dispatch_release_override,
             'reminder_minutes' => $booking->reminder_minutes,

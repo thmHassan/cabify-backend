@@ -6,6 +6,7 @@ use App\Jobs\ReleasePreBookingJob;
 use App\Models\CompanyBooking;
 use App\Models\CompanySetting;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 
@@ -47,7 +48,7 @@ class PreBookingService
 
     public function applyPreBookingsFilter(Builder $query): Builder
     {
-        $today = Carbon::today()->toDateString();
+        $today = Carbon::now($this->companyTimezone())->toDateString();
         return $query
             ->where(function (Builder $builder) {
                 $builder
@@ -81,9 +82,12 @@ class PreBookingService
         }
 
         try {
-            $pickupAt = Carbon::parse($booking->booking_date . ' ' . $booking->pickup_time);
+            $timezone = $this->companyTimezone();
+            $pickupAt = $this->parseCompanyDateTimeToUtc($booking->booking_date . ' ' . $booking->pickup_time, $timezone);
+            $pickupCompanyDate = $pickupAt->copy()->setTimezone($timezone)->toDateString();
+            $today = Carbon::now($timezone)->toDateString();
 
-            return $pickupAt->isFuture() && $pickupAt->toDateString() > Carbon::today()->toDateString();
+            return $pickupAt->isFuture() && $pickupCompanyDate > $today;
         } catch (\Exception $e) {
             return false;
         }
@@ -124,7 +128,8 @@ class PreBookingService
             return null;
         }
 
-        $settings = CompanySetting::resolveReleaseSettings();
+        $companySetting = CompanySetting::orderBy('id', 'DESC')->first();
+        $settings = CompanySetting::resolveReleaseSettings($companySetting);
         if (!$settings['enabled']) {
             return null;
         }
@@ -134,11 +139,14 @@ class PreBookingService
         }
 
         if ($booking->dispatch_release_at) {
-            return Carbon::parse($booking->dispatch_release_at);
+            return $this->parseStoredDateTimeToUtc($booking->dispatch_release_at);
         }
 
         try {
-            $pickupAt = Carbon::parse($booking->booking_date . ' ' . $booking->pickup_time);
+            $pickupAt = $this->parseCompanyDateTimeToUtc(
+                $booking->booking_date . ' ' . $booking->pickup_time,
+                $this->companyTimezone($companySetting)
+            );
             $leadMinutes = (int) ($settings['lead_minutes'] ?? self::DISPATCH_LEAD_MINUTES);
 
             return $pickupAt->copy()->subMinutes($leadMinutes);
@@ -157,7 +165,9 @@ class PreBookingService
             return;
         }
 
-        $settings = CompanySetting::resolveReleaseSettings();
+        $companySetting = CompanySetting::orderBy('id', 'DESC')->first();
+        $settings = CompanySetting::resolveReleaseSettings($companySetting);
+        $timezone = $this->companyTimezone($companySetting);
         $releaseEnabled = $settings['enabled'];
 
         if ($request->has('dispatch_release_enabled')) {
@@ -186,14 +196,14 @@ class PreBookingService
         $booking->dispatch_release_mode = $mode;
 
         if ($request->filled('dispatch_release_at')) {
-            $booking->dispatch_release_at = Carbon::parse($request->input('dispatch_release_at'));
+            $booking->dispatch_release_at = $this->parseCompanyDateTimeToUtc($request->input('dispatch_release_at'), $timezone);
             $booking->dispatch_release_override = true;
 
             return;
         }
 
         try {
-            $pickupAt = Carbon::parse($booking->booking_date . ' ' . $booking->pickup_time);
+            $pickupAt = $this->parseCompanyDateTimeToUtc($booking->booking_date . ' ' . $booking->pickup_time, $timezone);
             $booking->dispatch_release_at = $pickupAt->copy()->subMinutes((int) ($settings['lead_minutes'] ?? self::DISPATCH_LEAD_MINUTES));
             $booking->dispatch_release_override = false;
         } catch (\Exception $e) {
@@ -238,7 +248,51 @@ class PreBookingService
         }
 
         try {
-            return Carbon::parse($booking->dispatch_release_at)->format('Y-m-d H:i:s');
+            return $this->parseStoredDateTimeToUtc($booking->dispatch_release_at)->format('Y-m-d H:i:s');
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    public function companyTimezone(?CompanySetting $settings = null): string
+    {
+        $timezone = trim((string) ($settings?->company_timezone ?? ''));
+
+        if ($timezone === '') {
+            $timezone = trim((string) (CompanySetting::orderBy('id', 'DESC')->value('company_timezone') ?? ''));
+        }
+
+        if ($timezone === '' || !in_array($timezone, timezone_identifiers_list(), true)) {
+            return config('app.timezone', 'UTC');
+        }
+
+        return $timezone;
+    }
+
+    public function parseCompanyDateTimeToUtc(string $value, ?string $timezone = null): Carbon
+    {
+        return Carbon::parse($value, $timezone ?: $this->companyTimezone())->utc();
+    }
+
+    public function parseStoredDateTimeToUtc(CarbonInterface|string $value): Carbon
+    {
+        if ($value instanceof CarbonInterface) {
+            return $value->copy()->utc();
+        }
+
+        return Carbon::parse($value, config('app.timezone', 'UTC'))->utc();
+    }
+
+    public function formatStoredDateTimeForCompany(CarbonInterface|string|null $value, string $format = 'Y-m-d H:i:s', ?string $timezone = null): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        try {
+            return $this->parseStoredDateTimeToUtc($value)
+                ->setTimezone($timezone ?: $this->companyTimezone())
+                ->format($format);
         } catch (\Exception $e) {
             return null;
         }
