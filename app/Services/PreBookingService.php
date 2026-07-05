@@ -9,6 +9,8 @@ use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class PreBookingService
 {
@@ -259,6 +261,10 @@ class PreBookingService
         $timezone = trim((string) ($settings?->company_timezone ?? ''));
 
         if ($timezone === '') {
+            $timezone = $this->companyTimezoneFromConnection('tenant');
+        }
+
+        if ($timezone === '') {
             $timezone = trim((string) (CompanySetting::orderBy('id', 'DESC')->value('company_timezone') ?? ''));
         }
 
@@ -267,6 +273,22 @@ class PreBookingService
         }
 
         return $timezone;
+    }
+
+    private function companyTimezoneFromConnection(string $connection): string
+    {
+        try {
+            if (!Schema::connection($connection)->hasTable('settings')) {
+                return '';
+            }
+
+            return trim((string) (DB::connection($connection)
+                ->table('settings')
+                ->orderByDesc('id')
+                ->value('company_timezone') ?? ''));
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     public function parseCompanyDateTimeToUtc(string $value, ?string $timezone = null): Carbon
