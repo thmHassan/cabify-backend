@@ -944,6 +944,79 @@ class BookingController extends Controller
         }
     }
 
+    public function noShowRide(Request $request)
+    {
+        try {
+            $request->validate([
+                'booking_id' => 'required',
+            ]);
+
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $booking = CompanyBooking::where("id", $request->booking_id)
+                ->where("driver", $driver->id)
+                ->first();
+
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found for this driver',
+                ], 404);
+            }
+
+            if ($booking->booking_status !== 'arrived') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'No show can only be marked after arriving at pickup',
+                ], 422);
+            }
+
+            $booking->booking_status = "no_show";
+            $booking->dispatcher_action = trim(($driver->name ?? 'Driver') . ' marked this ride as no show');
+            $booking->save();
+
+            $driver->driving_status = "idle";
+            $driver->save();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'database' => $request->header('database'),
+            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                'userId' => $booking->user_id,
+                'status' => "driver_no_show",
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'pickup_location' => $booking->pickup_location,
+                    'destination_point' => $booking->destination_point,
+                    'destination_location' => $booking->destination_location,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'driver' => $booking->driver,
+                    'booking_status' => $booking->booking_status,
+                    'booking_date' => $booking->booking_date,
+                    'pickup_time' => $booking->pickup_time,
+                    'driverDetail' => [
+                        'id' => $driver->id,
+                        'name' => $driver->name,
+                        'phone_no' => $driver->phone_no,
+                    ],
+                ],
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride marked as no show',
+                'booking' => $booking,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function changeBookingPaymentStatus(Request $request)
     {
         try {

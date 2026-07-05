@@ -129,39 +129,11 @@ class PlotDispatch
 
     public static function applyTodaysBookingVisibilityFilter(Builder $query): Builder
     {
-        return $query
-            ->whereIn('booking_status', ['pending', 'pending_acceptance', 'started', 'unassigned'])
-            ->where(function (Builder $visible) {
+        return $query->where(function (Builder $visible) {
             $visible
-                ->where(function (Builder $notInProgress) {
-                    $notInProgress
-                        ->whereNull('dispatcher_action')
-                        ->orWhere(function (Builder $action) {
-                            $action
-                                ->where('dispatcher_action', 'not like', self::ACTIVE_PREFIX . '%')
-                                ->where('dispatcher_action', 'not like', '%started plot-based dispatch%')
-                                ->where('dispatcher_action', 'not like', '%Broadcast to %driver(s) in plot%')
-                                ->where('dispatcher_action', 'not like', '%Broadcast to %driver(s) in backup plot%')
-                                ->where('dispatcher_action', 'not like', '%Dispatched to primary plot%')
-                                ->where('dispatcher_action', 'not like', '%Dispatched to backup plot%')
-                                ->where('dispatcher_action', 'not like', '%plot dispatch%in progress%');
-                        });
-                })
-                ->where(function (Builder $notAwaitingDispatch) {
-                    $notAwaitingDispatch
-                        ->whereNotNull('dispatcher_action')
-                        ->orWhereNotNull('driver')
-                        ->orWhere('pickup_time', '!=', 'asap')
-                        ->orWhere('pickup_time_type', '!=', 'asap')
-                        ->orWhere('is_scheduled', true);
-                })
-                ->orWhere('booking_status', 'unassigned')
-                ->orWhere('dispatcher_action', 'like', '%no driver accepted%')
-                ->orWhere('dispatcher_action', 'like', '%plot dispatch failed%')
-                ->orWhere('dispatcher_action', 'like', '%all plots exhausted%')
-                ->orWhere('dispatcher_action', 'like', '%available for manual%')
-                ->orWhere('dispatcher_action', 'like', '%manual dispatch required%');
-            });
+                ->whereNull('booking_status')
+                ->orWhereNotIn('booking_status', ['completed', 'no_show', 'cancelled']);
+        });
     }
 
     public static function isFreshAsapAwaitingDispatch(CompanyBooking $booking): bool

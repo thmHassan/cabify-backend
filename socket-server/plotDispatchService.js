@@ -9,6 +9,7 @@ const {
 } = require('./plotDispatchMessages');
 
 const DEFAULT_DISPATCH_TIMEOUT_SECONDS = 30;
+const TERMINAL_BOOKING_STATUSES = new Set(['cancelled', 'completed', 'no_show']);
 
 const parseJsonArray = (raw) => {
     if (!raw) return [];
@@ -78,6 +79,56 @@ const createPlotDispatchService = ({
         const session = plotDispatchSessions.get(key);
         if (session?.timeoutId) clearTimeout(session.timeoutId);
         plotDispatchSessions.delete(key);
+    };
+
+    const isTerminalBookingStatus = (status) =>
+        TERMINAL_BOOKING_STATUSES.has(String(status || '').toLowerCase());
+
+    const terminatePlotDispatchForBooking = async ({
+        bookingId,
+        tenantDb,
+        db: providedDb = null,
+        dbName: providedDbName = null,
+        status = null,
+    }) => {
+        const bookingIdInt = parseInt(bookingId, 10);
+        if (!bookingIdInt) return null;
+
+        const db = providedDb || getConnection(tenantDb);
+        const dbName = providedDbName || (tenantDb?.startsWith('tenant') ? tenantDb.slice('tenant'.length) : tenantDb);
+        clearPlotDispatchSession(bookingIdInt);
+
+        await db.query(
+            `UPDATE booking_dispatch_cycles
+             SET status = 'exhausted',
+                 current_driver_id = NULL,
+                 current_driver_rank = NULL,
+                 offer_expires_at = NULL,
+                 updated_at = NOW()
+             WHERE booking_id = ? AND status = 'in_progress'`,
+            [bookingIdInt]
+        );
+
+        try {
+            await db.query('DELETE FROM send_new_rides WHERE booking_id = ?', [bookingIdInt]);
+        } catch (e) {
+            console.error('[PlotDispatch] send_new_rides cleanup error:', e.message);
+        }
+
+        const [bookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        const booking = bookingRows[0] ?? null;
+        if (booking && dbName) {
+            emitToCompanyRooms(dbName, 'plot-dispatch-status', {
+                booking_id: bookingIdInt,
+                phase: 'terminal',
+                message: status ? `Booking ${status}` : 'Booking is no longer dispatchable',
+                dispatcher_action: booking.dispatcher_action,
+                booking,
+            });
+            emitBookingUpdated(dbName, booking);
+        }
+
+        return booking;
     };
 
     const getDispatchTimeoutMs = async (db) => {
@@ -343,6 +394,20 @@ const createPlotDispatchService = ({
     };
 
     const markManualAttention = async ({ bookingIdInt, tenantDb, db, dbName, cycleId, action, eventName = 'manual-dispatch-required' }) => {
+        const [currentBookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        const currentBooking = currentBookingRows[0] ?? null;
+        if (!currentBooking) return null;
+        if (isTerminalBookingStatus(currentBooking.booking_status)) {
+            await terminatePlotDispatchForBooking({
+                bookingId: bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                status: currentBooking.booking_status,
+            });
+            return currentBooking;
+        }
+
         clearPlotDispatchSession(bookingIdInt);
         await db.query(
             `UPDATE bookings
@@ -370,6 +435,19 @@ const createPlotDispatchService = ({
     };
 
     const markCycleExhausted = async ({ bookingIdInt, tenantDb, db, dbName, cycleId }) => {
+        const [currentBookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        const currentBooking = currentBookingRows[0] ?? null;
+        if (!currentBooking || isTerminalBookingStatus(currentBooking.booking_status)) {
+            await terminatePlotDispatchForBooking({
+                bookingId: bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                status: currentBooking?.booking_status,
+            });
+            return;
+        }
+
         const cycle = await loadCycle(db, cycleId);
         const plotChain = cycle?.primary_plot_id ? await loadBackupPlotChain(db, cycle.primary_plot_id) : [];
         const fallbackToBidding = await isBiddingFallbackEnabled(db, bookingIdInt);
@@ -397,6 +475,7 @@ const createPlotDispatchService = ({
             eventName: 'plot-dispatch-failed',
         });
         if (!booking) return;
+        if (isTerminalBookingStatus(booking.booking_status)) return;
 
         if (fallbackToBidding) {
             await broadcastFixedFareBidding({ db, dbName, booking, plotChain });
@@ -436,8 +515,14 @@ const createPlotDispatchService = ({
 
         const [bookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
         const booking = bookingRows[0] ?? null;
-        if (!booking || ['cancelled', 'completed', 'ongoing', 'started'].includes(booking.booking_status) || booking.driver) {
-            clearPlotDispatchSession(bookingIdInt);
+        if (!booking || isTerminalBookingStatus(booking.booking_status) || ['ongoing', 'started'].includes(booking.booking_status) || booking.driver) {
+            await terminatePlotDispatchForBooking({
+                bookingId: bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                status: booking?.booking_status,
+            });
             return;
         }
 
@@ -608,7 +693,17 @@ const createPlotDispatchService = ({
                 if (!currentCycle || currentCycle.status !== 'in_progress' || currentCycle.offer_token !== offerToken) return;
                 const [checkRows] = await db.query('SELECT booking_status, driver, pending_driver_id FROM bookings WHERE id = ?', [bookingIdInt]);
                 const currentBooking = checkRows[0];
-                if (!currentBooking || currentBooking.booking_status !== 'pending' || currentBooking.driver) return;
+                if (!currentBooking || isTerminalBookingStatus(currentBooking.booking_status)) {
+                    await terminatePlotDispatchForBooking({
+                        bookingId: bookingIdInt,
+                        tenantDb,
+                        db,
+                        dbName,
+                        status: currentBooking?.booking_status,
+                    });
+                    return;
+                }
+                if (currentBooking.booking_status !== 'pending' || currentBooking.driver) return;
                 if (String(currentBooking.pending_driver_id) === String(candidate.id)) {
                     await db.query('UPDATE bookings SET pending_driver_id = NULL WHERE id = ?', [bookingIdInt]);
                     notifyDriverOfferWithdrawn(dbName, candidate.id, bookingIdInt, 'This ride offer expired');
@@ -658,7 +753,7 @@ const createPlotDispatchService = ({
             }
 
             const booking = bookingRows[0];
-            if (['cancelled', 'completed'].includes(booking.booking_status)) {
+            if (isTerminalBookingStatus(booking.booking_status)) {
                 await connection.rollback();
                 return { started: false, reason: 'terminal_status' };
             }
@@ -785,6 +880,17 @@ const createPlotDispatchService = ({
             const [rows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
             if (!rows.length) return;
             const booking = rows[0];
+            if (isTerminalBookingStatus(booking.booking_status)) {
+                await terminatePlotDispatchForBooking({
+                    bookingId: bookingIdInt,
+                    tenantDb,
+                    db,
+                    dbName,
+                    status: booking.booking_status,
+                });
+                notifyDriverOfferWithdrawn(dbName, driverId, bookingIdInt, 'This ride is no longer available');
+                return;
+            }
             const [driverRows] = await db.query('SELECT id, name, profile_image FROM drivers WHERE id = ?', [driverId]);
             const driver = driverRows[0] ?? {};
             const cycle = await loadCycleByBooking(db, bookingIdInt);
@@ -837,6 +943,24 @@ const createPlotDispatchService = ({
         const dbName = tenantDb.startsWith('tenant') ? tenantDb.slice('tenant'.length) : tenantDb;
         const cycle = await loadCycleByBooking(db, bookingIdInt);
         if (!cycle || cycle.status !== 'in_progress') return { handled: false };
+
+        const [bookingRows] = await db.query('SELECT booking_status FROM bookings WHERE id = ?', [bookingIdInt]);
+        const bookingStatus = bookingRows[0]?.booking_status;
+        if (isTerminalBookingStatus(bookingStatus)) {
+            await terminatePlotDispatchForBooking({
+                bookingId: bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                status: bookingStatus,
+            });
+            notifyDriverOfferWithdrawn(dbName, driverId, bookingIdInt, 'This ride is no longer available');
+            return {
+                handled: true,
+                status: 200,
+                body: { success: true, message: 'Ride is no longer available', skipped: true },
+            };
+        }
 
         if (String(cycle.current_driver_id) !== String(driverId)) {
             notifyDriverOfferWithdrawn(dbName, driverId, bookingIdInt, 'This ride offer is no longer available');
@@ -937,6 +1061,7 @@ const createPlotDispatchService = ({
         PLOT_DISPATCH_ACTIVE_PREFIX,
         isPlotDispatchActive,
         clearPlotDispatchSession,
+        terminatePlotDispatchForBooking,
         startPlotDispatchCycle,
         handlePlotDispatchAccept,
         handlePlotDispatchReject,

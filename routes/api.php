@@ -376,6 +376,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/reject-ride', [DriverBookingController::class, 'rejectRide']);
         Route::get('/driver/current-ride', [DriverBookingController::class, 'currentRide']);
         Route::get('/driver/arrived-status', [DriverBookingController::class, 'arrivedStatus']);
+        Route::post('/driver/no-show', [DriverBookingController::class, 'noShowRide']);
         Route::get('/driver/waiting-time', [DriverBookingController::class, 'waitingTime']);
         Route::get('/driver/change-booking-payment-status', [DriverBookingController::class, 'changeBookingPaymentStatus']);
         Route::post('/driver/verify-booking-otp', [DriverBookingController::class, 'verifyBookingOtp']);

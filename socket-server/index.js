@@ -15,7 +15,6 @@ const { getMailFrom } = require("./utils/Emailconfig");
 const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 const { PLOT_DISPATCH_ACTIVE_PREFIX } = require("./plotDispatchService");
-const { todaysBookingVisibilitySql } = require("./plotDispatchMessages");
 
 const app = express();
 
@@ -85,34 +84,62 @@ const getTenantTodayDate = async (db) => {
     }
 };
 
+const TERMINAL_BOOKING_STATUSES = ['completed', 'no_show', 'cancelled'];
+const terminalStatusesSqlList = TERMINAL_BOOKING_STATUSES.map((status) => `'${status}'`).join(', ');
+
+const nonTerminalBookingCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+
+    return `(${column('booking_status')} IS NULL OR ${column('booking_status')} NOT IN (${terminalStatusesSqlList}))`;
+};
+
+const todayBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+
+    return `
+    DATE(${column('booking_date')}) = ${todayExpression}
+    AND ${nonTerminalBookingCondition(alias)}
+`;
+};
+
 const preBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
 
     return `
-    (${column('pickup_time_type')} = 'time' OR ${column('is_scheduled')} = 1)
-    AND (${column('dispatch_released')} = 0 OR ${column('dispatch_released')} IS NULL)
-    AND ${column('booking_status')} = 'pending'
-    AND DATE(${column('booking_date')}) > ${todayExpression}
+    DATE(${column('booking_date')}) > ${todayExpression}
+    AND ${nonTerminalBookingCondition(alias)}
 `;
 };
 
-const isPreBookingRow = (booking) => {
-    const isScheduled = booking?.pickup_time_type === 'time' || booking?.is_scheduled == 1;
-    const dispatchReleased = booking?.dispatch_released == 1;
+const recentJobsCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+    return `${column('updated_at')} >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+};
 
-    if (!booking || !isScheduled || dispatchReleased) {
+const isTerminalBookingStatus = (status) =>
+    TERMINAL_BOOKING_STATUSES.includes(String(status || '').toLowerCase());
+
+const toDateOnlyString = (value) => {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString().split('T')[0];
+    }
+    const text = String(value);
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().split('T')[0];
+};
+
+const isPreBookingRow = (booking, todayDate = null) => {
+    if (!booking || !booking.booking_date || isTerminalBookingStatus(booking.booking_status)) {
         return false;
     }
 
-    if (booking.booking_status !== 'pending' || !booking.booking_date || booking.pickup_time === 'asap') {
-        return false;
-    }
+    const bookingDateStr = toDateOnlyString(booking.booking_date);
+    const todayStr = toDateOnlyString(todayDate) || toDateOnlyString(new Date());
 
-    const bookingDateStr = new Date(booking.booking_date).toISOString().split('T')[0];
-    const todayStr = new Date().toISOString().split('T')[0];
-    const pickupAt = new Date(`${bookingDateStr}T${booking.pickup_time}`);
-
-    return bookingDateStr > todayStr && pickupAt.getTime() > Date.now();
+    return Boolean(bookingDateStr && todayStr && bookingDateStr > todayStr);
 };
 
 const plotDriverQueues = new Map();
@@ -570,9 +597,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
         const query = `
             SELECT
                 COUNT(CASE 
-                    WHEN DATE(booking_date) = ${todaySql}
-                    AND (dispatcher_action IS NULL OR dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
-                    AND ${todaysBookingVisibilitySql()}
+                    WHEN ${todayBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS todays_booking,
 
@@ -587,7 +612,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
+                    WHEN booking_status = 'no_show'
                     THEN 1 
                 END) AS no_show,
 
@@ -597,7 +622,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS cancelled,
 
                 COUNT(CASE 
-                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
+                    WHEN ${recentJobsCondition()}
                     THEN 1 
                 END) AS recent_jobs
             FROM bookings
@@ -639,9 +664,7 @@ const fetchTodaysBookingsPage = async (db, page = 1, limit = 10) => {
         LEFT JOIN drivers d ON b.driver = d.id
         LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
         LEFT JOIN sub_companies sc ON b.sub_company = sc.id
-        WHERE DATE(b.booking_date) = CURDATE()
-        AND (b.dispatcher_action IS NULL OR b.dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
-        AND ${todaysBookingVisibilitySql('b')}
+        WHERE ${todayBookingsCondition('b')}
     `;
 
     const dataQuery = `
@@ -2537,9 +2560,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
         const query = `
             SELECT
                 COUNT(CASE 
-                    WHEN DATE(booking_date) = ${todaySql}
-                    AND (dispatcher_action IS NULL OR dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
-                    AND ${todaysBookingVisibilitySql()}
+                    WHEN ${todayBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS todays_booking,
 
@@ -2554,7 +2575,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
+                    WHEN booking_status = 'no_show'
                     THEN 1 
                 END) AS no_show,
 
@@ -2564,7 +2585,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS cancelled,
 
                 COUNT(CASE 
-                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
+                    WHEN ${recentJobsCondition()}
                     THEN 1 
                 END) AS recent_jobs
             FROM bookings
@@ -2618,9 +2639,7 @@ console.log("Fetching bookings with query:", req.query);
         if (filter) {
             switch (filter) {
                 case 'todays_booking':
-                    baseQuery += ` AND DATE(b.booking_date) = ${todaySql}`;
-                    baseQuery += ` AND (b.dispatcher_action IS NULL OR b.dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')`;
-                    baseQuery += ` AND ${todaysBookingVisibilitySql('b')}`;
+                    baseQuery += ` AND ${todayBookingsCondition('b', todaySql)}`;
                     break;
                 case 'pre_bookings':
                     baseQuery += ` AND ${preBookingsCondition('b', todaySql)}`;
@@ -2629,13 +2648,13 @@ console.log("Fetching bookings with query:", req.query);
                     baseQuery += ` AND b.booking_status = 'completed'`;
                     break;
                 case 'no_show':
-                    baseQuery += ` AND b.booking_status IN ('no_show', 'arrived', 'ongoing')`;
+                    baseQuery += ` AND b.booking_status = 'no_show'`;
                     break;
                 case 'cancelled':
                     baseQuery += ` AND b.booking_status = 'cancelled'`;
                     break;
                 case 'recent_jobs':
-                    baseQuery += ` AND b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+                    baseQuery += ` AND ${recentJobsCondition('b')}`;
                     break;
             }
         }
@@ -2676,7 +2695,7 @@ console.log("Fetching bookings with query:", req.query);
 
             return {
                 ...bookingData,
-                pre_booking: isPreBookingRow(bookingData),
+                pre_booking: isPreBookingRow(bookingData, todayDate),
                 driverDetail: driver_id ? { id: driver_id, name: driver_name, email: driver_email, phone_no: driver_phone, profile_image: driver_profile_image } : null,
                 vehicleDetail: vehicle_type_id ? { id: vehicle_type_id, vehicle_type_name, vehicle_type_service } : null,
                 subCompanyDetail: sub_company_id ? { id: sub_company_id, name: sub_company_name, email: sub_company_email } : null
@@ -3455,6 +3474,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         if (!booking_status) return res.status(400).json({ success: false, message: "booking_status is required" });
 
+        const dbName = toTenantSocketName(req.tenantDb || req.headers['database'] || req.headers['x-database']);
         const db = getConnection(req.tenantDb);
         const [bookings] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         if (bookings.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
@@ -3469,6 +3489,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         let actionLabel = `updated the status to ${booking_status}`;
         if (booking_status === 'cancelled') actionLabel = "cancelled this ride";
         else if (booking_status === 'completed') actionLabel = "marked the ride as completed";
+        else if (booking_status === 'no_show') actionLabel = "marked this ride as no show";
 
         updateQuery += ", dispatcher_action = ?";
         params.push(`${dispatcherName} ${actionLabel}`);
@@ -3482,9 +3503,22 @@ app.put("/bookings/:id/status", async (req, res) => {
         updateQuery += " WHERE id = ?";
         params.push(id);
 
-        await db.query(updateQuery, params);
+	        await db.query(updateQuery, params);
+	        const isTerminalStatus = ['cancelled', 'completed', 'no_show'].includes(String(booking_status || '').toLowerCase());
+	        if (isTerminalStatus) {
+	            const bookingIdInt = parseInt(id, 10);
+	            clearNearestDispatchSession(bookingIdInt);
+	            clearAutoDispatchSession(bookingIdInt);
+	            await plotDispatch.terminatePlotDispatchForBooking({
+	                bookingId: bookingIdInt,
+	                tenantDb: req.tenantDb,
+	                db,
+	                dbName,
+	                status: booking_status,
+	            });
+	        }
 
-        if (booking.driver) {
+	        if (booking.driver) {
             let driverStatus = null;
             if (['cancelled', 'completed', 'no_show'].includes(booking_status)) driverStatus = 'idle';
             else if (['ongoing', 'started', 'arrived'].includes(booking_status)) driverStatus = 'busy';
@@ -3755,26 +3789,27 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        const statusUpdateData = {
-            booking_id: id,
-            id,
-            booking_reference: booking.booking_id,
-            status: booking_status,
-            booking_status,
-            database: dbName,
-            message: `Booking #${booking.booking_id} status updated to ${booking_status}`
-        };
-        emitTenantRooms(dbName, "booking-status-updated", statusUpdateData);
+	        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
+	        const updatedBooking = updatedBookingRows[0];
 
-        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
-        const updatedBooking = updatedBookingRows[0];
+	        const statusUpdateData = {
+	            booking_id: updatedBooking.booking_id,
+	            id: updatedBooking.id,
+	            booking_reference: updatedBooking.booking_id,
+	            status: booking_status,
+	            booking_status,
+	            database: dbName,
+	            booking: { ...updatedBooking, database: dbName },
+	            message: `Booking #${updatedBooking.booking_id} status updated to ${booking_status}`
+	        };
+	        emitTenantRooms(dbName, "booking-status-updated", statusUpdateData);
 
-        const socketPayload = {
-            status: booking_status,
-            booking_status,
-            id,
-            booking_id: updatedBooking.booking_id,
-            database: dbName,
+	        const socketPayload = {
+	            status: booking_status,
+	            booking_status,
+	            id: updatedBooking.id,
+	            booking_id: updatedBooking.booking_id,
+	            database: dbName,
             booking: {
                 ...updatedBooking,
                 database: dbName,
@@ -3806,6 +3841,21 @@ app.put("/bookings/:id/status", async (req, res) => {
             emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
         }
 
+        if (booking_status === 'no_show') {
+            const noShowNotif = {
+                booking_id: id,
+                id,
+                booking_reference: updatedBooking.booking_id,
+                booking_status: 'no_show',
+                status: 'no_show',
+                booking: { ...updatedBooking, database: dbName },
+                database: dbName,
+                message: `Booking #${updatedBooking.booking_id} marked as no show`,
+                driver_id: updatedBooking.driver,
+            };
+            emitTenantRooms(dbName, "booking-no-show-event", noShowNotif);
+        }
+
         if (followOnPayload) {
             const driverSocketId = getTenantSocket(driverSockets, dbName, booking.driver);
             if (driverSocketId) {
@@ -3825,9 +3875,20 @@ app.put("/bookings/:id/status", async (req, res) => {
             emitTenantRooms(dbName, "follow-on-job-sent-to-driver", followOnEventData);
         }
 
-        await broadcastDashboardCardsUpdate(req.tenantDb);
+	        await broadcastDashboardCardsUpdate(req.tenantDb);
 
-        return res.json({ success: true, message: "Booking status updated successfully", res_user });
+	        return res.json({
+	            success: true,
+	            message: "Booking status updated successfully",
+	            res_user,
+	            data: {
+	                id: updatedBooking.id,
+	                booking_id: updatedBooking.booking_id,
+	                booking_status,
+	                database: dbName,
+	                booking: { ...updatedBooking, database: dbName },
+	            },
+	        });
 
     } catch (error) {
         console.error("Error updating booking status:", error);
@@ -4041,6 +4102,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
         }
 
         const booking = bookings[0];
+        const todayDate = await getTenantTodayDate(db);
         const {
             driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
             vehicle_type_id, vehicle_type_name, vehicle_type_service,
@@ -4051,7 +4113,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
 
         const formattedBooking = {
             ...bookingData,
-            pre_booking: isPreBookingRow(bookingData),
+            pre_booking: isPreBookingRow(bookingData, todayDate),
             account_id: bookingData.account,
             driverDetail: driver_id ? {
                 id: driver_id,
@@ -4294,6 +4356,7 @@ app.post("/waiting-time-event", (req, res) => {
 app.post("/change-ride-status", async (req, res) => {
     const { userId, status, booking } = req.body;
     const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const normalizedStatus = status === "driver_no_show" ? "no_show" : status;
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         const db = getConnection(req.tenantDb);
         const targetUserId = userId || booking.user_id;
@@ -4338,6 +4401,36 @@ app.post("/change-ride-status", async (req, res) => {
     const socketId = getTenantSocket(userSockets, dbName, userId);
     if (socketId) {
         io.to(socketId).emit("user-ride-status-event", { status, booking, database: dbName });
+    }
+
+    if (booking?.id && ["no_show", "driver_no_show", "arrived_driver", "ride_started", "complete_current_ride"].includes(status)) {
+        const bookingStatus =
+            status === "arrived_driver" ? "arrived" :
+            status === "ride_started" ? "started" :
+            status === "complete_current_ride" ? "completed" :
+            normalizedStatus;
+
+        const statusPayload = {
+            id: booking.id,
+            booking_id: booking.id,
+            booking_reference: booking.booking_id,
+            booking_status: bookingStatus,
+            status: bookingStatus,
+            database: dbName,
+            booking: { ...booking, booking_status: bookingStatus, database: dbName },
+            driver_id: booking.driver,
+            driver_name: booking.driverDetail?.name || booking.driver_name,
+            message: bookingStatus === "no_show"
+                ? `Booking #${booking.booking_id} marked as no show`
+                : `Booking #${booking.booking_id} status updated to ${bookingStatus}`,
+        };
+
+        emitTenantRooms(dbName, "booking-status-updated", statusPayload);
+        emitTenantRooms(dbName, "booking-updated-event", statusPayload.booking);
+
+        if (bookingStatus === "no_show") {
+            emitTenantRooms(dbName, "booking-no-show-event", statusPayload);
+        }
     }
 
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {

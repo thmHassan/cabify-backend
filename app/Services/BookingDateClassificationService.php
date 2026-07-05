@@ -3,13 +3,23 @@
 namespace App\Services;
 
 use App\Models\CompanyBooking;
-use App\Support\NearestDispatch;
 use App\Support\PlotDispatch;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 
 class BookingDateClassificationService
 {
+    private const TERMINAL_STATUSES = ['completed', 'no_show', 'cancelled'];
+
+    private function applyNonTerminalFilter(Builder $query): Builder
+    {
+        return $query->where(function (Builder $inner) {
+            $inner
+                ->whereNull('booking_status')
+                ->orWhereNotIn('booking_status', self::TERMINAL_STATUSES);
+        });
+    }
+
     public function normalizeMultiDays($multiDays): array
     {
         if (is_array($multiDays)) {
@@ -71,24 +81,29 @@ class BookingDateClassificationService
 
         switch ($filter) {
             case 'todays_booking':
-                return PlotDispatch::applyTodaysBookingVisibilityFilter(
-                    $query
-                        ->whereDate('booking_date', Carbon::today())
-                        ->where(function (Builder $inner) {
-                            $inner->whereNull('dispatcher_action')
-                                ->orWhere('dispatcher_action', 'not like', NearestDispatch::ACTIVE_PREFIX . '%');
-                        })
-                );
+                return $query
+                    ->whereDate('booking_date', Carbon::today())
+                    ->where(function (Builder $inner) {
+                        $inner
+                            ->whereNull('booking_status')
+                            ->orWhereNotIn('booking_status', self::TERMINAL_STATUSES);
+                    });
             case 'pre_bookings':
-                return app(PreBookingService::class)->applyPreBookingsFilter($query);
+                return $query
+                    ->whereDate('booking_date', '>', Carbon::today())
+                    ->where(function (Builder $inner) {
+                        $inner
+                            ->whereNull('booking_status')
+                            ->orWhereNotIn('booking_status', self::TERMINAL_STATUSES);
+                    });
             case 'completed':
                 return $query->where('booking_status', 'completed');
             case 'no_show':
-                return $query->whereIn('booking_status', ['no_show', 'arrived', 'ongoing']);
+                return $query->where('booking_status', 'no_show');
             case 'cancelled':
                 return $query->where('booking_status', 'cancelled');
             case 'recent_jobs':
-                return $query->where('created_at', '>=', Carbon::now()->subDays(7));
+                return $query->where('updated_at', '>=', Carbon::now()->subDays(7));
             default:
                 return $query;
         }
@@ -101,18 +116,15 @@ class BookingDateClassificationService
 
         return [
             'todaysBooking' => PlotDispatch::applyTodaysBookingVisibilityFilter(
-                (clone $query)
-                    ->whereDate('booking_date', $today)
-                    ->where(function (Builder $inner) {
-                        $inner->whereNull('dispatcher_action')
-                            ->orWhere('dispatcher_action', 'not like', 'NEAREST_DISPATCH_ACTIVE|%');
-                    })
+                (clone $query)->whereDate('booking_date', $today)
             )->count(),
-            'preBookings' => app(PreBookingService::class)->applyPreBookingsFilter(clone $query)->count(),
+            'preBookings' => $this->applyNonTerminalFilter(
+                (clone $query)->whereDate('booking_date', '>', $today)
+            )->count(),
             'completed' => (clone $query)->where('booking_status', 'completed')->count(),
-            'noShow' => (clone $query)->whereIn('booking_status', ['no_show', 'arrived', 'ongoing'])->count(),
+            'noShow' => (clone $query)->where('booking_status', 'no_show')->count(),
             'cancelled' => (clone $query)->where('booking_status', 'cancelled')->count(),
-            'recentJobs' => (clone $query)->where('created_at', '>=', Carbon::now()->subDays(7))->count(),
+            'recentJobs' => (clone $query)->where('updated_at', '>=', Carbon::now()->subDays(7))->count(),
         ];
     }
 }

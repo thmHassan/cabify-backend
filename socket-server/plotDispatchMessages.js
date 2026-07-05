@@ -119,20 +119,9 @@ const todaysBookingVisibilitySql = (alias = '') => {
     const col = (name) => (alias ? `${alias}.${name}` : name);
 
     return `(
-    ${col('booking_status')} IN ('pending', 'pending_acceptance', 'started', 'unassigned')
-    AND (
-        (
-            (${plotDispatchHideSql(alias)})
-            AND (${freshAsapAwaitingDispatchHideSql(alias)})
-        )
-        OR ${col('booking_status')} = 'unassigned'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%no driver accepted%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%plot dispatch failed%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%all plots exhausted%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%available for manual%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%manual dispatch required%'
-    )
-)`;
+        ${col('booking_status')} IS NULL
+        OR ${col('booking_status')} NOT IN ('completed', 'no_show', 'cancelled')
+    )`;
 };
 
 module.exports = {
