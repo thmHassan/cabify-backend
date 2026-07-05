@@ -18,7 +18,7 @@ class Kernel extends ConsoleKernel
                  ->withoutOverlapping();
         
         $schedule->command('app:make-cancel-ride-zero')
-                 ->everyDay()
+                 ->daily()
                  ->withoutOverlapping();
     }
 
