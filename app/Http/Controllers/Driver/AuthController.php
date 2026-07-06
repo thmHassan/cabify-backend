@@ -205,6 +205,7 @@ class AuthController extends Controller
             $user->email = $request->email;
             $user->name = $request->name;
             $user->country_code = $request->country_code;
+            $user->email_verified = false;
             $user->password = Hash::make($request->password);
             if ($request->filled('fcm_token')) {
                 $user->fcm_token = $request->fcm_token;
@@ -366,6 +367,48 @@ class AuthController extends Controller
         ]);
     }
 
+    public function resendOTP(Request $request)
+    {
+        try {
+            $request->validate([
+                'email' => 'required_without:phone|email',
+                'phone' => 'required_without:email',
+                'country_code' => 'required_with:phone',
+                'countryCode' => 'nullable',
+                'device_token' => 'nullable',
+                'deviceToken' => 'nullable',
+                'fcm_token' => 'nullable',
+                'fcmToken' => 'nullable',
+            ]);
+
+            $countryCode = $request->input('country_code', $request->input('countryCode'));
+            $driver = $request->filled('email')
+                ? CompanyDriver::where('email', $request->email)->first()
+                : CompanyDriver::where('phone_no', $request->phone)
+                    ->where('country_code', $countryCode)
+                    ->first();
+
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver does not exist',
+                ], 404);
+            }
+
+            $this->finalizeDriverRegistration($driver, $request);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'OTP resent successfully',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
     private function isAppRegistrationFlow(Request $request): bool
     {
         return $request->hasAny([
@@ -501,6 +544,7 @@ class AuthController extends Controller
         $driver->email = $request->email;
         $driver->phone_no = $request->phone;
         $driver->country_code = $request->countryCode;
+        $driver->email_verified = false;
         $driver->password = Hash::make($request->password);
         $driver->address = $request->address;
         $driver->city = $request->city;
@@ -664,9 +708,11 @@ class AuthController extends Controller
             $request->input('fcmToken')
         );
 
+        $this->finalizeDriverRegistration($driver, $request);
+
         return response()->json([
             'success' => 1,
-            'message' => 'Driver registration submitted successfully',
+            'message' => 'Driver registration submitted successfully and OTP sent',
             'profileVerified' => false,
             'profileStatus' => 'pending',
             'accountStatus' => 'pending',
@@ -986,16 +1032,21 @@ class AuthController extends Controller
 
             $user->otp = null;
             $user->otp_expires_at = null;
+            $user->email_verified = true;
+            $user->email_verified_at = now();
             $user->fcm_token = $request->fcm_token;
             $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
             $user->save();
 
             $token = JWTAuth::fromUser($user);
+            $profileData = $this->formatDriverProfileData($user);
 
             return response()->json([
+                'success' => 1,
                 'message' => 'Login successful',
                 'token' => $token,
-                'user' => $user
+                'data' => $profileData,
+                'user' => $profileData,
             ]);
         }
         catch(\Exception $e){
@@ -1420,6 +1471,8 @@ class AuthController extends Controller
             ->get();
 
         $data = Arr::except($profile, array_merge($vehicleFields, $documentFields));
+        $data['email_verified'] = (bool) ($user->email_verified ?? false);
+        $data['email_verified_at'] = $user->email_verified_at;
         $data['vehicle'] = $vehicle;
         $data['document'] = $document;
 
