@@ -1464,7 +1464,7 @@ class AuthController extends Controller
                 ]
             ]);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => 'SOmething went wrong'
