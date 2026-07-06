@@ -137,6 +137,16 @@ class BookingController extends Controller
                 ->orderBy("id", "DESC")
                 ->with("userDetail")
                 ->get();
+            $placedBidIds = CompanyBid::where("driver_id", $driver->id)
+                ->whereIn("booking_id", $rideList->pluck("id"))
+                ->pluck("booking_id")
+                ->map(fn ($id) => (string) $id)
+                ->all();
+
+            $rideList->transform(function ($ride) use ($placedBidIds) {
+                $ride->placed = in_array((string) $ride->id, $placedBidIds, true);
+                return $ride;
+            });
 
             return response()->json([
                 'success' => 1,
@@ -707,6 +717,24 @@ class BookingController extends Controller
         return 'started';
     }
 
+    private function isRejectableManualAssignment(CompanyBooking $booking, $driverId): bool
+    {
+        if ((string) $booking->driver !== (string) $driverId) {
+            return false;
+        }
+
+        if (!in_array($booking->booking_status, ['pending', 'ongoing'], true)) {
+            return false;
+        }
+
+        $action = strtolower((string) $booking->dispatcher_action);
+        return str_contains($action, 'assigned')
+            || str_contains($action, 'pre-job')
+            || str_contains($action, 'manual')
+            || str_contains($action, 'driver selected')
+            || str_contains($action, 'dispatching now');
+    }
+
     public function rejectRide(Request $request)
     {
         try {
@@ -728,7 +756,7 @@ class BookingController extends Controller
                 ->where('driver_id', $driverId)
                 ->exists();
 
-            if ($booking->booking_status !== 'pending') {
+            if ($booking->booking_status !== 'pending' && !$this->isRejectableManualAssignment($booking, $driverId)) {
                 return response()->json([
                     'success' => 1,
                     'message' => $wasNotified

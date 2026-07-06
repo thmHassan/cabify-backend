@@ -25,6 +25,7 @@ use App\Models\Setting;
 use App\Models\MobileAppSetting;
 use App\Models\PackageRideCountSetting;
 use App\Models\CompanyPlot;
+use App\Models\CompanyDispatchSystem;
 
 class SettingController extends Controller
 {
@@ -259,6 +260,8 @@ class SettingController extends Controller
                 $company_booking_system = "bidding";
             }
 
+            $dispatchContext = $this->driverDispatchContext($company_booking_system);
+
             $data = [
                 'stripe_key' => $stripe_key,
                 'stripe_secret_key' => $stripe_secret_key,
@@ -272,6 +275,11 @@ class SettingController extends Controller
                 'support_rescue_number' => $support_rescue_number,
                 'country_of_user' => $country_of_user,
                 'company_booking_system' => $company_booking_system,
+                'dispatch_system' => $dispatchContext['dispatch_system'],
+                'supports_rank' => $dispatchContext['supports_rank'],
+                'supports_bidding' => $dispatchContext['supports_bidding'],
+                'supports_manual_assignment' => $dispatchContext['supports_manual_assignment'],
+                'show_rank' => $dispatchContext['show_rank'],
             ];
 
             return response()->json([
@@ -592,6 +600,104 @@ class SettingController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function driverRanking(Request $request)
+    {
+        try {
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $dispatchContext = $this->driverDispatchContext($setting?->company_booking_system ?? "auto_dispatch");
+
+            $plots = CompanyPlot::orderBy("id", "DESC")->get();
+            $driverCounts = CompanyDriver::select("plot_id", DB::raw("COUNT(*) as driver_count"))
+                ->whereNotNull("plot_id")
+                ->where("online_status", "online")
+                ->where("driving_status", "idle")
+                ->groupBy("plot_id")
+                ->pluck("driver_count", "plot_id");
+
+            $plotRows = $plots->map(function ($plot) use ($driverCounts, $driver) {
+                return [
+                    "id" => $plot->id,
+                    "name" => $plot->name,
+                    "plot_name" => $plot->name,
+                    "driver_count" => (int) ($driverCounts[$plot->id] ?? 0),
+                    "is_current" => $driver && (string) $driver->plot_id === (string) $plot->id,
+                ];
+            })->values();
+
+            $currentPlot = $driver?->plot_id
+                ? CompanyPlot::where("id", $driver->plot_id)->first()
+                : null;
+            $rank = null;
+            if ($dispatchContext['show_rank'] && $driver?->plot_id) {
+                $rank = DB::table("plot_driver_queues")
+                    ->where("plot_id", $driver->plot_id)
+                    ->where("driver_id", $driver->id)
+                    ->value("rank");
+                $rank = $rank ?? $driver->priority_plot;
+            }
+
+            return response()->json([
+                "success" => 1,
+                "message" => "Driver dispatch context fetched successfully",
+                "data" => [
+                    ...$dispatchContext,
+                    "current_plot" => $currentPlot ? [
+                        "id" => $currentPlot->id,
+                        "name" => $currentPlot->name,
+                    ] : null,
+                    "current_driver" => [
+                        "id" => $driver?->id,
+                        "driver_id" => $driver?->id,
+                        "name" => $driver?->name,
+                        "profile_image" => $driver?->profile_image,
+                        "rating" => $driver?->rating ?? "0",
+                        "rank" => $rank ? (int) $rank : null,
+                        "plot_name" => $currentPlot?->name,
+                        "is_current_driver" => true,
+                    ],
+                    "plots" => $plotRows,
+                    "rankings" => [],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                "error" => 1,
+                "message" => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function driverDispatchContext(?string $companyBookingSystem = null): array
+    {
+        $enabledSystems = CompanyDispatchSystem::where("status", "enable")
+            ->orderByRaw("priority IS NULL, priority ASC")
+            ->orderBy("id", "ASC")
+            ->pluck("dispatch_system")
+            ->values()
+            ->all();
+
+        $dispatchSystem = $enabledSystems[0] ?? null;
+        if (!$dispatchSystem) {
+            $dispatchSystem = $companyBookingSystem === "bidding"
+                ? "bidding"
+                : "auto_dispatch_plot_base";
+        }
+
+        return [
+            "dispatch_system" => $dispatchSystem,
+            "company_booking_system" => $companyBookingSystem ?: "auto_dispatch",
+            "supports_rank" => $dispatchSystem === "auto_dispatch_plot_base",
+            "supports_bidding" => in_array($dispatchSystem, [
+                "bidding",
+                "bidding_fixed_fare_plot_base",
+                "bidding_fixed_fare_nearest_driver",
+            ], true),
+            "supports_manual_assignment" => true,
+            "show_rank" => $dispatchSystem === "auto_dispatch_plot_base",
+        ];
     }
 
     public function changeStatus(Request $request){

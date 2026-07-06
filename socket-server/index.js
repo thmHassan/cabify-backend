@@ -1055,9 +1055,54 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
     }
 
     const { booking_status, driver, dispatcher_action } = rows[0];
+    const actionText = String(dispatcher_action || '').toLowerCase();
+    const isManualAssignmentReject = (
+        actionText.includes('assigned') ||
+        actionText.includes('pre-job') ||
+        actionText.includes('manual') ||
+        actionText.includes('driver selected') ||
+        actionText.includes('dispatching now')
+    ) && String(driver) === String(driverId) && ['pending', 'ongoing'].includes(String(booking_status));
 
     if (plotDispatch.isPlotDispatchActive(dispatcher_action)) {
         return plotDispatch.handlePlotDispatchReject({ bookingIdInt, tenantDb, driverId });
+    }
+
+    if (isManualAssignmentReject) {
+        const dbName = toTenantSocketName(tenantDb);
+        const rejectAction = `Driver #${driverId} rejected manual assignment — returned to dispatcher panel`;
+        await db.query(
+            `UPDATE bookings
+             SET driver = NULL,
+                 pending_driver_id = NULL,
+                 booking_status = 'pending',
+                 dispatcher_action = ?
+             WHERE id = ?`,
+            [rejectAction, bookingIdInt]
+        );
+        await db.query("UPDATE drivers SET driving_status = 'idle' WHERE id = ?", [driverId]);
+
+        const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
+        const updatedBooking = updatedRows[0] || { id: bookingIdInt };
+        const rejectEvent = {
+            booking_id: bookingIdInt,
+            id: bookingIdInt,
+            driver_id: driverId,
+            database: dbName,
+            booking: updatedBooking,
+            message: rejectAction,
+        };
+
+        emitTenantRooms(dbName, "job-rejected-by-driver", rejectEvent);
+        emitTenantRooms(dbName, "booking-updated-event", updatedBooking);
+        emitTenantRooms(dbName, "notification-ride", updatedBooking);
+        await broadcastDashboardCardsUpdate(tenantDb);
+        await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
+
+        return {
+            status: 200,
+            body: { success: true, message: "Manual assignment rejected — returned to dispatcher panel" },
+        };
     }
 
     if (booking_status !== "pending") {
