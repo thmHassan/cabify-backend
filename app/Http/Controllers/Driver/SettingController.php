@@ -862,6 +862,11 @@ class SettingController extends Controller
         try{
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->online_status = $request->status;
+            $activeRideExists = CompanyBooking::where("driver", $driver->id)
+                ->whereIn("booking_status", ["ongoing", "arrived", "started"])
+                ->exists();
+            $drivingStatus = $activeRideExists ? "busy" : "idle";
+            $driver->driving_status = $drivingStatus;
             $driver->save();
 
             $tenantId = $request->header('database') ?: $request->header('x-database');
@@ -877,6 +882,7 @@ class SettingController extends Controller
                         'driver_id' => $driver->id,
                         'status' => $request->status,
                         'online_status' => $request->status,
+                        'driving_status' => $drivingStatus,
                     ]);
                 } catch (\Throwable $socketException) {
                     \Log::warning('Driver status socket sync failed', [
