@@ -1,5 +1,44 @@
 const DEFAULT_SEARCH_RADIUS_KM = 1;
 
+const toTenantSocketName = (database) => String(database || '').trim().replace(/^tenant/i, '');
+
+const toTenantDbName = (database) => {
+    const value = toTenantSocketName(database);
+    return value ? `tenant${value}` : null;
+};
+
+const normalizeDriverRealtimePayload = (driver, database, overrides = {}) => {
+    if (!driver) return null;
+    const dbName = toTenantSocketName(database);
+    const driverId = driver.id ?? driver.driver_id;
+    const driverName = driver.name ?? driver.driver_name ?? driver.driverName;
+    const plotId = overrides.plot_id ?? driver.plot_id ?? driver.plot;
+
+    return {
+        ...driver,
+        ...overrides,
+        id: driverId,
+        driver_id: driverId,
+        driverName,
+        driver_name: driverName,
+        name: driverName,
+        phone_no: driver.phone_no ?? driver.driver_phone ?? driver.phone ?? null,
+        phone: driver.phone ?? driver.phone_no ?? driver.driver_phone ?? null,
+        plate_no: driver.plate_no ?? driver.plate ?? null,
+        plate: driver.plate ?? driver.plate_no ?? null,
+        assigned_vehicle: driver.assigned_vehicle ?? null,
+        vehicle_name: driver.vehicle_name ?? driver.vehicle_type_name ?? null,
+        vehicle_type: driver.vehicle_type ?? driver.vehicle_type_service ?? driver.vehicle_type_name ?? null,
+        vehicle_service: driver.vehicle_service ?? driver.vehicle_type_service ?? null,
+        vehicle_type_name: driver.vehicle_type_name ?? null,
+        vehicle_type_service: driver.vehicle_type_service ?? null,
+        plot: plotId,
+        plot_id: plotId,
+        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : 'N/A'),
+        database: dbName,
+    };
+};
+
 const pointInPolygon = (lat, lng, polygon) => {
     if (!Array.isArray(polygon) || polygon.length === 0) {
         return false;
@@ -117,7 +156,7 @@ const createWaitingQueueService = ({
 
         for (const entry of queue) {
             await db.query(
-                `INSERT INTO plot_driver_queues (plot_id, driver_id, rank, created_at, updated_at)
+                `INSERT INTO plot_driver_queues (plot_id, driver_id, \`rank\`, created_at, updated_at)
                  VALUES (?, ?, ?, NOW(), NOW())`,
                 [plotId, entry.driver_id, entry.rank]
             );
@@ -129,7 +168,7 @@ const createWaitingQueueService = ({
 
         try {
             const [rows] = await db.query(
-                'SELECT driver_id, rank FROM plot_driver_queues WHERE plot_id = ? ORDER BY rank ASC, id ASC',
+                'SELECT driver_id, `rank` FROM plot_driver_queues WHERE plot_id = ? ORDER BY `rank` ASC, id ASC',
                 [plotId]
             );
 
@@ -166,10 +205,6 @@ const createWaitingQueueService = ({
     const resolvePlotIdFromBooking = async (db, booking) => {
         if (booking?.pickup_plot_id) {
             return parseInt(booking.pickup_plot_id, 10);
-        }
-
-        if (booking?.destination_plot_id) {
-            return parseInt(booking.destination_plot_id, 10);
         }
 
         if (!booking?.pickup_point || !String(booking.pickup_point).includes(',')) {
@@ -287,9 +322,12 @@ const createWaitingQueueService = ({
 
         const driverIds = queue.map((entry) => entry.driver_id);
         const [drivers] = await db.query(
-            `SELECT d.id, d.name, d.plot_id, d.latitude, d.longitude, p.name AS plot_name
+            `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                    d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
+                    p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
+             LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
              WHERE d.id IN (?)`,
             [driverIds]
         );
@@ -304,20 +342,21 @@ const createWaitingQueueService = ({
                     return null;
                 }
 
-                const lastUpdate = driverLastLocationTime.get(String(driver.id)) || 0;
+                const lastUpdate = driverLastLocationTime.get(`${database}:${driver.id}`) || 0;
                 const timeSince = now - lastUpdate;
                 const isReconnecting = lastUpdate > 0 && timeSince > RECONNECTING_THRESHOLD_MS;
 
-                return {
-                    driver_id: driver.id,
-                    driver_name: driver.name,
+                return normalizeDriverRealtimePayload(driver, database, {
                     plot_id: plotId,
                     plot_name: driver.plot_name || plotName,
                     rank: entry.rank,
                     latitude: driver.latitude,
                     longitude: driver.longitude,
                     is_reconnecting: isReconnecting,
-                };
+                    status: driver.driving_status || 'idle',
+                    driving_status: driver.driving_status || 'idle',
+                    online_status: driver.online_status || 'online',
+                });
             })
             .filter(Boolean);
 
@@ -333,23 +372,24 @@ const createWaitingQueueService = ({
             return null;
         }
 
-        const db = getConnection(`tenant${database}`);
-        const queue = await loadPlotQueueFromDb(db, plotId, database);
-        const payload = await buildDriverPayload(db, database, plotId, queue, bookingId);
+        const dbName = toTenantSocketName(database);
+        const db = getConnection(toTenantDbName(dbName));
+        const queue = await loadPlotQueueFromDb(db, plotId, dbName);
+        const payload = await buildDriverPayload(db, dbName, plotId, queue, bookingId);
 
         const response = {
             success: true,
-            database,
+            database: dbName,
             plot_id: payload.plot_id,
             booking_id: payload.booking_id,
             drivers: payload.drivers,
             total_idle_drivers: payload.drivers.length,
         };
 
-        io.to(`driver_${database}`).emit('my-rank-update', response);
-        io.to(`dispatcher_${database}`).emit('my-rank-update', response);
-        io.to(`admin_${database}`).emit('my-rank-update', response);
-        io.to(`client_${database}`).emit('my-rank-update', response);
+        io.to(`driver_${dbName}`).emit('my-rank-update', response);
+        io.to(`dispatcher_${dbName}`).emit('my-rank-update', response);
+        io.to(`admin_${dbName}`).emit('my-rank-update', response);
+        io.to(`client_${dbName}`).emit('my-rank-update', response);
 
         payload.drivers.forEach((driver) => {
             const legacyEvent = {
@@ -359,24 +399,25 @@ const createWaitingQueueService = ({
                 is_reconnecting: driver.is_reconnecting,
             };
 
-            io.to(`dispatcher_${database}`).emit('waiting-driver-rank-updated', legacyEvent);
-            io.to(`admin_${database}`).emit('waiting-driver-rank-updated', legacyEvent);
-            io.to(`client_${database}`).emit('waiting-driver-rank-updated', legacyEvent);
+            io.to(`dispatcher_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
+            io.to(`admin_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
+            io.to(`client_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
         });
 
         return response;
     };
 
     const broadcastAllPlotRankUpdates = async (database, bookingId = null) => {
-        const db = getConnection(`tenant${database}`);
+        const dbName = toTenantSocketName(database);
+        const db = getConnection(toTenantDbName(dbName));
         const plotIds = new Set();
 
         for (const plotKey of plotDriverQueues.keys()) {
-            if (!plotKey.endsWith(`_${database}`)) {
+            if (!plotKey.endsWith(`_${dbName}`)) {
                 continue;
             }
 
-            const plotId = plotKey.slice(0, plotKey.length - (`_${database}`).length);
+            const plotId = plotKey.slice(0, plotKey.length - (`_${dbName}`).length);
             if (plotId) {
                 plotIds.add(plotId);
             }
@@ -393,7 +434,7 @@ const createWaitingQueueService = ({
 
         const responses = [];
         for (const plotId of plotIds) {
-            responses.push(await broadcastPlotRankUpdate(database, plotId, bookingId));
+            responses.push(await broadcastPlotRankUpdate(dbName, plotId, bookingId));
         }
 
         return responses;
@@ -471,7 +512,7 @@ const createWaitingQueueService = ({
 
     const updateDriverRankInQueue = async (database, plotId, driverId, newRank) => {
         const plotKey = plotKeyFor(plotId, database);
-        const db = getConnection(`tenant${database}`);
+        const db = getConnection(toTenantDbName(database));
 
         let queue = plotDriverQueues.get(plotKey) || [];
         if (!queue.length) {

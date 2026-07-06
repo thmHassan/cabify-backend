@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "npx nodemon index.js"
+    "start": "npx nodemon index.js",
+    "stress:scale": "node stress/socket-scale.js",
+    "stress:scale:sharded": "node stress/socket-scale-sharded.js"
   },
   "keywords": [],
   "author": "",
@@ -20,5 +22,8 @@
     "nodemailer": "^7.0.13",
     "pdfkit": "^0.18.0",
     "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }

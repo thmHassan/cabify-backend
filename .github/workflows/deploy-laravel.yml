@@ -58,6 +58,7 @@ jobs:
 
             composer install --no-dev --optimize-autoloader --prefer-dist
             composer require doctrine/dbal
+            bash scripts/restore-public-upload-symlinks.sh /var/www/html/backend.cabifyit.com
             php artisan migrate
             php artisan tenants:migrate --path=database/migrations/tenant
             php artisan db:seed

@@ -330,6 +330,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::get('/driver/document-requirements', [DriverAuthController::class, 'documentRequirements']);
     Route::get('/driver/vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
     Route::get('/driver/public-vehicle-type-list', [DriverVehicleController::class, 'vehicleTypeList']);
+    Route::post('/driver/resend-otp', [DriverAuthController::class, 'resendOtp']);
     Route::post('/driver/verify-otp', [DriverAuthController::class, 'verifyOTP']);
     Route::post('/driver/verify-password', [DriverAuthController::class, 'verifyPassword']);
     Route::post('/driver/set-password', [DriverAuthController::class, 'setPassword']);
@@ -337,10 +338,27 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/driver/refresh-token', [DriverAuthController::class, 'refreshToken']);
     Route::get('/driver/policies', [DriverSettingController::class, 'policies']);
 
-    Route::group(['middleware' => ['auth.driver.jwt', 'check.app.availibility']], function () {
+    Route::group(['middleware' => ['auth.driver.jwt']], function () {
         Route::get('/driver/get-profile', [DriverAuthController::class, 'getProfile']);
         Route::post('/driver/update-profile', [DriverAuthController::class, 'updateProfile']);
 
+        Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
+        Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
+        Route::get('/driver/get-mobile-setting', [DriverSettingController::class, 'getMobileSetting']);
+
+        Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
+        Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
+
+        Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
+        Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
+        Route::post('/driver/change-vehicle-information', [DriverVehicleController::class, 'changeVehicleInformation']);
+
+        Route::post('/driver/store-token', [DriverAuthController::class, 'storeToken']);
+        Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
+        Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);
+    });
+
+    Route::group(['middleware' => ['auth.driver.jwt', 'check.app.availibility']], function () {
         Route::post('/driver/add-wallet-amount', [DriverSettingController::class, 'addWalletAmount']);
         Route::get('/driver/balance-transaction', [DriverSettingController::class, 'balanceTransaction']);
         Route::post('/driver/send-message', [DriverSettingController::class, 'sendMessage']);
@@ -349,17 +367,12 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/notification-list', [DriverSettingController::class, 'notificationList']);
         Route::get('/driver/get-purchase-package', [DriverSettingController::class, 'getPurchasePackage']);
 
-        Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
-        Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
-        Route::get('/driver/get-mobile-setting', [DriverSettingController::class, 'getMobileSetting']);
         Route::post('/driver/purchase-package', [DriverSettingController::class, 'purchasePackage']);
         Route::get('/driver/list-plot', [DriverSettingController::class, 'plotList']);
+        Route::get('/driver/driver-ranking', [DriverSettingController::class, 'driverRanking']);
         Route::get('/driver/change-status', [DriverSettingController::class, 'changeStatus']);
 
-
-        Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
-        Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
 
         Route::post('/driver/create-ticket', [DriverTicketController::class, 'createTicket']);
         Route::get('/driver/list-ticket', [DriverTicketController::class, 'ticketList']);
@@ -376,18 +389,12 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::post('/driver/reject-ride', [DriverBookingController::class, 'rejectRide']);
         Route::get('/driver/current-ride', [DriverBookingController::class, 'currentRide']);
         Route::get('/driver/arrived-status', [DriverBookingController::class, 'arrivedStatus']);
+        Route::post('/driver/no-show', [DriverBookingController::class, 'noShowRide']);
         Route::get('/driver/waiting-time', [DriverBookingController::class, 'waitingTime']);
         Route::get('/driver/change-booking-payment-status', [DriverBookingController::class, 'changeBookingPaymentStatus']);
         Route::post('/driver/verify-booking-otp', [DriverBookingController::class, 'verifyBookingOtp']);
         Route::get('/driver/complete-current-ride', [DriverBookingController::class, 'completeCurrentRide']);
 
-        Route::get('/driver/vehicle-information', [DriverVehicleController::class, 'getVehicleInformation']);
-        Route::post('/driver/vehicle-information', [DriverVehicleController::class, 'saveVehicleInformation']);
-        Route::post('/driver/change-vehicle-information', [DriverVehicleController::class, 'changeVehicleInformation']);
-
-        Route::post('/driver/store-token', [DriverAuthController::class, 'storeToken']);
-        Route::get('/driver/logout', [DriverAuthController::class, 'logout']);
-        Route::post('/driver/delete-account', [DriverAuthController::class, 'deleteAccount']);
         Route::post('/driver/set-plot-priority', [DriverAuthController::class, 'setPlotPriority']);
     });
 });

@@ -14,6 +14,7 @@ use App\Models\CompanyBooking;
 use App\Models\CompanyNotification;
 use App\Models\WalletTransaction;
 use App\Models\CompanyVehicleType;
+use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
@@ -196,6 +197,12 @@ class SettingController extends Controller
             $support_emergency_no = $setting->support_emergency_no;
             $support_rescue_number = $setting->support_rescue_number;
             $company_booking_system = $setting->company_booking_system;
+            $activeDispatchSystem = CompanyDispatchSystem::query()
+                ->select('dispatch_system')
+                ->where('status', 'enable')
+                ->groupBy('dispatch_system')
+                ->orderByRaw('MIN(priority) ASC')
+                ->value('dispatch_system');
 
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
@@ -225,6 +232,12 @@ class SettingController extends Controller
                 $company_booking_system = "bidding";
             }
 
+            if (!$activeDispatchSystem) {
+                $activeDispatchSystem = $company_booking_system === "bidding"
+                    ? "bidding"
+                    : "auto_dispatch_plot_base";
+            }
+
             $data = [
                 'stripe_key' => $stripe_key,
                 'stripe_secret_key' => $stripe_secret_key,
@@ -238,6 +251,14 @@ class SettingController extends Controller
                 'support_rescue_number' => $support_rescue_number,
                 'country_of_user' => $country_of_user,
                 'company_booking_system' => $company_booking_system,
+                'customer_capabilities' => [
+                    'dispatch_system' => $activeDispatchSystem,
+                    'allow_asap' => $activeDispatchSystem !== 'manual_dispatch_only',
+                    'allow_scheduled' => true,
+                    'show_fare_now' => true,
+                    'show_fare_scheduled' => false,
+                    'release_settings' => CompanySetting::resolveReleaseSettings($setting),
+                ],
             ];
 
             return response()->json([
@@ -245,7 +266,7 @@ class SettingController extends Controller
                 'setting' => $data
             ], 200);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -278,7 +299,7 @@ class SettingController extends Controller
                 'list' => $vehicleList
             ]);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -301,9 +322,11 @@ class SettingController extends Controller
             $driver = CompanyDriver::where("id", $request->driver_id)->first();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/driver-message-notification', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                'database' => $request->header('database'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-message-notification', [
                 'driverId' => $request->driver_id,
+                'database' => $request->header('database'),
                 'chat' => $chat
             ]);
 
@@ -341,7 +364,7 @@ class SettingController extends Controller
                 'driver' => $driver
             ]);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -384,7 +407,7 @@ class SettingController extends Controller
                 'messages' => $chat
             ]);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -402,7 +425,7 @@ class SettingController extends Controller
                 'message' => 'Notification list fetched successfully'
             ]);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()

@@ -18,11 +18,29 @@ const broadcastAction = (driverCount, plotId, isBackup, timeoutSeconds) => {
     );
 };
 
+const singleOfferAction = (driverId, rank, plotId, isBackup, timeoutSeconds) => {
+    const plotLabel = isBackup ? 'backup plot' : 'primary plot';
+    return activeAction(
+        `Offered to driver #${driverId} rank ${rank} in ${plotLabel} #${plotId} — waiting up to ${timeoutSeconds}s`
+    );
+};
+
 const exhaustedAction = () => (
     'Plot dispatch failed — no driver accepted across primary/backup plots. Available for manual dispatch.'
 );
 
-const acceptedAction = (driverId) => `Plot-based dispatch — accepted by driver #${driverId}`;
+const exhaustedBiddingAction = () => (
+    'Plot dispatch failed — no driver accepted across primary/backup plots. Available for manual dispatch and fixed-fare bidding.'
+);
+
+const missingPickupPlotAction = () => (
+    'Pickup is outside all service plots. Manual dispatch required.'
+);
+
+const acceptedAction = (driverName, driverId = null) => {
+    const label = driverName || (driverId ? `driver #${driverId}` : 'driver');
+    return `Plot-based dispatch - accepted by ${label}`;
+};
 
 const isPlotDispatchInProgress = (dispatcherAction) => {
     if (typeof dispatcherAction !== 'string' || dispatcherAction === '') {
@@ -50,6 +68,7 @@ const isPlotDispatchInProgress = (dispatcherAction) => {
         'broadcast to',
         'driver(s) in plot',
         'driver(s) in backup plot',
+        'offered to driver',
         'dispatched to primary plot',
         'dispatched to backup plot',
         'plot dispatch',
@@ -67,6 +86,7 @@ const plotDispatchHideSql = (alias = '') => {
             AND LOWER(${col('dispatcher_action')}) NOT LIKE '%started plot-based dispatch%'
             AND LOWER(${col('dispatcher_action')}) NOT LIKE '%broadcast to %driver(s) in plot%'
             AND LOWER(${col('dispatcher_action')}) NOT LIKE '%broadcast to %driver(s) in backup plot%'
+            AND LOWER(${col('dispatcher_action')}) NOT LIKE '%offered to driver%'
             AND LOWER(${col('dispatcher_action')}) NOT LIKE '%dispatched to primary plot%'
             AND LOWER(${col('dispatcher_action')}) NOT LIKE '%dispatched to backup plot%'
             AND LOWER(${col('dispatcher_action')}) NOT LIKE '%plot dispatch%in progress%'
@@ -102,19 +122,9 @@ const todaysBookingVisibilitySql = (alias = '') => {
     const col = (name) => (alias ? `${alias}.${name}` : name);
 
     return `(
-    ${col('booking_status')} IN ('pending', 'pending_acceptance', 'started', 'unassigned')
-    AND (
-        (
-            (${plotDispatchHideSql(alias)})
-            AND (${freshAsapAwaitingDispatchHideSql(alias)})
-        )
-        OR ${col('booking_status')} = 'unassigned'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%no driver accepted%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%plot dispatch failed%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%all plots exhausted%'
-        OR LOWER(${col('dispatcher_action')}) LIKE '%available for manual%'
-    )
-)`;
+        ${col('booking_status')} IS NULL
+        OR ${col('booking_status')} NOT IN ('completed', 'no_show', 'cancelled')
+    )`;
 };
 
 module.exports = {
@@ -123,7 +133,10 @@ module.exports = {
     startedAction,
     dispatchedPlotAction,
     broadcastAction,
+    singleOfferAction,
     exhaustedAction,
+    exhaustedBiddingAction,
+    missingPickupPlotAction,
     acceptedAction,
     isPlotDispatchInProgress,
     plotDispatchHideSql,

@@ -9,15 +9,14 @@ const http = require("http");
 const { Server } = require("socket.io");
 const PDFDocument = require('pdfkit');
 const axios = require("axios");
-const { getConnection } = require("./db")
+const { getConnection, getPoolStats } = require("./db")
+const { createLatestPerKeyCoalescer } = require("./locationPersistCoalescer")
 const transporter = require("./utils/Emailconfig");
 const { getMailFrom } = require("./utils/Emailconfig");
 const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 const { PLOT_DISPATCH_ACTIVE_PREFIX } = require("./plotDispatchService");
-const { todaysBookingVisibilitySql } = require("./plotDispatchMessages");
-
-console.log("Loaded VIP Token:", process.env.VIP_WEBHOOK_TOKEN);
+const { createWaitingQueueService, pointInPolygon } = require("./waitingQueueService");
 
 const app = express();
 
@@ -32,8 +31,12 @@ app.use(cors(SOCKET_API_CORS));
 app.options(/.*/, cors(SOCKET_API_CORS));
 
 const server = http.createServer(app);
+const SOCKET_PING_INTERVAL_MS = Number(process.env.SOCKET_PING_INTERVAL_MS || 25000);
+const SOCKET_PING_TIMEOUT_MS = Number(process.env.SOCKET_PING_TIMEOUT_MS || 60000);
 
 const io = new Server(server, {
+    pingInterval: SOCKET_PING_INTERVAL_MS,
+    pingTimeout: SOCKET_PING_TIMEOUT_MS,
     cors: {
         origin: "*"
     }
@@ -45,46 +48,151 @@ const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
 
-const preBookingsCondition = (alias = '') => {
+const formatDateInTimezone = (date = new Date(), timeZone = 'UTC') => {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+
+    const parts = Object.fromEntries(
+        formatter
+            .formatToParts(date)
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, part.value])
+    );
+
+    return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
+const sqlDateLiteral = (dateString) => `'${String(dateString).replace(/[^0-9-]/g, '')}'`;
+
+const getTenantTimezone = async (db) => {
+    try {
+        const [rows] = await db.query(
+            "SELECT company_timezone FROM settings WHERE company_timezone IS NOT NULL AND company_timezone != '' ORDER BY id DESC LIMIT 1"
+        );
+        return rows?.[0]?.company_timezone || process.env.APP_TIMEZONE || 'UTC';
+    } catch (error) {
+        console.warn('[Timezone] Could not load tenant timezone:', error.message);
+        return process.env.APP_TIMEZONE || 'UTC';
+    }
+};
+
+const getTenantTodayDate = async (db) => {
+    const timezone = await getTenantTimezone(db);
+    try {
+        return formatDateInTimezone(new Date(), timezone);
+    } catch (error) {
+        console.warn(`[Timezone] Invalid tenant timezone "${timezone}", falling back to UTC`);
+        return formatDateInTimezone(new Date(), 'UTC');
+    }
+};
+
+const TERMINAL_BOOKING_STATUSES = ['completed', 'no_show', 'cancelled'];
+const terminalStatusesSqlList = TERMINAL_BOOKING_STATUSES.map((status) => `'${status}'`).join(', ');
+const ACTIVE_RIDE_STATUSES = ['pending_acceptance', 'ongoing', 'arrived', 'started'];
+const activeRideStatusesSqlList = ACTIVE_RIDE_STATUSES.map((status) => `'${status}'`).join(', ');
+
+const nonTerminalBookingCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+
+    return `(${column('booking_status')} IS NULL OR ${column('booking_status')} NOT IN (${terminalStatusesSqlList}))`;
+};
+
+const todayBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
 
     return `
-    (${column('pickup_time_type')} = 'time' OR ${column('is_scheduled')} = 1)
-    AND (${column('dispatch_released')} = 0 OR ${column('dispatch_released')} IS NULL)
-    AND ${column('booking_status')} = 'pending'
-    AND DATE(${column('booking_date')}) > CURDATE()
+    DATE(${column('booking_date')}) = ${todayExpression}
+    AND ${nonTerminalBookingCondition(alias)}
 `;
 };
 
-const isPreBookingRow = (booking) => {
-    const isScheduled = booking?.pickup_time_type === 'time' || booking?.is_scheduled == 1;
-    const dispatchReleased = booking?.dispatch_released == 1;
+const preBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
 
-    if (!booking || !isScheduled || dispatchReleased) {
+    return `
+    DATE(${column('booking_date')}) > ${todayExpression}
+    AND ${nonTerminalBookingCondition(alias)}
+`;
+};
+
+const recentJobsCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+    return `${column('updated_at')} >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+};
+
+const isTerminalBookingStatus = (status) =>
+    TERMINAL_BOOKING_STATUSES.includes(String(status || '').toLowerCase());
+
+const toDateOnlyString = (value) => {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString().split('T')[0];
+    }
+    const text = String(value);
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().split('T')[0];
+};
+
+const isPreBookingRow = (booking, todayDate = null) => {
+    if (!booking || !booking.booking_date || isTerminalBookingStatus(booking.booking_status)) {
         return false;
     }
 
-    if (booking.booking_status !== 'pending' || !booking.booking_date || booking.pickup_time === 'asap') {
-        return false;
-    }
+    const bookingDateStr = toDateOnlyString(booking.booking_date);
+    const todayStr = toDateOnlyString(todayDate) || toDateOnlyString(new Date());
 
-    const bookingDateStr = new Date(booking.booking_date).toISOString().split('T')[0];
-    const todayStr = new Date().toISOString().split('T')[0];
-    const pickupAt = new Date(`${bookingDateStr}T${booking.pickup_time}`);
-
-    return bookingDateStr > todayStr && pickupAt.getTime() > Date.now();
+    return Boolean(bookingDateStr && todayStr && bookingDateStr > todayStr);
 };
 
 const plotDriverQueues = new Map();
 const driverLastLocationTime = new Map();
 const driverDisconnectTimers = new Map();
+const knownDriverRuntimeKeys = new Set();
 const DISCONNECT_GRACE_MS = 15 * 60 * 1000;
 
 const LOCATION_TIMEOUT_MS = 15 * 60 * 1000;
 const RECONNECTING_THRESHOLD_MS = 10 * 1000;
+const GPS_IDLE_PERSIST_MS = Number(process.env.SOCKET_GPS_IDLE_PERSIST_MS || 30000);
+const GPS_ACTIVE_PERSIST_MS = Number(process.env.SOCKET_GPS_ACTIVE_PERSIST_MS || 5000);
+const GPS_IDLE_MIN_MOVEMENT_METERS = Number(process.env.SOCKET_GPS_IDLE_MIN_MOVEMENT_METERS || 75);
+const GPS_ACTIVE_MIN_MOVEMENT_METERS = Number(process.env.SOCKET_GPS_ACTIVE_MIN_MOVEMENT_METERS || 15);
+const GPS_PERSIST_CONCURRENCY = Number(process.env.SOCKET_GPS_PERSIST_CONCURRENCY || 10);
+const QUEUE_FULL_BROADCAST_COALESCE_MS = Number(process.env.SOCKET_QUEUE_FULL_BROADCAST_COALESCE_MS || 2000);
+const SOCKET_LISTEN_BACKLOG = Number(process.env.SOCKET_LISTEN_BACKLOG || 8192);
+const GPS_LIVE_BROADCAST_FLUSH_MS = Number(process.env.SOCKET_GPS_LIVE_BROADCAST_FLUSH_MS || 250);
+const driverLocationCache = new Map();
+const driverLocationPersistTime = new Map();
+const plotPolygonCache = new Map();
+const gpsStats = {
+    accepted: 0,
+    broadcast: 0,
+    persisted: 0,
+    skippedPersist: 0,
+    coalescedPersist: 0,
+    pendingPersisted: 0,
+    dbErrors: 0,
+};
+const liveGpsBroadcastStats = {
+    scheduled: 0,
+    flushed: 0,
+    coalesced: 0,
+};
+const queueBroadcastStats = {
+    requested: 0,
+    executed: 0,
+    coalesced: 0,
+    errors: 0,
+};
+const PLOT_POLYGON_CACHE_MS = Number(process.env.SOCKET_PLOT_POLYGON_CACHE_MS || 60000);
 
 const AUTO_DISPATCH_TIMEOUT_MS = 30000;
-const NEAREST_DISPATCH_TIMEOUT_MS = 90000;
+const DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS = 30;
 const NEAREST_DISPATCH_ACTIVE_PREFIX = 'NEAREST_DISPATCH_ACTIVE|';
 const ACTIVE_DISPATCH_HIDE_PREFIXES = [NEAREST_DISPATCH_ACTIVE_PREFIX, PLOT_DISPATCH_ACTIVE_PREFIX];
 const activeDispatchHideSql = (alias = '') => {
@@ -94,9 +202,395 @@ const activeDispatchHideSql = (alias = '') => {
         .join(' AND ');
 };
 const DEFAULT_NEAREST_SEARCH_RADIUS_KM = 1;
+const RECONNECTING_ELIGIBILITY_MINUTES = 15;
 const autoDispatchSessions = new Map();
 const nearestDispatchSessions = new Map();
 let autoDispatchOfferToken = 0;
+
+const tenantSocketKey = (database, id) => {
+    if (!database || id === undefined || id === null || id === '') return null;
+    return `${toTenantSocketName(database)}:${String(id).trim()}`;
+};
+
+const toTenantSocketName = (database) => {
+    const value = String(database || '').trim();
+    return value.replace(/^tenant/i, '');
+};
+
+const toTenantDbName = (database) => {
+    const value = toTenantSocketName(database);
+    return value ? `tenant${value}` : null;
+};
+
+const setTenantSocket = (map, database, id, socketId) => {
+    const key = tenantSocketKey(database, id);
+    if (key) map.set(key, socketId);
+};
+
+const getTenantSocket = (map, database, id) => {
+    const key = tenantSocketKey(database, id);
+    return key ? map.get(key) : null;
+};
+
+const deleteTenantSocket = (map, database, id) => {
+    const key = tenantSocketKey(database, id);
+    if (key) map.delete(key);
+};
+
+const emitTenantDriverOffline = (database, payload) => {
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit("driver-offline-event", eventPayload);
+    io.to(`admin_${dbName}`).emit("driver-offline-event", eventPayload);
+    io.to(`client_${dbName}`).emit("driver-offline-event", eventPayload);
+};
+
+const emitTenantWaitingDriver = (database, payload) => {
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventPayload);
+    io.to(`admin_${dbName}`).emit("waiting-driver-event", eventPayload);
+    io.to(`client_${dbName}`).emit("waiting-driver-event", eventPayload);
+};
+
+const emitTenantOnJobDriver = (database, payload) => {
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventPayload);
+    io.to(`admin_${dbName}`).emit("on-job-driver-event", eventPayload);
+    io.to(`client_${dbName}`).emit("on-job-driver-event", eventPayload);
+};
+
+const emitTenantRooms = (database, event, payload) => {
+    if (!database || !event) return;
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    io.to(`dispatcher_${dbName}`).emit(event, eventPayload);
+    io.to(`admin_${dbName}`).emit(event, eventPayload);
+    io.to(`client_${dbName}`).emit(event, eventPayload);
+};
+
+const pendingLiveGpsBroadcasts = new Map();
+const liveGpsBroadcastTimers = new Map();
+
+const flushLiveGpsBroadcasts = (database) => {
+    const dbName = toTenantSocketName(database);
+    const pending = pendingLiveGpsBroadcasts.get(dbName);
+    liveGpsBroadcastTimers.delete(dbName);
+
+    if (!pending || pending.size === 0) {
+        pendingLiveGpsBroadcasts.delete(dbName);
+        return;
+    }
+
+    pendingLiveGpsBroadcasts.delete(dbName);
+    for (const payload of pending.values()) {
+        emitTenantRooms(dbName, "driver-location-update", payload);
+        liveGpsBroadcastStats.flushed += 1;
+    }
+};
+
+const scheduleLiveGpsBroadcast = (database, driverId, payload) => {
+    const dbName = toTenantSocketName(database);
+    if (!dbName || !driverId || !payload) return;
+
+    let pending = pendingLiveGpsBroadcasts.get(dbName);
+    if (!pending) {
+        pending = new Map();
+        pendingLiveGpsBroadcasts.set(dbName, pending);
+    }
+
+    const driverKey = String(driverId);
+    if (pending.has(driverKey)) {
+        liveGpsBroadcastStats.coalesced += 1;
+    }
+    pending.set(driverKey, payload);
+    liveGpsBroadcastStats.scheduled += 1;
+
+    if (!liveGpsBroadcastTimers.has(dbName)) {
+        liveGpsBroadcastTimers.set(dbName, setTimeout(() => {
+            flushLiveGpsBroadcasts(dbName);
+        }, GPS_LIVE_BROADCAST_FLUSH_MS));
+    }
+};
+
+const normalizeDriverRealtimePayload = (driver, database, overrides = {}) => {
+    if (!driver) return null;
+    const dbName = toTenantSocketName(database);
+    const driverId = driver.id ?? driver.driver_id;
+    const driverName = driver.name ?? driver.driver_name ?? driver.driverName;
+    const plotId = driver.plot_id ?? driver.plot;
+
+    return {
+        ...driver,
+        ...overrides,
+        id: driverId,
+        driver_id: driverId,
+        driverName,
+        driver_name: driverName,
+        name: driverName,
+        phone_no: driver.phone_no ?? driver.driver_phone ?? driver.phone ?? null,
+        phone: driver.phone ?? driver.phone_no ?? driver.driver_phone ?? null,
+        plate_no: driver.plate_no ?? driver.plate ?? null,
+        plate: driver.plate ?? driver.plate_no ?? null,
+        assigned_vehicle: driver.assigned_vehicle ?? null,
+        vehicle_name: driver.vehicle_name ?? driver.vehicle_type_name ?? null,
+        vehicle_type: driver.vehicle_type ?? driver.vehicle_type_service ?? driver.vehicle_type_name ?? null,
+        vehicle_service: driver.vehicle_service ?? driver.vehicle_type_service ?? null,
+        vehicle_type_name: driver.vehicle_type_name ?? null,
+        vehicle_type_service: driver.vehicle_type_service ?? null,
+        plot: plotId,
+        plot_id: plotId,
+        plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : 'N/A'),
+        database: dbName,
+    };
+};
+
+const parseCoordinate = (value) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isValidCoordinatePair = (latitude, longitude) => (
+    latitude !== null
+    && longitude !== null
+    && latitude >= -90
+    && latitude <= 90
+    && longitude >= -180
+    && longitude <= 180
+    && !(latitude === 0 && longitude === 0)
+);
+
+const distanceMeters = (from, to) => {
+    if (!from || !to) return Number.POSITIVE_INFINITY;
+    const toRadians = (degrees) => degrees * Math.PI / 180;
+    const earthRadiusMeters = 6371000;
+    const dLat = toRadians(to.latitude - from.latitude);
+    const dLng = toRadians(to.longitude - from.longitude);
+    const lat1 = toRadians(from.latitude);
+    const lat2 = toRadians(to.latitude);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const isActiveRideStatus = (status) => {
+    const normalized = String(status || '').toLowerCase();
+    return ['busy', 'ongoing', 'arrived', 'started', 'pending_acceptance'].includes(normalized);
+};
+
+const shouldPersistDriverLocation = ({ runtimeKey, current, status, onlineStatus, force = false }) => {
+    if (force) return true;
+
+    const cached = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
+    if (!cached) return true;
+
+    const statusChanged = status
+        && String(status) !== String(cached.driving_status || cached.status || '');
+    const onlineStatusChanged = onlineStatus
+        && String(onlineStatus) !== String(cached.online_status || '');
+    if (statusChanged || onlineStatusChanged) return true;
+
+    const active = isActiveRideStatus(status || cached?.driving_status || cached?.status);
+    const minInterval = active ? GPS_ACTIVE_PERSIST_MS : GPS_IDLE_PERSIST_MS;
+    const minMovement = active ? GPS_ACTIVE_MIN_MOVEMENT_METERS : GPS_IDLE_MIN_MOVEMENT_METERS;
+    const lastPersistAt = runtimeKey ? (driverLocationPersistTime.get(runtimeKey) || 0) : 0;
+    const movedMeters = distanceMeters(cached, current);
+
+    if (!lastPersistAt) return true;
+    if (Date.now() - lastPersistAt >= minInterval) return true;
+    return movedMeters >= minMovement;
+};
+
+const parsePlotPolygonForLocation = (plot) => {
+    if (!plot?.features) return null;
+    try {
+        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
+        const geometry = features.geometry || features;
+        const rawCoords = geometry.coordinates;
+        if (typeof rawCoords === 'string') {
+            const parsed = JSON.parse(rawCoords);
+            return Array.isArray(parsed?.[0]) ? parsed[0] : parsed;
+        }
+        if (Array.isArray(rawCoords)) {
+            return Array.isArray(rawCoords[0]?.[0]) ? rawCoords[0] : rawCoords;
+        }
+    } catch (error) {
+        console.error('[LocationUpdate] Failed to parse plot polygon:', error.message);
+    }
+    return null;
+};
+
+const getCachedPlotPolygons = async (db, database) => {
+    const cacheKey = toTenantSocketName(database);
+    const cached = plotPolygonCache.get(cacheKey);
+    if (cached && Date.now() - cached.loadedAt < PLOT_POLYGON_CACHE_MS) {
+        return cached.plots;
+    }
+
+    const [plotRows] = await db.query('SELECT id, features FROM plots ORDER BY id DESC');
+    const plots = plotRows
+        .map((plot) => ({
+            id: plot.id,
+            polygon: parsePlotPolygonForLocation(plot),
+        }))
+        .filter((plot) => plot.polygon);
+
+    plotPolygonCache.set(cacheKey, { loadedAt: Date.now(), plots });
+    return plots;
+};
+
+const resolvePlotIdForLocation = async (db, database, latitude, longitude) => {
+    const plots = await getCachedPlotPolygons(db, database);
+    for (const plot of plots) {
+        if (pointInPolygon(latitude, longitude, plot.polygon)) {
+            return plot.id;
+        }
+    }
+    return null;
+};
+
+const cacheDriverLocationSnapshot = ({
+    runtimeKey,
+    cachedDriver,
+    driverId,
+    latitude,
+    longitude,
+    status,
+    onlineStatus,
+}) => {
+    if (!runtimeKey) return;
+    driverLocationCache.set(runtimeKey, {
+        ...(cachedDriver || {}),
+        id: driverId,
+        driver_id: driverId,
+        latitude,
+        longitude,
+        driving_status: status || cachedDriver?.driving_status || 'idle',
+        online_status: onlineStatus || cachedDriver?.online_status || 'online',
+    });
+};
+
+const persistDriverLocationSnapshot = async ({
+    dbName,
+    driverId,
+    latitude,
+    longitude,
+    status,
+    onlineStatus,
+    runtimeKey,
+    cachedDriver,
+    socket,
+}) => {
+    try {
+        const db = getConnection(toTenantDbName(dbName));
+        const plotId = await resolvePlotIdForLocation(db, dbName, latitude, longitude);
+        const updates = ['latitude = ?', 'longitude = ?', 'updated_at = NOW()'];
+        const params = [latitude, longitude];
+
+        if (status) {
+            updates.push('driving_status = ?');
+            params.push(status);
+        }
+        if (onlineStatus) {
+            updates.push('online_status = ?');
+            params.push(onlineStatus);
+        }
+        if (plotId) {
+            updates.push('plot_id = ?');
+            params.push(plotId);
+        }
+
+        params.push(driverId);
+        await db.query(
+            `UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`,
+            params
+        );
+
+        if (runtimeKey) {
+            driverLocationPersistTime.set(runtimeKey, Date.now());
+        }
+
+        const [dbDriverRows] = await db.query(
+            `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                    d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
+                    p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
+             FROM drivers d
+             LEFT JOIN plots p ON d.plot_id = p.id
+             LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
+             WHERE d.id = ? LIMIT 1`,
+            [driverId]
+        );
+
+        if (dbDriverRows.length > 0) {
+            const dbDriver = dbDriverRows[0];
+            const previousPlotId = cachedDriver?.plot_id;
+            const plotChanged = previousPlotId
+                && dbDriver.plot_id
+                && String(previousPlotId) !== String(dbDriver.plot_id);
+            if (runtimeKey) {
+                driverLocationCache.set(runtimeKey, {
+                    ...dbDriver,
+                    latitude,
+                    longitude,
+                });
+            }
+
+            emitTenantRooms(dbName, "driver-location-update", normalizeDriverRealtimePayload(dbDriver, dbName, {
+                latitude,
+                longitude,
+                status: dbDriver.driving_status || "idle",
+            }));
+
+            const isIdleAndOnline = dbDriver.driving_status === "idle" && dbDriver.online_status === "online";
+            if (plotChanged && isIdleAndOnline) {
+                await removeFromQueue(dbDriver.id, dbName);
+                const rank = dbDriver.plot_id ? await getOrAssignRankForDriver(dbDriver.plot_id, dbName, dbDriver.id) : "-";
+                const eventData = normalizeDriverRealtimePayload(dbDriver, dbName, {
+                    rank,
+                    status: dbDriver.driving_status,
+                    latitude,
+                    longitude,
+                    online_status: dbDriver.online_status,
+                    is_reconnecting: false,
+                });
+                emitTenantWaitingDriver(dbName, eventData);
+                socket?.emit("waiting-driver-event", eventData);
+            } else if (isActiveRideStatus(dbDriver.driving_status)) {
+                emitTenantOnJobDriver(dbName, normalizeDriverRealtimePayload(dbDriver, dbName, {
+                    rank: null,
+                    status: dbDriver.driving_status,
+                    latitude,
+                    longitude,
+                    online_status: dbDriver.online_status,
+                }));
+            }
+        }
+        gpsStats.persisted += 1;
+    } catch (dbErr) {
+        gpsStats.dbErrors += 1;
+        console.error("Driver location DB persist error:", dbErr.message);
+    }
+};
+
+const driverLocationPersistCoalescer = createLatestPerKeyCoalescer({
+    persist: persistDriverLocationSnapshot,
+    maxConcurrent: GPS_PERSIST_CONCURRENCY,
+    onCoalesced: () => {
+        gpsStats.coalescedPersist += 1;
+    },
+    onPendingPersisted: () => {
+        gpsStats.pendingPersisted += 1;
+    },
+    onError: (error) => {
+        gpsStats.dbErrors += 1;
+        console.error("Driver location persist scheduler error:", error.message);
+    },
+});
+
+const scheduleDriverLocationPersist = (snapshot) => {
+    driverLocationPersistCoalescer.schedule(snapshot.runtimeKey, snapshot);
+};
 
 const clearAutoDispatchSession = (bookingIdInt) => {
     const key = String(bookingIdInt);
@@ -136,41 +630,240 @@ const getNearestSearchRadiusKm = async (db) => {
     return searchRadius;
 };
 
-const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverIds = []) => {
+const getNearestDispatchTimeoutMs = async (db) => {
+    try {
+        const [settingsRows] = await db.query(
+            'SELECT dispatch_timeout FROM settings ORDER BY id DESC LIMIT 1'
+        );
+        if (settingsRows.length && settingsRows[0].dispatch_timeout) {
+            const seconds = parseInt(settingsRows[0].dispatch_timeout, 10);
+            if (!Number.isNaN(seconds) && seconds > 0) {
+                return seconds * 1000;
+            }
+        }
+    } catch (e) {
+        console.error('[NearestDispatch] Timeout setting fetch error:', e.message);
+    }
+
+    return DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS * 1000;
+};
+
+const isTruthyDbValue = (value) => (
+    value === true
+    || value === 1
+    || value === '1'
+    || String(value || '').toLowerCase() === 'yes'
+    || String(value || '').toLowerCase() === 'true'
+);
+
+const nearestDriverBiddingFallbackEnabled = async (db, booking) => {
+    if (isTruthyDbValue(booking?.bidding_fallback)) {
+        return true;
+    }
+
+    try {
+        const [rows] = await db.query(
+            `SELECT id FROM dispatch_system
+             WHERE status = 'enable'
+             AND dispatch_system = 'auto_dispatch_nearest_driver'
+             AND steps = 'put_in_bidding_panel'
+             LIMIT 1`
+        );
+        return rows.length > 0;
+    } catch (error) {
+        console.error('[NearestDispatch] Bidding fallback setting lookup error:', error.message);
+        return false;
+    }
+};
+
+const buildActiveRideExclusion = (driverAlias = 'd', currentBookingId = null) => {
+    const params = [];
+    const bookingClauses = [];
+    if (currentBookingId) {
+        bookingClauses.push('b.id <> ?');
+        params.push(currentBookingId);
+    }
+    bookingClauses.push(`(b.driver = ${driverAlias}.id OR b.pending_driver_id = ${driverAlias}.id)`);
+    bookingClauses.push(`b.booking_status IN (${activeRideStatusesSqlList})`);
+
+    return {
+        sql: `
+        AND NOT EXISTS (
+            SELECT 1
+            FROM bookings b
+            WHERE ${bookingClauses.join('\n            AND ')}
+        )`,
+        params,
+    };
+};
+
+const buildRequestedVehicleFilter = (booking, driverAlias = 'd') => {
+    if (!booking?.vehicle) {
+        return { sql: '', params: [] };
+    }
+
+    return {
+        sql: `AND ${driverAlias}.assigned_vehicle = ?`,
+        params: [String(booking.vehicle)],
+    };
+};
+
+const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverIds = [], currentBookingId = null, booking = null) => {
     let excludeClause = '';
-    let queryParams = [lat, lng, lat];
+    let excludeParams = [];
+    const activeRideExclusion = buildActiveRideExclusion('d', currentBookingId);
+    const vehicleFilter = buildRequestedVehicleFilter(booking, 'd');
 
     if (excludeDriverIds.length > 0) {
-        excludeClause = `AND id NOT IN (${excludeDriverIds.map(() => '?').join(',')})`;
-        queryParams = [lat, lng, lat, ...excludeDriverIds];
+        excludeClause = `AND d.id NOT IN (${excludeDriverIds.map(() => '?').join(',')})`;
+        excludeParams = [...excludeDriverIds];
     }
 
     const [nearestDrivers] = await db.query(`
-        SELECT *,
+        SELECT d.*,
             (6371 * acos(
-                cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?))
-                + sin(radians(?)) * sin(radians(latitude))
+                cos(radians(?)) * cos(radians(d.latitude)) * cos(radians(d.longitude) - radians(?))
+                + sin(radians(?)) * sin(radians(d.latitude))
             )) AS distance
-        FROM drivers
-        WHERE driving_status = 'idle'
-        AND online_status = 'online'
-        AND latitude IS NOT NULL
-        AND longitude IS NOT NULL
+        FROM drivers d
+        WHERE d.driving_status = 'idle'
+        AND (
+            d.online_status = 'online'
+            OR (d.online_status = 'reconnecting' AND d.updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
+        )
+        AND d.latitude IS NOT NULL
+        AND d.longitude IS NOT NULL
+        ${activeRideExclusion.sql}
+        ${vehicleFilter.sql}
         ${excludeClause}
         HAVING distance IS NOT NULL AND distance <= ?
         ORDER BY distance ASC
-    `, [...queryParams, searchRadius]);
+    `, [
+        lat,
+        lng,
+        lat,
+        RECONNECTING_ELIGIBILITY_MINUTES,
+        ...activeRideExclusion.params,
+        ...vehicleFilter.params,
+        ...excludeParams,
+        searchRadius,
+    ]);
 
     return nearestDrivers;
 };
 
-const notifyNearestDriversRideWithdrawn = (notifiedDriverIds, acceptedDriverId, bookingIdInt) => {
+const fetchBiddingFallbackDrivers = async (db, booking) => {
+    const activeRideExclusion = buildActiveRideExclusion('d', booking?.id);
+    const vehicleFilter = buildRequestedVehicleFilter(booking, 'd');
+
+    const [drivers] = await db.query(`
+        SELECT d.id
+        FROM drivers d
+        WHERE d.status = 'accepted'
+        AND d.driving_status = 'idle'
+        AND (
+            d.online_status = 'online'
+            OR (d.online_status = 'reconnecting' AND d.updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
+        )
+        ${activeRideExclusion.sql}
+        ${vehicleFilter.sql}
+        ORDER BY d.id ASC
+    `, [
+        RECONNECTING_ELIGIBILITY_MINUTES,
+        ...activeRideExclusion.params,
+        ...vehicleFilter.params,
+    ]);
+
+    return drivers.map((driver) => driver.id);
+};
+
+const notifyBiddingFallbackDrivers = async (db, dbName, booking) => {
+    const driverIds = await fetchBiddingFallbackDrivers(db, booking);
+    const payload = {
+        ...booking,
+        fixed_fare: true,
+        assignment_type: 'fixed_fare_bidding',
+    };
+
+    for (const driverId of driverIds) {
+        try {
+            await sendNotificationToDriver(
+                db,
+                driverId,
+                'New Ride Available',
+                'You have a new ride request',
+                { booking_id: String(booking.id), type: 'new_ride' }
+            );
+        } catch (error) {
+            console.error(`[NearestDispatch] Bidding fallback FCM error for driver #${driverId}:`, error.message);
+        }
+
+        const socketId = getTenantSocket(driverSockets, dbName, driverId);
+        if (socketId) {
+            io.to(socketId).emit('new-ride-request', {
+                booking_id: booking.id,
+                message: 'You have a new ride request',
+                booking: payload,
+            });
+        }
+
+        try {
+            await db.query(
+                'INSERT INTO send_new_rides (booking_id, driver_id, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
+                [booking.id, driverId]
+            );
+        } catch (error) {
+            console.error(`[NearestDispatch] Bidding fallback send_new_rides insert error for driver #${driverId}:`, error.message);
+        }
+    }
+
+    return driverIds.length;
+};
+
+const parseServicePlotPolygon = (plot) => {
+    if (!plot?.features) return null;
+
+    try {
+        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
+        const geometry = features.geometry || features;
+        let coordinates = geometry.coordinates;
+
+        if (typeof coordinates === 'string') {
+            coordinates = JSON.parse(coordinates);
+        }
+
+        if (!Array.isArray(coordinates)) return null;
+
+        return Array.isArray(coordinates[0]?.[0]) ? coordinates[0] : coordinates;
+    } catch (error) {
+        console.error('[NearestDispatch] Failed to parse service plot:', error.message);
+        return null;
+    }
+};
+
+const findServicePlotForPickup = async (db, lat, lng) => {
+    try {
+        const [plots] = await db.query('SELECT id, name, features FROM plots ORDER BY id DESC');
+        for (const plot of plots) {
+            const polygon = parseServicePlotPolygon(plot);
+            if (polygon && pointInPolygon(lat, lng, polygon)) {
+                return plot;
+            }
+        }
+    } catch (error) {
+        console.error('[NearestDispatch] Service plot lookup error:', error.message);
+    }
+
+    return null;
+};
+
+const notifyNearestDriversRideWithdrawn = (dbName, notifiedDriverIds, acceptedDriverId, bookingIdInt) => {
     notifiedDriverIds.forEach((driverId) => {
         if (String(driverId) === String(acceptedDriverId)) {
             return;
         }
 
-        const driverSocketId = driverSockets.get(String(driverId).trim());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driverId);
         if (driverSocketId) {
             io.to(driverSocketId).emit('ride-no-longer-available', {
                 booking_id: bookingIdInt,
@@ -185,14 +878,14 @@ const isNearestDispatchActive = (dispatcherAction) => (
     && dispatcherAction.startsWith(NEAREST_DISPATCH_ACTIVE_PREFIX)
 );
 
-const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName }) => {
+const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName, message: fallbackMessage = null }) => {
     clearAutoDispatchSession(bookingIdInt);
     clearNearestDispatchSession(bookingIdInt);
     if (typeof plotDispatch !== 'undefined') {
         plotDispatch.clearPlotDispatchSession(bookingIdInt);
     }
 
-    const message = 'Auto dispatch completed — no driver accepted. Booking is available for manual dispatch.';
+    const message = fallbackMessage || 'Auto dispatch completed — no driver accepted. Booking is available for manual dispatch.';
 
     try {
         await db.query(
@@ -222,13 +915,8 @@ const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName }) 
         fallback: 'manual_dispatch_only',
     };
 
-    dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
-    adminSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
-    clientSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
-
-    dispatcherSockets.forEach((sid) => io.to(sid).emit("new-booking-event", updatedBooking));
-    adminSockets.forEach((sid) => io.to(sid).emit("new-booking-event", updatedBooking));
-    clientSockets.forEach((sid) => io.to(sid).emit("new-booking-event", updatedBooking));
+    emitTenantRooms(dbName, "notification-ride", updatedBooking);
+    emitTenantRooms(dbName, "new-booking-event", updatedBooking);
 
     io.to(`dispatcher_${dbName}`).emit("manual-dispatch-required", payload);
     io.to(`admin_${dbName}`).emit("manual-dispatch-required", payload);
@@ -243,6 +931,79 @@ const fallbackToManualDispatch = async ({ bookingIdInt, tenantDb, db, dbName }) 
     await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
 
     console.log(`[AutoDispatch] Fallback to manual dispatch for booking #${bookingIdInt}`);
+};
+
+const fallbackNearestDispatchToBidding = async ({ bookingIdInt, tenantDb, db, dbName, message }) => {
+    clearAutoDispatchSession(bookingIdInt);
+    clearNearestDispatchSession(bookingIdInt);
+
+    try {
+        await db.query(
+            `UPDATE bookings
+             SET driver = NULL,
+                 pending_driver_id = NULL,
+                 booking_status = 'pending',
+                 booking_system = 'bidding',
+                 bidding_fallback = 1,
+                 dispatcher_action = ?
+             WHERE id = ?`,
+            [message, bookingIdInt]
+        );
+    } catch (error) {
+        console.error('[NearestDispatch] Bidding fallback DB update error:', error.message);
+        await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName, message });
+        return;
+    }
+
+    let updatedBooking = null;
+    try {
+        const [updatedRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        updatedBooking = updatedRows[0];
+    } catch (error) {
+        console.error('[NearestDispatch] Bidding fallback fetch error:', error.message);
+    }
+
+    if (!updatedBooking || !io) {
+        return;
+    }
+
+    const driverCount = await notifyBiddingFallbackDrivers(db, dbName, updatedBooking);
+    const payload = {
+        booking_id: bookingIdInt,
+        message,
+        booking: updatedBooking,
+        fallback: 'bidding',
+        driver_count: driverCount,
+    };
+
+    emitTenantRooms(dbName, 'notification-ride', updatedBooking);
+    emitTenantRooms(dbName, 'new-booking-event', updatedBooking);
+    io.to(`dispatcher_${dbName}`).emit('nearest-dispatch-bidding-fallback', payload);
+    io.to(`admin_${dbName}`).emit('nearest-dispatch-bidding-fallback', payload);
+    io.to(`client_${dbName}`).emit('nearest-dispatch-bidding-fallback', payload);
+
+    await broadcastDashboardCardsUpdate(tenantDb);
+    await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
+
+    console.log(`[NearestDispatch] Fallback to bidding for booking #${bookingIdInt}; notified ${driverCount} driver(s)`);
+};
+
+const fallbackNearestDispatchAfterExhaustion = async ({ bookingIdInt, tenantDb, db, dbName, message }) => {
+    let booking = null;
+    try {
+        const [bookingRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
+        booking = bookingRows[0];
+    } catch (error) {
+        console.error('[NearestDispatch] Exhaustion booking fetch error:', error.message);
+    }
+
+    if (booking && (await nearestDriverBiddingFallbackEnabled(db, booking))) {
+        await fallbackNearestDispatchToBidding({ bookingIdInt, tenantDb, db, dbName, message });
+        return 'bidding';
+    }
+
+    await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName, message });
+    return 'manual';
 };
 
 const advanceAutoDispatchAfterDriverSkip = async ({
@@ -294,9 +1055,54 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
     }
 
     const { booking_status, driver, dispatcher_action } = rows[0];
+    const actionText = String(dispatcher_action || '').toLowerCase();
+    const isManualAssignmentReject = (
+        actionText.includes('assigned') ||
+        actionText.includes('pre-job') ||
+        actionText.includes('manual') ||
+        actionText.includes('driver selected') ||
+        actionText.includes('dispatching now')
+    ) && String(driver) === String(driverId) && ['pending', 'ongoing'].includes(String(booking_status));
 
     if (plotDispatch.isPlotDispatchActive(dispatcher_action)) {
-        return plotDispatch.handlePlotDispatchReject({ bookingIdInt, driverId });
+        return plotDispatch.handlePlotDispatchReject({ bookingIdInt, tenantDb, driverId });
+    }
+
+    if (isManualAssignmentReject) {
+        const dbName = toTenantSocketName(tenantDb);
+        const rejectAction = `Driver #${driverId} rejected manual assignment — returned to dispatcher panel`;
+        await db.query(
+            `UPDATE bookings
+             SET driver = NULL,
+                 pending_driver_id = NULL,
+                 booking_status = 'pending',
+                 dispatcher_action = ?
+             WHERE id = ?`,
+            [rejectAction, bookingIdInt]
+        );
+        await db.query("UPDATE drivers SET driving_status = 'idle' WHERE id = ?", [driverId]);
+
+        const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
+        const updatedBooking = updatedRows[0] || { id: bookingIdInt };
+        const rejectEvent = {
+            booking_id: bookingIdInt,
+            id: bookingIdInt,
+            driver_id: driverId,
+            database: dbName,
+            booking: updatedBooking,
+            message: rejectAction,
+        };
+
+        emitTenantRooms(dbName, "job-rejected-by-driver", rejectEvent);
+        emitTenantRooms(dbName, "booking-updated-event", updatedBooking);
+        emitTenantRooms(dbName, "notification-ride", updatedBooking);
+        await broadcastDashboardCardsUpdate(tenantDb);
+        await broadcastTodaysBookingsListUpdate(tenantDb, db, dbName, bookingIdInt);
+
+        return {
+            status: 200,
+            body: { success: true, message: "Manual assignment rejected — returned to dispatcher panel" },
+        };
     }
 
     if (booking_status !== "pending") {
@@ -324,12 +1130,12 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
 
         const rejectEvent = {
             booking_id: bookingIdInt,
+            id: bookingIdInt,
             driver_id: driverId,
+            database: toTenantSocketName(tenantDb),
             message: `Driver #${driverId} rejected the ride`,
         };
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("job-rejected-by-driver", rejectEvent));
-        adminSockets.forEach((sid) => io.to(sid).emit("job-rejected-by-driver", rejectEvent));
-        clientSockets.forEach((sid) => io.to(sid).emit("job-rejected-by-driver", rejectEvent));
+        emitTenantRooms(tenantDb, "job-rejected-by-driver", rejectEvent);
 
         await advanceAutoDispatchAfterDriverSkip({
             bookingIdInt,
@@ -364,7 +1170,6 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
     };
 };
 
-const { createWaitingQueueService } = require("./waitingQueueService");
 const { createPlotDispatchService } = require("./plotDispatchService");
 
 const waitingQueue = createWaitingQueueService({
@@ -386,8 +1191,76 @@ const notifyPlotQueueChanged = async (database, plotId, bookingId = null) => {
     await waitingQueue.broadcastAllPlotRankUpdates(database, bookingId);
 };
 
+const fullQueueBroadcastInFlight = new Set();
+const fullQueueBroadcastPending = new Map();
+const fullQueueBroadcastTimers = new Map();
+const fullQueueLastBroadcastAt = new Map();
+
+const runFullQueueBroadcast = async (database, bookingId = null) => {
+    const dbName = toTenantSocketName(database);
+    if (!dbName) return null;
+
+    fullQueueBroadcastInFlight.add(dbName);
+    queueBroadcastStats.executed += 1;
+    try {
+        return await waitingQueue.broadcastAllPlotRankUpdates(dbName, bookingId);
+    } catch (error) {
+        queueBroadcastStats.errors += 1;
+        console.error("[WaitingQueue] Full broadcast error:", error.message);
+        return null;
+    } finally {
+        fullQueueBroadcastInFlight.delete(dbName);
+        fullQueueLastBroadcastAt.set(dbName, Date.now());
+
+        const pendingBookingId = fullQueueBroadcastPending.get(dbName);
+        if (fullQueueBroadcastPending.has(dbName)) {
+            fullQueueBroadcastPending.delete(dbName);
+            setTimeout(() => {
+                runFullQueueBroadcast(dbName, pendingBookingId).catch((error) => {
+                    queueBroadcastStats.errors += 1;
+                    console.error("[WaitingQueue] Pending full broadcast error:", error.message);
+                });
+            }, QUEUE_FULL_BROADCAST_COALESCE_MS);
+        }
+    }
+};
+
 const broadcastFullQueueToDrivers = async (database, bookingId = null) => {
-    await waitingQueue.broadcastAllPlotRankUpdates(database, bookingId);
+    const dbName = toTenantSocketName(database);
+    if (!dbName) return null;
+
+    queueBroadcastStats.requested += 1;
+
+    if (fullQueueBroadcastInFlight.has(dbName)) {
+        queueBroadcastStats.coalesced += 1;
+        fullQueueBroadcastPending.set(dbName, bookingId || fullQueueBroadcastPending.get(dbName) || null);
+        return null;
+    }
+
+    if (fullQueueBroadcastTimers.has(dbName)) {
+        queueBroadcastStats.coalesced += 1;
+        fullQueueBroadcastPending.set(dbName, bookingId || fullQueueBroadcastPending.get(dbName) || null);
+        return null;
+    }
+
+    const lastBroadcastAt = fullQueueLastBroadcastAt.get(dbName) || 0;
+    const delayMs = Math.max(0, QUEUE_FULL_BROADCAST_COALESCE_MS - (Date.now() - lastBroadcastAt));
+    if (delayMs > 0) {
+        queueBroadcastStats.coalesced += 1;
+        fullQueueBroadcastPending.set(dbName, bookingId || fullQueueBroadcastPending.get(dbName) || null);
+        fullQueueBroadcastTimers.set(dbName, setTimeout(() => {
+            fullQueueBroadcastTimers.delete(dbName);
+            const pendingBookingId = fullQueueBroadcastPending.get(dbName);
+            fullQueueBroadcastPending.delete(dbName);
+            runFullQueueBroadcast(dbName, pendingBookingId).catch((error) => {
+                queueBroadcastStats.errors += 1;
+                console.error("[WaitingQueue] Delayed full broadcast error:", error.message);
+            });
+        }, delayMs));
+        return null;
+    }
+
+    return runFullQueueBroadcast(dbName, bookingId);
 };
 
 const broadcastUpdatedQueue = (plotId, database, bookingId = null) => {
@@ -397,14 +1270,14 @@ const broadcastUpdatedQueue = (plotId, database, bookingId = null) => {
 };
 
 const getOrAssignRankForDriver = async (plotId, database, driverId) => {
-    const db = getConnection(`tenant${database}`);
+    const db = getConnection(toTenantDbName(database));
     const rank = await waitingQueue.getOrAssignRank(db, plotId, database, driverId);
     await waitingQueue.broadcastPlotRankUpdate(database, plotId, null);
     return rank;
 };
 
 const removeFromQueue = async (driverId, database, bookingId = null) => {
-    const db = getConnection(`tenant${database}`);
+    const db = getConnection(toTenantDbName(database));
     const changedPlots = await waitingQueue.removeFromQueue(db, driverId, database);
 
     for (const plotId of changedPlots) {
@@ -434,18 +1307,18 @@ const storeNotification = async (db, { user_type, user_id, title, message }) => 
 const broadcastDashboardCardsUpdate = async (tenantDb) => {
     try {
         const db = getConnection(tenantDb);
+        const todayDate = await getTenantTodayDate(db);
+        const todaySql = sqlDateLiteral(todayDate);
 
         const query = `
             SELECT
                 COUNT(CASE 
-                    WHEN DATE(booking_date) = CURDATE()
-                    AND (dispatcher_action IS NULL OR dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
-                    AND ${todaysBookingVisibilitySql()}
+                    WHEN ${todayBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS todays_booking,
 
                 COUNT(CASE 
-                    WHEN ${preBookingsCondition()}
+                    WHEN ${preBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS pre_bookings,
 
@@ -455,7 +1328,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
+                    WHEN booking_status = 'no_show'
                     THEN 1 
                 END) AS no_show,
 
@@ -465,7 +1338,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS cancelled,
 
                 COUNT(CASE 
-                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
+                    WHEN ${recentJobsCondition()}
                     THEN 1 
                 END) AS recent_jobs
             FROM bookings
@@ -482,7 +1355,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
             cancelled: counts.cancelled
         };
 
-        const dbName = tenantDb.startsWith("tenant") ? tenantDb.replace("tenant", "") : tenantDb;
+        const dbName = toTenantSocketName(tenantDb);
 
         console.log("Broadcasting dashboard cards update to company:", dbName);
 
@@ -507,9 +1380,7 @@ const fetchTodaysBookingsPage = async (db, page = 1, limit = 10) => {
         LEFT JOIN drivers d ON b.driver = d.id
         LEFT JOIN vehicle_types vt ON b.vehicle = vt.id
         LEFT JOIN sub_companies sc ON b.sub_company = sc.id
-        WHERE DATE(b.booking_date) = CURDATE()
-        AND (b.dispatcher_action IS NULL OR b.dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
-        AND ${todaysBookingVisibilitySql('b')}
+        WHERE ${todayBookingsCondition('b')}
     `;
 
     const dataQuery = `
@@ -584,13 +1455,7 @@ const broadcastTodaysBookingsListUpdate = async (tenantDb, db, dbName, highlight
             ...listPayload,
         };
 
-        io.to(`dispatcher_${dbName}`).emit('refresh-bookings-list', refreshPayload);
-        io.to(`admin_${dbName}`).emit('refresh-bookings-list', refreshPayload);
-        io.to(`client_${dbName}`).emit('refresh-bookings-list', refreshPayload);
-
-        dispatcherSockets.forEach((sid) => io.to(sid).emit('refresh-bookings-list', refreshPayload));
-        adminSockets.forEach((sid) => io.to(sid).emit('refresh-bookings-list', refreshPayload));
-        clientSockets.forEach((sid) => io.to(sid).emit('refresh-bookings-list', refreshPayload));
+        emitTenantRooms(dbName, 'refresh-bookings-list', refreshPayload);
 
         console.log(`[AutoDispatch] Broadcast todays_booking list (${listPayload.data.length} rows) for manual fallback`);
         return refreshPayload;
@@ -672,12 +1537,14 @@ const advanceNearestDispatchAfterDriverSkip = async ({
     lat,
     lng,
     searchRadius,
+    timeoutMs = null,
     driverId,
     reason,
 }) => {
+    const timeoutSeconds = Math.round((timeoutMs || DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS * 1000) / 1000);
     const actionMessage = reason === 'reject'
         ? `Nearest dispatch — driver #${driverId} rejected the ride`
-        : `Nearest dispatch — driver #${driverId} did not respond within ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s`;
+        : `Nearest dispatch — driver #${driverId} did not respond within ${timeoutSeconds}s`;
 
     try {
         await db.query(
@@ -708,7 +1575,7 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
 
     if (!session) {
         const [rows] = await db.query(
-            'SELECT booking_status, driver, dispatcher_action FROM bookings WHERE id = ?',
+            'SELECT * FROM bookings WHERE id = ?',
             [bookingIdInt]
         );
         if (!rows.length) {
@@ -746,27 +1613,33 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
         const lat = parseFloat(latStr.trim());
         const lng = parseFloat(lngStr.trim());
         const searchRadius = await getNearestSearchRadiusKm(db);
-        const drivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius);
+        const drivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius, [], bookingIdInt, rows[0]);
         const driverIndex = drivers.findIndex((item) => String(item.id) === String(driverId));
 
         clearNearestDispatchSession(bookingIdInt);
 
         const rejectEvent = {
             booking_id: bookingIdInt,
+            id: bookingIdInt,
             driver_id: driverId,
+            database: dbName,
             message: `Driver #${driverId} rejected the ride`,
         };
-        dispatcherSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
-        adminSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
-        clientSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
+        emitTenantRooms(dbName, 'job-rejected-by-driver', rejectEvent);
 
         if (driverIndex < 0 || driverIndex + 1 >= drivers.length) {
-            console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → manual fallback`);
-            await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName });
+            const message = 'Nearest driver dispatch completed — all nearby drivers exhausted. Booking is available for bidding or manual dispatch.';
+            console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → fallback`);
+            const fallback = await fallbackNearestDispatchAfterExhaustion({ bookingIdInt, tenantDb, db, dbName, message });
             return {
                 handled: true,
                 status: 200,
-                body: { success: true, message: 'All nearby drivers exhausted — moved to manual dispatch list' },
+                body: {
+                    success: true,
+                    message: fallback === 'bidding'
+                        ? 'All nearby drivers exhausted — moved to bidding panel'
+                        : 'All nearby drivers exhausted — moved to manual dispatch list',
+                },
             };
         }
 
@@ -833,12 +1706,12 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
 
     const rejectEvent = {
         booking_id: bookingIdInt,
+        id: bookingIdInt,
         driver_id: driverId,
+        database: session.dbName,
         message: `Driver #${driverId} rejected the ride`,
     };
-    dispatcherSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
-    adminSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
-    clientSockets.forEach((sid) => io.to(sid).emit('job-rejected-by-driver', rejectEvent));
+    emitTenantRooms(session.dbName, 'job-rejected-by-driver', rejectEvent);
 
     const sessionState = {
         tenantDb: session.tenantDb,
@@ -854,18 +1727,25 @@ const handleNearestDispatchReject = async ({ bookingIdInt, tenantDb, driverId })
     clearNearestDispatchSession(bookingIdInt);
 
     if (sessionState.driverIndex + 1 >= sessionState.drivers.length) {
-        console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → manual fallback`);
-        await fallbackToManualDispatch({
+        const message = 'Nearest driver dispatch completed — all nearby drivers exhausted. Booking is available for bidding or manual dispatch.';
+        console.log(`[NearestDispatch] Driver #${driverId} rejected booking #${bookingIdInt} → fallback`);
+        const fallback = await fallbackNearestDispatchAfterExhaustion({
             bookingIdInt,
             tenantDb,
             db,
             dbName: sessionState.dbName,
+            message,
         });
 
         return {
             handled: true,
             status: 200,
-            body: { success: true, message: 'All nearby drivers exhausted — moved to manual dispatch list' },
+            body: {
+                success: true,
+                message: fallback === 'bidding'
+                    ? 'All nearby drivers exhausted — moved to bidding panel'
+                    : 'All nearby drivers exhausted — moved to manual dispatch list',
+            },
         };
     }
 
@@ -939,9 +1819,12 @@ const nearestDriverDispatch = async ({
 
         if (!booking.pickup_point || !booking.pickup_point.includes(',')) {
             console.log('[NearestDispatch] No valid pickup_point on booking');
-            io.to(`dispatcher_${dbName}`).emit('nearest-dispatch-failed', {
-                booking_id: bookingIdInt,
-                message: 'No pickup coordinates on booking',
+            await fallbackToManualDispatch({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                message: 'Nearest driver dispatch stopped — pickup coordinates are missing. Booking is available for manual dispatch.',
             });
             return;
         }
@@ -952,13 +1835,59 @@ const nearestDriverDispatch = async ({
             lng = parseFloat(lngStr.trim());
         }
 
+        if (Number.isNaN(lat) || Number.isNaN(lng)) {
+            console.log('[NearestDispatch] Invalid pickup coordinates on booking');
+            await fallbackToManualDispatch({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                message: 'Nearest driver dispatch stopped — pickup coordinates are invalid. Booking is available for manual dispatch.',
+            });
+            return;
+        }
+
+        if (isFreshStart) {
+            const servicePlot = await findServicePlotForPickup(db, lat, lng);
+            if (!servicePlot) {
+                console.log('[NearestDispatch] Pickup is outside all service plots → manual dispatch');
+                await fallbackToManualDispatch({
+                    bookingIdInt,
+                    tenantDb,
+                    db,
+                    dbName,
+                    message: 'Nearest driver dispatch stopped — pickup is outside configured service plots. Booking is available for manual dispatch.',
+                });
+                return;
+            }
+
+            if (!booking.pickup_plot_id) {
+                try {
+                    await db.query('UPDATE bookings SET pickup_plot_id = ? WHERE id = ?', [servicePlot.id, bookingIdInt]);
+                    booking.pickup_plot_id = servicePlot.id;
+                } catch (error) {
+                    console.error('[NearestDispatch] pickup_plot_id update error:', error.message);
+                }
+            }
+        }
+
         if (searchRadius === null) {
             searchRadius = await getNearestSearchRadiusKm(db);
         }
+        const dispatchTimeoutMs = await getNearestDispatchTimeoutMs(db);
+        const dispatchTimeoutSeconds = Math.round(dispatchTimeoutMs / 1000);
 
         let nearestDrivers = cachedDrivers;
         if (!nearestDrivers) {
-            nearestDrivers = await fetchNearbyIdleDrivers(db, lat, lng, searchRadius, triedDriverIds);
+            nearestDrivers = await fetchNearbyIdleDrivers(
+                db,
+                lat,
+                lng,
+                searchRadius,
+                triedDriverIds,
+                bookingIdInt,
+                booking
+            );
         }
 
         console.log(`[NearestDispatch] Pickup: lat=${lat} lng=${lng} radius=${searchRadius}km`);
@@ -974,8 +1903,15 @@ const nearestDriverDispatch = async ({
             const reason = !nearestDrivers.length
                 ? `no idle drivers within ${searchRadius}km`
                 : `all ${nearestDrivers.length} nearby driver(s) exhausted`;
-            console.log(`[NearestDispatch] ${reason} → manual fallback`);
-            await fallbackToManualDispatch({ bookingIdInt, tenantDb, db, dbName });
+            const message = `Nearest driver dispatch completed — ${reason}. Booking is available for bidding or manual dispatch.`;
+            console.log(`[NearestDispatch] ${reason} → fallback`);
+            await fallbackNearestDispatchAfterExhaustion({
+                bookingIdInt,
+                tenantDb,
+                db,
+                dbName,
+                message,
+            });
             return;
         }
 
@@ -989,7 +1925,7 @@ const nearestDriverDispatch = async ({
             booking.booking_amount === null || booking.booking_amount === undefined || booking.booking_amount == 0
         ) ? (booking.offered_amount ?? null) : booking.booking_amount;
 
-        const actionMessage = `${NEAREST_DISPATCH_ACTIVE_PREFIX}Request sent to driver #${driver.id} (${distanceKm}km away, radius=${searchRadius}km) — waiting up to ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s`;
+        const actionMessage = `${NEAREST_DISPATCH_ACTIVE_PREFIX}Request sent to driver #${driver.id} (${distanceKm}km away, radius=${searchRadius}km) — waiting up to ${dispatchTimeoutSeconds}s`;
 
         await db.query(
             `UPDATE bookings SET driver = ?, booking_amount = ?, booking_status = 'pending', dispatcher_action = ? WHERE id = ?`,
@@ -999,7 +1935,7 @@ const nearestDriverDispatch = async ({
         const [updatedRows] = await db.query('SELECT * FROM bookings WHERE id = ?', [bookingIdInt]);
         const updatedBooking = updatedRows[0];
 
-        const driverSocketId = driverSockets.get(String(driver.id).trim());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driver.id);
         if (driverSocketId) {
             io.to(driverSocketId).emit('new-ride-request', {
                 booking_id: updatedBooking.id,
@@ -1008,23 +1944,11 @@ const nearestDriverDispatch = async ({
                 booking: updatedBooking,
                 distance_km: distanceKm,
                 search_radius: searchRadius,
-                expires_in_seconds: NEAREST_DISPATCH_TIMEOUT_MS / 1000,
+                expires_in_seconds: dispatchTimeoutSeconds,
             });
             console.log(`[NearestDispatch] Socket sent to driver #${driver.id}`);
         } else {
             console.log(`[NearestDispatch] Driver #${driver.id} not in socket map — FCM only`);
-        }
-
-        try {
-            await sendNotificationToDriver(
-                db,
-                driver.id,
-                'New Ride Nearby',
-                `You have a new ride request (${distanceKm}km away)`,
-                { booking_id: String(updatedBooking.id), type: 'new_ride' }
-            );
-        } catch (e) {
-            console.error(`[NearestDispatch] FCM error for driver #${driver.id}:`, e.message);
         }
 
         try {
@@ -1041,7 +1965,7 @@ const nearestDriverDispatch = async ({
                 booking_id: bookingIdInt,
                 driver_count: nearestDrivers.length,
                 search_radius: searchRadius,
-                expires_in_seconds: NEAREST_DISPATCH_TIMEOUT_MS / 1000,
+                expires_in_seconds: dispatchTimeoutSeconds,
                 booking: updatedBooking,
             });
         }
@@ -1055,13 +1979,14 @@ const nearestDriverDispatch = async ({
             lat,
             lng,
             searchRadius,
+            dispatchTimeoutMs,
             driverIndex,
             triedDriverIds: [...triedDriverIds],
             drivers: nearestDrivers,
             currentDriverId: driver.id,
         };
 
-        console.log(`[NearestDispatch] ${NEAREST_DISPATCH_TIMEOUT_MS / 1000}s timeout for driver #${driver.id}`);
+        console.log(`[NearestDispatch] ${dispatchTimeoutSeconds}s timeout for driver #${driver.id}`);
 
         const timeoutId = setTimeout(async () => {
             try {
@@ -1099,6 +2024,7 @@ const nearestDriverDispatch = async ({
                         lat: sessionState.lat,
                         lng: sessionState.lng,
                         searchRadius: sessionState.searchRadius,
+                        timeoutMs: sessionState.dispatchTimeoutMs,
                         driverId: driver.id,
                         reason: 'timeout',
                     });
@@ -1106,9 +2032,19 @@ const nearestDriverDispatch = async ({
             } catch (e) {
                 console.error('[NearestDispatch] Timeout error:', e.message);
             }
-        }, NEAREST_DISPATCH_TIMEOUT_MS);
+        }, dispatchTimeoutMs);
 
         nearestDispatchSessions.set(String(bookingIdInt), { ...sessionState, timeoutId });
+
+        sendNotificationToDriver(
+            db,
+            driver.id,
+            'New Ride Nearby',
+            `You have a new ride request (${distanceKm}km away)`,
+            { booking_id: String(updatedBooking.id), type: 'new_ride' }
+        ).catch((e) => {
+            console.error(`[NearestDispatch] FCM error for driver #${driver.id}:`, e.message);
+        });
     } catch (error) {
         console.error('[NearestDispatch] FATAL:', error.message);
         console.error(error.stack);
@@ -1170,7 +2106,7 @@ io.on("connection", (socket) => {
     const userId = socket.handshake.query.user_id || socket.handshake.query.customer_id;
     const clientId = socket.handshake.query.client_id;
     const adminId = socket.handshake.query.admin_id;
-    const database = socket.handshake.query.database;
+    const database = toTenantSocketName(socket.handshake.query.database);
 
     if (database) {
         socket.join(database);
@@ -1179,21 +2115,22 @@ io.on("connection", (socket) => {
         console.log(`Socket connected: Role=${role}, ID=${driverId || dispatcherId || userId || adminId || clientId}, DB=${database}`);
     }
 
-    if (role === "dispatcher" && dispatcherId) dispatcherSockets.set(dispatcherId.toString(), socket.id);
-    if ((role === "user" || role === "customer") && userId) userSockets.set(userId.toString(), socket.id);
-    if (role === "client" && clientId) clientSockets.set(clientId.toString(), socket.id);
-    if (role === "admin" && adminId) adminSockets.set(adminId.toString(), socket.id);
+    if (role === "dispatcher" && dispatcherId) setTenantSocket(dispatcherSockets, database, dispatcherId, socket.id);
+    if ((role === "user" || role === "customer") && userId) setTenantSocket(userSockets, database, userId, socket.id);
+    if (role === "client" && clientId) setTenantSocket(clientSockets, database, clientId, socket.id);
+    if (role === "admin" && adminId) setTenantSocket(adminSockets, database, adminId, socket.id);
 
     if (driverId) {
-        driverSockets.set(driverId.toString(), socket.id);
-        driverLastLocationTime.set(driverId.toString(), Date.now());
+        setTenantSocket(driverSockets, database, driverId, socket.id);
+        const driverRuntimeKey = tenantSocketKey(database, driverId);
+        if (driverRuntimeKey) driverLastLocationTime.set(driverRuntimeKey, Date.now());
 
         (async () => {
             try {
-                const db = getConnection(`tenant${database}`);
+                const db = getConnection(toTenantDbName(database));
 
                 const [rows] = await db.query(
-                    `SELECT d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name 
+                    `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name
                  FROM drivers d
                  LEFT JOIN plots p ON d.plot_id = p.id
                  WHERE d.id = ? LIMIT 1`,
@@ -1202,6 +2139,14 @@ io.on("connection", (socket) => {
 
                 if (!rows.length) return;
                 const driver = rows[0];
+                if (driverRuntimeKey) {
+                    knownDriverRuntimeKeys.add(driverRuntimeKey);
+                    driverLocationCache.set(driverRuntimeKey, {
+                        ...driver,
+                        id: driver.id || driverId,
+                        driver_id: driver.id || driverId,
+                    });
+                }
 
                 console.log(`[Connect] Driver #${driverId} online_status=${driver.online_status} driving_status=${driver.driving_status}`);
 
@@ -1218,12 +2163,11 @@ io.on("connection", (socket) => {
                         plot_name: plotName,
                         rank: rank,
                         online_status: driver.online_status,
-                        is_reconnecting: false  // ← always false on fresh connect
+                        is_reconnecting: false,
+                        database
                     };
 
-                    io.to(`dispatcher_${database}`).emit("waiting-driver-event", emitData);
-                    io.to(`admin_${database}`).emit("waiting-driver-event", emitData);
-                    io.to(`client_${database}`).emit("waiting-driver-event", emitData);
+                    emitTenantWaitingDriver(database, emitData);
                     socket.emit("waiting-driver-event", emitData);
 
                 } else {
@@ -1235,11 +2179,10 @@ io.on("connection", (socket) => {
                         driver_id: driverId,
                         driver_name: driver.name,
                         online_status: driver.online_status,
-                        driving_status: driver.driving_status
+                        driving_status: driver.driving_status,
+                        database
                     };
-                    io.to(`dispatcher_${database}`).emit("driver-offline-event", offlineData);
-                    io.to(`admin_${database}`).emit("driver-offline-event", offlineData);
-                    io.to(`client_${database}`).emit("driver-offline-event", offlineData);
+                    emitTenantDriverOffline(database, offlineData);
                 }
 
             } catch (err) {
@@ -1254,17 +2197,25 @@ io.on("connection", (socket) => {
 
             const dbName = dataArray.database || socket.handshake.query.database;
             const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
+            const latitude = parseCoordinate(dataArray.latitude);
+            const longitude = parseCoordinate(dataArray.longitude);
+            const status = dataArray.driving_status || dataArray.status;
+            const onlineStatus = dataArray.online_status;
+            const runtimeKey = tenantSocketKey(dbName, driverIdFromData);
 
-            // if (driverIdFromData) {
-            //     driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
-            // }
+            if (!dbName || !driverIdFromData || !isValidCoordinatePair(latitude, longitude)) {
+                return;
+            }
+
+            gpsStats.accepted += 1;
+
             if (driverIdFromData) {
-                const prevTime = driverLastLocationTime.get(driverIdFromData.toString()) || 0;
+                const prevTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const wasReconnecting = prevTime > 0
                     && (Date.now() - prevTime) > RECONNECTING_THRESHOLD_MS
                     && (Date.now() - prevTime) < LOCATION_TIMEOUT_MS;
 
-                driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
+                if (runtimeKey) driverLastLocationTime.set(runtimeKey, Date.now());
 
                 if (wasReconnecting) {
                     const dbName = dataArray.database || socket.handshake.query.database;
@@ -1275,114 +2226,101 @@ io.on("connection", (socket) => {
                 }
             }
 
-            if (dbName && driverIdFromData) {
-                try {
-                    const db = getConnection(`tenant${dbName}`);
-                    const status = dataArray.driving_status || dataArray.status;
+            const cachedDriver = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
+            const livePayload = normalizeDriverRealtimePayload(cachedDriver || {
+                id: driverIdFromData,
+                driver_id: driverIdFromData,
+                driving_status: status || cachedDriver?.driving_status || 'idle',
+                online_status: onlineStatus || cachedDriver?.online_status || 'online',
+            }, dbName, {
+                latitude,
+                longitude,
+                status: status || cachedDriver?.driving_status || 'idle',
+                driving_status: status || cachedDriver?.driving_status || 'idle',
+                online_status: onlineStatus || cachedDriver?.online_status || 'online',
+            });
 
-                    const onlineStatus = dataArray.online_status;
-
-                    if (status && onlineStatus) {
-                        await db.query(
-                            `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, online_status = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, status, onlineStatus, driverIdFromData]
-                        );
-                    } else if (status) {
-                        await db.query(
-                            `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
-                        );
-                    } else {
-                        await db.query(
-                            `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, driverIdFromData]
-                        );
-                    }
-                } catch (dbErr) {
-                    console.error("DB update error:", dbErr.message);
-                }
+            if (livePayload) {
+                scheduleLiveGpsBroadcast(dbName, driverIdFromData, livePayload);
+                gpsStats.broadcast += 1;
             }
 
-            const response = await axios.post(
-                "https://backend.cabifyit.com/api/driver/location",
-                dataArray,
-                {
-                    headers: {
-                        Authorization: `Bearer ${socket.token}`,
-                        database: `${dbName}`,
-                    }
-                }
-            );
+            const shouldPersist = shouldPersistDriverLocation({
+                runtimeKey,
+                current: { latitude, longitude },
+                status,
+                onlineStatus,
+                force: dataArray.force_persist === true || String(dataArray.force_persist || '').toLowerCase() === 'true',
+            });
 
-            const driver = response.data.driver;
-            if (driver) {
-                io.to(dbName).emit("driver-location-update", driver);
-
-                // Fetch real state from DB
-                const db = getConnection(`tenant${dbName}`);
-                const [dbDriverRows] = await db.query(
-                    `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name 
-                     FROM drivers d
-                     LEFT JOIN plots p ON d.plot_id = p.id
-                     WHERE d.id = ? LIMIT 1`,
-                    [driverIdFromData]
-                );
-
-                if (dbDriverRows.length > 0) {
-                    const dbDriver = dbDriverRows[0];
-                    const isIdleAndOnline = dbDriver.driving_status === "idle" && dbDriver.online_status === "online";
-
-                    if (isIdleAndOnline) {
-                        const plotId = dbDriver.plot_id;
-                        const plotName = dbDriver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
-
-                        const rank = plotId ? await getOrAssignRankForDriver(plotId, dbName, dbDriver.id) : "-";
-
-                        const eventData = {
-                            driver_id: dbDriver.id,
-                            driverName: dbDriver.name,
-                            driver_name: dbDriver.name,
-                            plot: plotId,
-                            plot_name: plotName,
-                            rank: rank,
-                            status: dbDriver.driving_status,
-                            latitude: dbDriver.latitude,
-                            longitude: dbDriver.longitude
-                        };
-
-                        io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
-                        io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
-                        io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
-                        socket.emit("waiting-driver-event", eventData);
-
-                    } else {
-                        const plotId = dbDriver.plot_id;
-                        await removeFromQueue(dbDriver.id, dbName);
-                        if (plotId) broadcastUpdatedQueue(plotId, dbName);
-
-                        if (dbDriver.driving_status === "busy") {
-                            const plotName = dbDriver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
-                            const eventData = {
-                                driver_id: dbDriver.id,
-                                driverName: dbDriver.name,
-                                driver_name: dbDriver.name,
-                                plot: plotId,
-                                plot_name: plotName,
-                                rank: null,
-                                status: dbDriver.driving_status,
-                                latitude: dbDriver.latitude,
-                                longitude: dbDriver.longitude
-                            };
-
-                            io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
-                            io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
-                            io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
-                        }
-                    }
-                }
+            if (!shouldPersist) {
+                cacheDriverLocationSnapshot({
+                    runtimeKey,
+                    cachedDriver,
+                    driverId: driverIdFromData,
+                    latitude,
+                    longitude,
+                    status,
+                    onlineStatus,
+                });
+                gpsStats.skippedPersist += 1;
+                return;
             }
+
+            scheduleDriverLocationPersist({
+                dbName,
+                driverId: driverIdFromData,
+                latitude,
+                longitude,
+                status,
+                onlineStatus,
+                runtimeKey,
+                cachedDriver,
+                socket,
+                force: dataArray.force_persist === true || String(dataArray.force_persist || '').toLowerCase() === 'true',
+            });
         } catch (err) {
-            console.error("Laravel Socket error:", err.message);
+            console.error("Driver location socket error:", err.message);
+        }
+    });
+
+    socket.on("driver-status-change", async (data) => {
+        try {
+            const payload = typeof data === "string" ? JSON.parse(data) : (data || {});
+            const dbName = payload.database || socket.handshake.query.database;
+            const driverIdFromData = payload.driver_id || payload.driverId || payload.id || socket.driverId;
+            const onlineStatus = payload.online_status || payload.status;
+            const drivingStatus = payload.driving_status;
+
+            if (!dbName || !driverIdFromData || !onlineStatus) return;
+
+            const db = getConnection(toTenantDbName(dbName));
+            const updates = ['online_status = ?', 'updated_at = NOW()'];
+            const params = [onlineStatus];
+
+            if (drivingStatus) {
+                updates.unshift('driving_status = ?');
+                params.unshift(drivingStatus);
+            }
+            if (payload.latitude !== undefined && payload.longitude !== undefined) {
+                updates.unshift('longitude = ?');
+                updates.unshift('latitude = ?');
+                params.unshift(payload.longitude);
+                params.unshift(payload.latitude);
+            }
+
+            params.push(driverIdFromData);
+            await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`, params);
+
+            await emitDriverStatusForTenant({
+                db,
+                database: dbName,
+                driverId: driverIdFromData,
+                reason: 'explicit_status_socket',
+            });
+            await broadcastDashboardCardsUpdate(toTenantDbName(dbName));
+        } catch (err) {
+            console.error("[driver-status-change] Error:", err.message);
         }
     });
 
@@ -1441,7 +2379,7 @@ io.on("connection", (socket) => {
                 return;
             }
 
-            const db = getConnection(`tenant${dbName}`);
+            const db = getConnection(toTenantDbName(dbName));
             const plotId = data?.plot_id || null;
             const bookingId = data?.booking_id || null;
 
@@ -1489,22 +2427,38 @@ io.on("connection", (socket) => {
         const adminId = socket.handshake.query.admin_id;
 
         if (role === "dispatcher" && dispatcherId) {
-            dispatcherSockets.delete(dispatcherId.toString());
+            deleteTenantSocket(dispatcherSockets, database, dispatcherId);
             console.log(`Dispatcher ${dispatcherId} disconnected`);
         }
-        if (role === "user" && userId) userSockets.delete(userId.toString());
-        if (role === "client" && clientId) clientSockets.delete(clientId.toString());
+        if (role === "user" && userId) deleteTenantSocket(userSockets, database, userId);
+        if (role === "client" && clientId) deleteTenantSocket(clientSockets, database, clientId);
         if (role === "admin" && adminId) {
-            adminSockets.delete(adminId.toString());
+            deleteTenantSocket(adminSockets, database, adminId);
             console.log(`Admin ${adminId} disconnected`);
         }
 
         if (driverId) {
-            driverSockets.delete(driverId.toString());
+            deleteTenantSocket(driverSockets, database, driverId);
+            const driverRuntimeKey = tenantSocketKey(database, driverId);
+            if (driverRuntimeKey) {
+                driverLocationCache.delete(driverRuntimeKey);
+                driverLocationPersistTime.delete(driverRuntimeKey);
+                driverLocationPersistCoalescer.clear(driverRuntimeKey);
+            }
 
-            if (driverDisconnectTimers.has(driverId.toString())) {
-                clearTimeout(driverDisconnectTimers.get(driverId.toString()));
-                driverDisconnectTimers.delete(driverId.toString());
+            if (driverRuntimeKey && !knownDriverRuntimeKeys.has(driverRuntimeKey)) {
+                driverLastLocationTime.delete(driverRuntimeKey);
+                if (driverDisconnectTimers.has(driverRuntimeKey)) {
+                    clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
+                    driverDisconnectTimers.delete(driverRuntimeKey);
+                }
+                console.log(`[Disconnect] Driver #${driverId} was not loaded from DB — skipping offline grace timer`);
+                return;
+            }
+
+            if (driverRuntimeKey && driverDisconnectTimers.has(driverRuntimeKey)) {
+                clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
+                driverDisconnectTimers.delete(driverRuntimeKey);
                 console.log(`[Disconnect] Driver #${driverId} — cancelled previous grace timer`);
             }
 
@@ -1513,7 +2467,7 @@ io.on("connection", (socket) => {
             if (database) {
                 (async () => {
                     try {
-                        const db = getConnection(`tenant${database}`);
+                        const db = getConnection(toTenantDbName(database));
                         const [rows] = await db.query(
                             "SELECT plot_id, driving_status, online_status FROM drivers WHERE id = ? LIMIT 1",
                             [driverId]
@@ -1536,20 +2490,21 @@ io.on("connection", (socket) => {
             }
 
             const timer = setTimeout(async () => {
-                driverDisconnectTimers.delete(driverId.toString());
+                if (driverRuntimeKey) driverDisconnectTimers.delete(driverRuntimeKey);
+                if (driverRuntimeKey) knownDriverRuntimeKeys.delete(driverRuntimeKey);
 
-                if (driverSockets.has(driverId.toString())) {
+                if (getTenantSocket(driverSockets, database, driverId)) {
                     console.log(`[GraceTimer] Driver #${driverId} already reconnected — skip offline`);
                     return;
                 }
 
                 console.log(`[GraceTimer] Driver #${driverId} — grace period expired, marking offline`);
 
-                driverLastLocationTime.delete(driverId.toString());
+                if (driverRuntimeKey) driverLastLocationTime.delete(driverRuntimeKey);
 
                 if (database) {
                     try {
-                        const db = getConnection(`tenant${database}`);
+                        const db = getConnection(toTenantDbName(database));
 
                         await db.query(
                             "UPDATE drivers SET online_status = 'offline' WHERE id = ?",
@@ -1566,17 +2521,7 @@ io.on("connection", (socket) => {
                         if (plotId) broadcastUpdatedQueue(plotId, database);
                         await broadcastFullQueueToDrivers(database);
 
-                        io.to(`dispatcher_${database}`).emit("driver-offline-event", {
-                            driver_id: driverId,
-                            online_status: "offline",
-                            reason: "15 min grace period expired"
-                        });
-                        io.to(`admin_${database}`).emit("driver-offline-event", {
-                            driver_id: driverId,
-                            online_status: "offline",
-                            reason: "15 min grace period expired"
-                        });
-                        io.to(`client_${database}`).emit("driver-offline-event", {
+                        emitTenantDriverOffline(database, {
                             driver_id: driverId,
                             online_status: "offline",
                             reason: "15 min grace period expired"
@@ -1590,15 +2535,15 @@ io.on("connection", (socket) => {
                 }
             }, DISCONNECT_GRACE_MS);
 
-            driverDisconnectTimers.set(driverId.toString(), timer);
+            if (driverRuntimeKey) driverDisconnectTimers.set(driverRuntimeKey, timer);
         }
     });
 });
 
 app.use((req, res, next) => {
-    const databaseHeader = req.headers['database'];
+    const databaseHeader = req.headers['database'] || req.headers['x-database'];
     if (databaseHeader) {
-        req.tenantDb = `tenant${databaseHeader}`;
+        req.tenantDb = toTenantDbName(databaseHeader);
         console.log(`Using database: ${req.tenantDb}`);
     }
     next();
@@ -1607,13 +2552,28 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 app.use(async (req, res, next) => {
-    if (req.tenantDb || req.method !== 'POST') {
+    if (req.tenantDb) {
+        return next();
+    }
+
+    const explicitTenant = req.body?.tenantDb
+        || req.body?.database
+        || req.body?.clientId
+        || req.query?.database
+        || req.query?.tenantDb;
+
+    if (explicitTenant) {
+        req.tenantDb = toTenantDbName(explicitTenant);
+        return next();
+    }
+
+    if (req.method !== 'POST' || process.env.SOCKET_ENABLE_TENANT_SCAN_RESOLUTION !== 'true') {
         return next();
     }
 
     const bookingId = req.body?.booking?.booking_id || req.body?.booking_id;
     if (bookingId) {
-        console.log(` to auto-resolve database for booking_id: ${bookingId}`);
+        console.warn(`[TenantResolve] Slow tenant scan enabled for booking_id: ${bookingId}`);
         const centralDb = getConnection();
         try {
             const [databases] = await centralDb.query("SHOW DATABASES LIKE 'tenant%'");
@@ -1639,6 +2599,186 @@ app.use(async (req, res, next) => {
         }
     }
     next();
+});
+
+const buildDriverStateSnapshot = async (db, database) => {
+    const [rows] = await db.query(
+        `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
+                p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
+         FROM drivers d
+         LEFT JOIN plots p ON d.plot_id = p.id
+         LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
+         WHERE d.online_status = 'online'
+         ORDER BY d.plot_id ASC, d.updated_at ASC, d.id ASC`
+    );
+
+    const waiting = [];
+    const onJob = [];
+
+    for (const driver of rows) {
+        const isBusy = String(driver.driving_status || '').toLowerCase() === 'busy';
+        const plotId = driver.plot_id;
+        const rank = !isBusy && plotId ? await getOrAssignRankForDriver(plotId, database, driver.id) : null;
+        const runtimeKey = tenantSocketKey(database, driver.id);
+        const lastUpdate = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
+        const timeSinceUpdate = Date.now() - lastUpdate;
+        const payload = normalizeDriverRealtimePayload(driver, database, {
+            rank,
+            status: driver.driving_status || 'idle',
+            driving_status: driver.driving_status || 'idle',
+            online_status: driver.online_status,
+            latitude: driver.latitude,
+            longitude: driver.longitude,
+            is_reconnecting: lastUpdate > 0 && timeSinceUpdate > RECONNECTING_THRESHOLD_MS && timeSinceUpdate < LOCATION_TIMEOUT_MS,
+        });
+
+        if (isBusy) onJob.push(payload);
+        else waiting.push(payload);
+    }
+
+    return { waiting, onJob };
+};
+
+const emitDriverStatusForTenant = async ({ db, database, driverId, reason = 'status_change' }) => {
+    const [rows] = await db.query(
+        `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
+                p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
+         FROM drivers d
+         LEFT JOIN plots p ON d.plot_id = p.id
+         LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
+         WHERE d.id = ? LIMIT 1`,
+        [driverId]
+    );
+
+    if (!rows.length) return null;
+
+    const driver = rows[0];
+    const runtimeKey = tenantSocketKey(database, driver.id);
+    const plotId = driver.plot_id;
+    const onlineStatus = String(driver.online_status || '').toLowerCase();
+    const drivingStatus = String(driver.driving_status || 'idle').toLowerCase();
+
+    if (runtimeKey && driverDisconnectTimers.has(runtimeKey)) {
+        clearTimeout(driverDisconnectTimers.get(runtimeKey));
+        driverDisconnectTimers.delete(runtimeKey);
+    }
+
+    if (onlineStatus !== 'online') {
+        await removeFromQueue(driver.id, database);
+        if (runtimeKey) driverLastLocationTime.delete(runtimeKey);
+        if (plotId) broadcastUpdatedQueue(plotId, database);
+        await broadcastFullQueueToDrivers(database);
+        emitTenantDriverOffline(database, {
+            driver_id: driver.id,
+            driver_name: driver.name,
+            online_status: 'offline',
+            driving_status: driver.driving_status,
+            reason,
+        });
+        return { state: 'offline', driver };
+    }
+
+    if (runtimeKey) driverLastLocationTime.set(runtimeKey, Date.now());
+
+    if (drivingStatus === 'busy') {
+        await removeFromQueue(driver.id, database);
+        if (plotId) broadcastUpdatedQueue(plotId, database);
+        emitTenantOnJobDriver(database, normalizeDriverRealtimePayload(driver, database, {
+            status: driver.driving_status,
+            driving_status: driver.driving_status,
+            online_status: driver.online_status,
+            latitude: driver.latitude,
+            longitude: driver.longitude,
+        }));
+        return { state: 'busy', driver };
+    }
+
+    const rank = plotId ? await getOrAssignRankForDriver(plotId, database, driver.id) : '-';
+    emitTenantWaitingDriver(database, normalizeDriverRealtimePayload(driver, database, {
+        rank,
+        status: driver.driving_status || 'idle',
+        driving_status: driver.driving_status || 'idle',
+        online_status: driver.online_status,
+        latitude: driver.latitude,
+        longitude: driver.longitude,
+        is_reconnecting: false,
+    }));
+    return { state: 'waiting', driver };
+};
+
+app.get("/drivers/state", async (req, res) => {
+    try {
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const database = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
+        const db = getConnection(req.tenantDb);
+        const snapshot = await buildDriverStateSnapshot(db, database);
+
+        return res.json({ success: true, data: snapshot });
+    } catch (error) {
+        console.error("Driver state snapshot error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+app.post("/driver-status-change", async (req, res) => {
+    try {
+        if (!req.tenantDb) {
+            const dbHeader = req.headers['database'] || req.headers['x-database'] || req.body?.database;
+            if (dbHeader) req.tenantDb = toTenantDbName(dbHeader);
+        }
+
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const database = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.body?.database || req.tenantDb);
+        const driverId = req.body?.driver_id || req.body?.driverId || req.body?.id;
+        const onlineStatus = req.body?.online_status || req.body?.status;
+        const drivingStatus = req.body?.driving_status;
+        const latitude = req.body?.latitude;
+        const longitude = req.body?.longitude;
+
+        if (!driverId || !onlineStatus) {
+            return res.status(400).json({ success: false, message: "Missing driver_id or online_status" });
+        }
+
+        const db = getConnection(req.tenantDb);
+        const updates = ['online_status = ?', 'updated_at = NOW()'];
+        const params = [onlineStatus];
+
+        if (drivingStatus) {
+            updates.unshift('driving_status = ?');
+            params.unshift(drivingStatus);
+        }
+        if (latitude !== undefined && longitude !== undefined) {
+            updates.unshift('longitude = ?');
+            updates.unshift('latitude = ?');
+            params.unshift(longitude);
+            params.unshift(latitude);
+        }
+
+        params.push(driverId);
+        await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`, params);
+
+        const result = await emitDriverStatusForTenant({
+            db,
+            database,
+            driverId,
+            reason: 'explicit_status_change',
+        });
+
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+
+        return res.json({ success: true, data: result });
+    } catch (error) {
+        console.error("Driver status change error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
 });
 
 async function calculatePostPaidEntries(driver, settings, db) {
@@ -1885,7 +3025,7 @@ app.get("/driver/commission-entries", async (req, res) => {
                 .json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [settingsRows] = await db.query(
@@ -2011,7 +3151,7 @@ app.post("/driver/collect-commission", async (req, res) => {
                 .json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [settingsRows] = await db.query(
@@ -2199,20 +3339,22 @@ app.post("/driver/collect-commission", async (req, res) => {
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
         const db = getConnection(req.tenantDb);
+        const todayDate = await getTenantTodayDate(db);
+        const todaySql = sqlDateLiteral(todayDate);
         const dispatcherId = req.query.dispatcher_id;
-        const dispatcherWhere = dispatcherId ? "WHERE dispatcher_id = ?" : "";
+        const scope = String(req.query.scope || "").toLowerCase();
+        const shouldFilterDispatcher = scope === "mine" && dispatcherId;
+        const dispatcherWhere = shouldFilterDispatcher ? "WHERE dispatcher_id = ?" : "";
 
         const query = `
             SELECT
                 COUNT(CASE 
-                    WHEN DATE(booking_date) = CURDATE()
-                    AND (dispatcher_action IS NULL OR dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')
-                    AND ${todaysBookingVisibilitySql()}
+                    WHEN ${todayBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS todays_booking,
 
                 COUNT(CASE 
-                    WHEN ${preBookingsCondition()}
+                    WHEN ${preBookingsCondition('', todaySql)}
                     THEN 1 
                 END) AS pre_bookings,
 
@@ -2222,7 +3364,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS completed,
 
                 COUNT(CASE 
-                    WHEN booking_status IN ('no_show', 'arrived', 'ongoing')
+                    WHEN booking_status = 'no_show'
                     THEN 1 
                 END) AS no_show,
 
@@ -2232,14 +3374,14 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS cancelled,
 
                 COUNT(CASE 
-                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) 
+                    WHEN ${recentJobsCondition()}
                     THEN 1 
                 END) AS recent_jobs
             FROM bookings
             ${dispatcherWhere}
         `;
 
-        const [[counts]] = await db.query(query, dispatcherId ? [dispatcherId] : []);
+        const [[counts]] = await db.query(query, shouldFilterDispatcher ? [dispatcherId] : []);
 
         return res.json({
             success: true,
@@ -2264,13 +3406,15 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
-        let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, page = 1, limit = 10 } = req.query;
+        let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, scope, page = 1, limit = 10 } = req.query;
 console.log("Fetching bookings with query:", req.query);
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
         const offset = (pageNum - 1) * limitNum;
 
         const db = getConnection(req.tenantDb);
+        const todayDate = await getTenantTodayDate(db);
+        const todaySql = sqlDateLiteral(todayDate);
 
         let baseQuery = `
             FROM bookings b
@@ -2284,24 +3428,22 @@ console.log("Fetching bookings with query:", req.query);
         if (filter) {
             switch (filter) {
                 case 'todays_booking':
-                    baseQuery += ` AND DATE(b.booking_date) = CURDATE()`;
-                    baseQuery += ` AND (b.dispatcher_action IS NULL OR b.dispatcher_action NOT LIKE '${NEAREST_DISPATCH_ACTIVE_PREFIX}%')`;
-                    baseQuery += ` AND ${todaysBookingVisibilitySql('b')}`;
+                    baseQuery += ` AND ${todayBookingsCondition('b', todaySql)}`;
                     break;
                 case 'pre_bookings':
-                    baseQuery += ` AND ${preBookingsCondition('b')}`;
+                    baseQuery += ` AND ${preBookingsCondition('b', todaySql)}`;
                     break;
                 case 'completed':
                     baseQuery += ` AND b.booking_status = 'completed'`;
                     break;
                 case 'no_show':
-                    baseQuery += ` AND b.booking_status IN ('no_show', 'arrived', 'ongoing')`;
+                    baseQuery += ` AND b.booking_status = 'no_show'`;
                     break;
                 case 'cancelled':
                     baseQuery += ` AND b.booking_status = 'cancelled'`;
                     break;
                 case 'recent_jobs':
-                    baseQuery += ` AND b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+                    baseQuery += ` AND ${recentJobsCondition('b')}`;
                     break;
             }
         }
@@ -2310,7 +3452,7 @@ console.log("Fetching bookings with query:", req.query);
         if (date) { baseQuery += ` AND DATE(b.booking_date) = ?`; params.push(date); }
         if (user_id) { baseQuery += ` AND b.user_id = ?`; params.push(user_id); }
         if (driver_id) { baseQuery += ` AND b.driver = ?`; params.push(driver_id); }
-        if (dispatcher_id) { baseQuery += ` AND b.dispatcher_id = ?`; params.push(dispatcher_id); }
+        if (dispatcher_id && String(scope || "").toLowerCase() === "mine") { baseQuery += ` AND b.dispatcher_id = ?`; params.push(dispatcher_id); }
         if (sub_company) { baseQuery += ` AND b.sub_company = ?`; params.push(sub_company); }
         if (search) {
             baseQuery += ` AND (b.booking_id LIKE ? OR b.name LIKE ? OR b.phone_no LIKE ? OR b.email LIKE ? OR d.name LIKE ? OR vt.vehicle_type_name LIKE ?)`;
@@ -2342,7 +3484,7 @@ console.log("Fetching bookings with query:", req.query);
 
             return {
                 ...bookingData,
-                pre_booking: isPreBookingRow(bookingData),
+                pre_booking: isPreBookingRow(bookingData, todayDate),
                 driverDetail: driver_id ? { id: driver_id, name: driver_name, email: driver_email, phone_no: driver_phone, profile_image: driver_profile_image } : null,
                 vehicleDetail: vehicle_type_id ? { id: vehicle_type_id, vehicle_type_name, vehicle_type_service } : null,
                 subCompanyDetail: sub_company_id ? { id: sub_company_id, name: sub_company_name, email: sub_company_email } : null
@@ -2398,15 +3540,10 @@ app.put("/bookings/:id", async (req, res) => {
 
         const booking = response.data?.booking;
         const dbName = databaseHeader.toString();
-        const finalDb = `tenant${dbName}`;
+        const finalDb = toTenantDbName(dbName);
 
         if (booking) {
-            io.to(`dispatcher_${dbName}`).emit("booking-updated-event", booking);
-            io.to(`admin_${dbName}`).emit("booking-updated-event", booking);
-            io.to(`client_${dbName}`).emit("booking-updated-event", booking);
-            dispatcherSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
-            adminSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
-            clientSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", booking));
+            emitTenantRooms(dbName, "booking-updated-event", booking);
             await broadcastDashboardCardsUpdate(finalDb);
         }
 
@@ -2422,6 +3559,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
     try {
         const { id } = req.params;
         const { driver_id, assignment_type } = req.body;
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         if (!driver_id) {
             return res.status(400).json({ success: false, message: "Driver ID is required" });
@@ -2525,7 +3663,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             console.error("Store notification failed (non-fatal):", storeError.message);
         }
 
-        const driverSocketId = driverSockets.get(driver_id.toString());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driver_id);
         if (driverSocketId) {
             io.to(driverSocketId).emit("new-ride-request", {
                 booking_id: id,
@@ -2535,7 +3673,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
             });
         }
 
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("notification-ride", updatedBooking));
+        emitTenantRooms(dbName, "notification-ride", updatedBooking);
 
         return res.json({
             success: true,
@@ -2704,9 +3842,11 @@ app.post("/driver/accept-ride", async (req, res) => {
         if (rideId) {
             const bookingIdInt = parseInt(rideId, 10);
             const nearestSession = nearestDispatchSessions.get(String(bookingIdInt));
+            const acceptDbName = toTenantSocketName(req.tenantDb || req.headers['database'] || req.headers['x-database']);
 
             if (nearestSession) {
                 notifyNearestDriversRideWithdrawn(
+                    acceptDbName,
                     nearestSession.notifiedDriverIds ?? [],
                     driverId,
                     bookingIdInt
@@ -2748,10 +3888,8 @@ app.post("/driver/accept-ride", async (req, res) => {
 
                         if (updatedRows.length) {
                             const updatedBooking = updatedRows[0];
-                            dispatcherSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
-                            adminSockets.forEach((sid) => io.to(sid).emit('notification-ride', updatedBooking));
-                            io.to(`dispatcher_${dbName}`).emit('booking-updated-event', updatedBooking);
-                            io.to(`admin_${dbName}`).emit('booking-updated-event', updatedBooking);
+                            emitTenantRooms(dbName, 'notification-ride', updatedBooking);
+                            emitTenantRooms(dbName, 'booking-updated-event', updatedBooking);
                             await broadcastDashboardCardsUpdate(req.tenantDb);
                         }
                     }
@@ -2836,7 +3974,7 @@ app.get("/debug/dispatch-check", async (req, res) => {
             return res.status(400).json({ error: "database query param required" });
         }
 
-        const tenantDb = `tenant${database}`;
+        const tenantDb = toTenantDbName(database);
         const db = getConnection(tenantDb);
 
         // booking info
@@ -2887,6 +4025,75 @@ app.get("/debug/dispatch-check", async (req, res) => {
     }
 });
 
+const hasValidInternalAuth = (req) => {
+    const expected = process.env.NODE_INTERNAL_SECRET;
+    if (!expected) return true;
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : header;
+    return token === expected;
+};
+
+app.get("/socket-health", (req, res) => {
+    if (!hasValidInternalAuth(req)) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const locationPersistStats = driverLocationPersistCoalescer.stats();
+    return res.json({
+        success: true,
+        sockets: {
+            drivers: driverSockets.size,
+            users: userSockets.size,
+            dispatchers: dispatcherSockets.size,
+            clients: clientSockets.size,
+            admins: adminSockets.size,
+            total: driverSockets.size + userSockets.size + dispatcherSockets.size + clientSockets.size + adminSockets.size,
+        },
+        runtime: {
+            driverLastLocationEntries: driverLastLocationTime.size,
+            driverDisconnectTimers: driverDisconnectTimers.size,
+            knownDriverRuntimeKeys: knownDriverRuntimeKeys.size,
+            driverLocationCacheEntries: driverLocationCache.size,
+            driverLocationPersistInFlight: locationPersistStats.inFlight,
+            driverLocationPendingPersist: locationPersistStats.pending,
+            driverLocationQueuedPersist: locationPersistStats.queued,
+            plotQueueCount: plotDriverQueues.size,
+            plotPolygonCacheEntries: plotPolygonCache.size,
+            memory: process.memoryUsage(),
+            uptimeSeconds: process.uptime(),
+        },
+        gps: {
+            ...gpsStats,
+            idlePersistMs: GPS_IDLE_PERSIST_MS,
+            activePersistMs: GPS_ACTIVE_PERSIST_MS,
+            persistConcurrency: GPS_PERSIST_CONCURRENCY,
+            idleMinMovementMeters: GPS_IDLE_MIN_MOVEMENT_METERS,
+            activeMinMovementMeters: GPS_ACTIVE_MIN_MOVEMENT_METERS,
+            liveBroadcastFlushMs: GPS_LIVE_BROADCAST_FLUSH_MS,
+        },
+        liveGpsBroadcast: {
+            ...liveGpsBroadcastStats,
+            pendingTenants: pendingLiveGpsBroadcasts.size,
+            pendingDrivers: Array.from(pendingLiveGpsBroadcasts.values())
+                .reduce((total, pending) => total + pending.size, 0),
+            timers: liveGpsBroadcastTimers.size,
+        },
+        queueBroadcast: {
+            ...queueBroadcastStats,
+            fullBroadcastInFlight: fullQueueBroadcastInFlight.size,
+            fullBroadcastPending: fullQueueBroadcastPending.size,
+            fullBroadcastTimers: fullQueueBroadcastTimers.size,
+            fullBroadcastCoalesceMs: QUEUE_FULL_BROADCAST_COALESCE_MS,
+        },
+        server: {
+            listenBacklog: SOCKET_LISTEN_BACKLOG,
+            pingIntervalMs: SOCKET_PING_INTERVAL_MS,
+            pingTimeoutMs: SOCKET_PING_TIMEOUT_MS,
+        },
+        db: getPoolStats(),
+    });
+});
+
 app.get("/debug/tokens", async (req, res) => {
     try {
         const { database, limit = 100 } = req.query;
@@ -2896,7 +4103,7 @@ app.get("/debug/tokens", async (req, res) => {
 
         let tenantDb = database;
         if (!isNaN(database)) {
-            tenantDb = `tenant${database}`;
+            tenantDb = toTenantDbName(database);
         }
 
         const db = getConnection(tenantDb);
@@ -3062,9 +4269,7 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
         };
 
         // ✅ Notify dispatcher/admin/client via socket
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-        adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
-        clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-linked", responseData));
+        emitTenantRooms(dbName, "follow-on-job-linked", responseData);
 
         // ✅ Push notification to driver
         const notifTitle = "New Follow-On Job";
@@ -3091,7 +4296,7 @@ app.post("/bookings/:id/set-follow-on-job", async (req, res) => {
             console.error("[FollowOn] Store notification failed (non-fatal):", storeErr.message);
         }
 
-        const driverSocketId = driverSockets.get(job1.driver.toString());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, job1.driver);
 
         console.log(`[FollowOn] job1.driver = "${job1.driver}", type = ${typeof job1.driver}`);
         console.log(`[FollowOn] driverSockets keys:`, Array.from(driverSockets.keys()));
@@ -3127,6 +4332,7 @@ app.put("/bookings/:id/status", async (req, res) => {
 
         if (!booking_status) return res.status(400).json({ success: false, message: "booking_status is required" });
 
+        const dbName = toTenantSocketName(req.tenantDb || req.headers['database'] || req.headers['x-database']);
         const db = getConnection(req.tenantDb);
         const [bookings] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
         if (bookings.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
@@ -3141,6 +4347,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         let actionLabel = `updated the status to ${booking_status}`;
         if (booking_status === 'cancelled') actionLabel = "cancelled this ride";
         else if (booking_status === 'completed') actionLabel = "marked the ride as completed";
+        else if (booking_status === 'no_show') actionLabel = "marked this ride as no show";
 
         updateQuery += ", dispatcher_action = ?";
         params.push(`${dispatcherName} ${actionLabel}`);
@@ -3154,9 +4361,22 @@ app.put("/bookings/:id/status", async (req, res) => {
         updateQuery += " WHERE id = ?";
         params.push(id);
 
-        await db.query(updateQuery, params);
+	        await db.query(updateQuery, params);
+	        const isTerminalStatus = ['cancelled', 'completed', 'no_show'].includes(String(booking_status || '').toLowerCase());
+	        if (isTerminalStatus) {
+	            const bookingIdInt = parseInt(id, 10);
+	            clearNearestDispatchSession(bookingIdInt);
+	            clearAutoDispatchSession(bookingIdInt);
+	            await plotDispatch.terminatePlotDispatchForBooking({
+	                bookingId: bookingIdInt,
+	                tenantDb: req.tenantDb,
+	                db,
+	                dbName,
+	                status: booking_status,
+	            });
+	        }
 
-        if (booking.driver) {
+	        if (booking.driver) {
             let driverStatus = null;
             if (['cancelled', 'completed', 'no_show'].includes(booking_status)) driverStatus = 'idle';
             else if (['ongoing', 'started', 'arrived'].includes(booking_status)) driverStatus = 'busy';
@@ -3371,9 +4591,7 @@ app.put("/bookings/:id/status", async (req, res) => {
                                     driver_name: driverInfo?.name,
                                     message: `Driver ${driverInfo?.name} did not respond to follow-on job #${followOnBooking.booking_id} — reset to pending`
                                 };
-                                dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
-                                adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
-                                clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-timeout", timeoutEvent));
+                                emitTenantRooms(dbName, "follow-on-job-timeout", timeoutEvent);
 
                                 console.log(`[FollowOn] Job #${followOnId} timed out — reset to pending`);
                             }
@@ -3390,7 +4608,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         }
 
         if (booking.driver) {
-            const driverSocketId = driverSockets.get(booking.driver.toString());
+            const driverSocketId = getTenantSocket(driverSockets, dbName, booking.driver);
             if (driverSocketId) {
                 io.to(driverSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -3410,7 +4628,7 @@ app.put("/bookings/:id/status", async (req, res) => {
         }
 
         if (booking.user_id) {
-            const userSocketId = userSockets.get(booking.user_id.toString());
+            const userSocketId = getTenantSocket(userSockets, dbName, booking.user_id);
             if (userSocketId) {
                 io.to(userSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -3429,47 +4647,75 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        const statusUpdateData = {
-            booking_id: id,
-            status: booking_status,
-            message: `Booking #${booking.booking_id} status updated to ${booking_status}`
-        };
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-status-updated", statusUpdateData));
-        adminSockets.forEach((sid) => io.to(sid).emit("booking-status-updated", statusUpdateData));
+	        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
+	        const updatedBooking = updatedBookingRows[0];
 
-        const [updatedBookingRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [id]);
-        const updatedBooking = updatedBookingRows[0];
+	        const statusUpdateData = {
+	            booking_id: updatedBooking.booking_id,
+	            id: updatedBooking.id,
+	            booking_reference: updatedBooking.booking_id,
+	            status: booking_status,
+	            booking_status,
+	            database: dbName,
+	            booking: { ...updatedBooking, database: dbName },
+	            message: `Booking #${updatedBooking.booking_id} status updated to ${booking_status}`
+	        };
+	        emitTenantRooms(dbName, "booking-status-updated", statusUpdateData);
 
-        const socketPayload = {
-            status: booking_status,
+	        const socketPayload = {
+	            status: booking_status,
+	            booking_status,
+	            id: updatedBooking.id,
+	            booking_id: updatedBooking.booking_id,
+	            database: dbName,
             booking: {
                 ...updatedBooking,
+                database: dbName,
                 cancelled_by: cancelled_by_actor === 'admin' ? 'admin' : updatedBooking.cancelled_by
             }
         };
 
         if (updatedBooking.user_id) {
-            const userSocketId = userSockets.get(updatedBooking.user_id.toString());
+            const userSocketId = getTenantSocket(userSockets, dbName, updatedBooking.user_id);
             if (userSocketId) io.to(userSocketId).emit("user-ride-status-event", socketPayload);
         }
         if (updatedBooking.driver) {
-            const driverSocketId = driverSockets.get(updatedBooking.driver.toString());
+            const driverSocketId = getTenantSocket(driverSockets, dbName, updatedBooking.driver);
             if (driverSocketId) io.to(driverSocketId).emit("driver-ride-status-event", socketPayload);
         }
 
         if (booking_status === 'cancelled') {
             const cancelNotif = {
                 booking_id: id,
+                id,
                 booking_reference: updatedBooking.booking_id,
+                booking_status: 'cancelled',
+                status: 'cancelled',
+                booking: { ...updatedBooking, database: dbName },
+                database: dbName,
                 message: `Booking #${updatedBooking.booking_id} has been cancelled`,
                 cancelled_by: cancelled_by_actor
             };
-            dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
-            adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+            emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
+        }
+
+        if (booking_status === 'no_show') {
+            const noShowNotif = {
+                booking_id: id,
+                id,
+                booking_reference: updatedBooking.booking_id,
+                booking_status: 'no_show',
+                status: 'no_show',
+                booking: { ...updatedBooking, database: dbName },
+                database: dbName,
+                message: `Booking #${updatedBooking.booking_id} marked as no show`,
+                driver_id: updatedBooking.driver,
+            };
+            emitTenantRooms(dbName, "booking-no-show-event", noShowNotif);
         }
 
         if (followOnPayload) {
-            const driverSocketId = driverSockets.get(booking.driver.toString());
+            const driverSocketId = getTenantSocket(driverSockets, dbName, booking.driver);
             if (driverSocketId) {
                 io.to(driverSocketId).emit("new-ride-request", {
                     booking_id: followOnPayload.id,
@@ -3484,14 +4730,23 @@ app.put("/bookings/:id/status", async (req, res) => {
         }
 
         if (followOnEventData) {
-            dispatcherSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", followOnEventData));
-            adminSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", followOnEventData));
-            clientSockets.forEach((sid) => io.to(sid).emit("follow-on-job-sent-to-driver", followOnEventData));
+            emitTenantRooms(dbName, "follow-on-job-sent-to-driver", followOnEventData);
         }
 
-        await broadcastDashboardCardsUpdate(req.tenantDb);
+	        await broadcastDashboardCardsUpdate(req.tenantDb);
 
-        return res.json({ success: true, message: "Booking status updated successfully", res_user });
+	        return res.json({
+	            success: true,
+	            message: "Booking status updated successfully",
+	            res_user,
+	            data: {
+	                id: updatedBooking.id,
+	                booking_id: updatedBooking.booking_id,
+	                booking_status,
+	                database: dbName,
+	                booking: { ...updatedBooking, database: dbName },
+	            },
+	        });
 
     } catch (error) {
         console.error("Error updating booking status:", error);
@@ -3625,26 +4880,9 @@ app.post("/bookings/broadcast", async (req, res) => {
         const booking = rows[0];
         let sentCount = 0;
 
-        dispatcherSockets.forEach((socketId) => {
-            io.to(socketId).emit("new-booking-event", booking);
-            sentCount++;
-        });
-
-        adminSockets.forEach((socketId) => {
-            io.to(socketId).emit("new-booking-event", booking);
-            sentCount++;
-        });
-
-        clientSockets.forEach((socketId) => {
-            io.to(socketId).emit("new-booking-event", booking);
-            sentCount++;
-        });
-
         if (dbName) {
-            io.to(`dispatcher_${dbName}`).emit("new-booking-event", booking);
-            io.to(`admin_${dbName}`).emit("new-booking-event", booking);
-            io.to(`client_${dbName}`).emit("new-booking-event", booking);
-            sentCount += 3;
+            emitTenantRooms(dbName, "new-booking-event", booking);
+            sentCount = 1;
         }
 
         await broadcastDashboardCardsUpdate(finalDb);
@@ -3688,7 +4926,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
             return res.status(400).json({ success: false, message: "booking_id and tenantDb are required" });
         }
 
-        const finalDb = `tenant${tenantDb}`;
+        const finalDb = toTenantDbName(tenantDb);
         const db = getConnection(finalDb);
 
         const [bookings] = await db.query(`
@@ -3722,6 +4960,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
         }
 
         const booking = bookings[0];
+        const todayDate = await getTenantTodayDate(db);
         const {
             driver_id, driver_name, driver_email, driver_phone, driver_profile_image,
             vehicle_type_id, vehicle_type_name, vehicle_type_service,
@@ -3732,7 +4971,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
 
         const formattedBooking = {
             ...bookingData,
-            pre_booking: isPreBookingRow(bookingData),
+            pre_booking: isPreBookingRow(bookingData, todayDate),
             account_id: bookingData.account,
             driverDetail: driver_id ? {
                 id: driver_id,
@@ -3760,12 +4999,7 @@ app.post("/bookings/notify-updated", async (req, res) => {
         };
 
         const dbName = tenantDb.toString();
-        io.to(`dispatcher_${dbName}`).emit("booking-updated-event", formattedBooking);
-        io.to(`admin_${dbName}`).emit("booking-updated-event", formattedBooking);
-        io.to(`client_${dbName}`).emit("booking-updated-event", formattedBooking);
-        dispatcherSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
-        adminSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
-        clientSockets.forEach((socketId) => io.to(socketId).emit("booking-updated-event", formattedBooking));
+        emitTenantRooms(dbName, "booking-updated-event", formattedBooking);
 
         await broadcastDashboardCardsUpdate(finalDb);
 
@@ -3779,7 +5013,9 @@ app.post("/bookings/notify-updated", async (req, res) => {
 app.post("/send-new-ride", async (req, res) => {
     try {
         const { drivers, booking, tenantDb } = req.body;
-        const db = getConnection(tenantDb || req.tenantDb);
+        const resolvedTenantDb = tenantDb || req.tenantDb;
+        const dbName = resolvedTenantDb ? toTenantSocketName(resolvedTenantDb) : null;
+        const db = getConnection(resolvedTenantDb);
         let sentCount = 0;
 
         for (const driverId of drivers) {
@@ -3797,7 +5033,7 @@ app.post("/send-new-ride", async (req, res) => {
                 console.error("Notification error in /send-new-ride:", notifErr.message);
             }
 
-            const socketId = driverSockets.get(driverId.toString());
+            const socketId = getTenantSocket(driverSockets, dbName, driverId);
             if (socketId) {
                 if (isAccepted) {
                     io.to(socketId).emit("new-ride", booking);
@@ -3826,11 +5062,12 @@ app.post("/send-new-ride", async (req, res) => {
 app.post("/send-notification-dispatcher", (req, res) => {
     console.log("mmediate");
     const { dispatchers, booking } = req.body;
+    const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.body?.tenantDb || req.tenantDb);
     let sentCount = 0;
     dispatchers.forEach(dispatcherId => {
-        const socketId = dispatcherSockets.get(dispatcherId.toString());
+        const socketId = getTenantSocket(dispatcherSockets, dbName, dispatcherId);
         if (socketId) {
-            io.to(socketId).emit("notification-ride", booking);
+            io.to(socketId).emit("notification-ride", { ...booking, database: dbName });
             sentCount++;
         }
     });
@@ -3838,17 +5075,21 @@ app.post("/send-notification-dispatcher", (req, res) => {
 });
 
 app.post("/change-cancel-ride", async (req, res) => {
-    const { drivers, status, booking } = req.body;
+    const { status, booking } = req.body;
+    const drivers = Array.isArray(req.body.drivers) ? req.body.drivers : [];
+    const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
     const db = getConnection(req.tenantDb);
-    let targetUserId = booking.user_id;
-    if (!targetUserId) {
-        try {
-            const [rows] = await db.query("SELECT user_id FROM bookings WHERE id = ?", [booking.id]);
-            if (rows.length > 0) targetUserId = rows[0].user_id;
-        } catch (dbErr) {
-            console.error("Error fetching user_id for notification:", dbErr.message);
-        }
+
+    let persistedBooking = null;
+    try {
+        const [rows] = await db.query("SELECT user_id, driver FROM bookings WHERE id = ?", [booking.id]);
+        persistedBooking = rows[0] || null;
+    } catch (dbErr) {
+        console.error("Error fetching booking for cancellation notification:", dbErr.message);
     }
+
+    let targetUserId = booking.user_id || persistedBooking?.user_id;
+    const assignedDriverId = booking.driver || persistedBooking?.driver || null;
 
     if (targetUserId) {
         try {
@@ -3870,31 +5111,34 @@ app.post("/change-cancel-ride", async (req, res) => {
         }
     }
 
-    if (drivers && drivers.length > 0) {
+    if (assignedDriverId) {
         const driverNotifTitle = "Ride Cancelled";
         const driverNotifMessage = req.body.cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} has been cancelled`;
 
-        for (const driverId of drivers) {
-            try {
-                await sendNotificationToDriver(db, driverId, driverNotifTitle, driverNotifMessage, {
-                    booking_id: String(booking.id),
-                    type: "ride_cancelled"
-                });
-                await storeNotification(db, {
-                    user_type: 'driver',
-                    user_id: driverId,
-                    title: driverNotifTitle,
-                    message: driverNotifMessage
-                });
-            } catch (driverNotifErr) {
-                console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
-            }
+        try {
+            await sendNotificationToDriver(db, assignedDriverId, driverNotifTitle, driverNotifMessage, {
+                booking_id: String(booking.id),
+                type: "ride_cancelled"
+            });
+            await storeNotification(db, {
+                user_type: 'driver',
+                user_id: assignedDriverId,
+                title: driverNotifTitle,
+                message: driverNotifMessage
+            });
+        } catch (driverNotifErr) {
+            console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
         }
     }
 
     let sentCount = 0;
-    drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
+    const socketDriverIds = Array.from(new Set([
+        ...drivers.map((driverId) => String(driverId)),
+        ...(assignedDriverId ? [String(assignedDriverId)] : []),
+    ].filter(Boolean)));
+
+    socketDriverIds.forEach(driverId => {
+        const socketId = getTenantSocket(driverSockets, dbName, driverId);
         if (socketId) {
             io.to(socketId).emit("driver-ride-status-event", { status, booking });
             sentCount++;
@@ -3903,13 +5147,16 @@ app.post("/change-cancel-ride", async (req, res) => {
 
     const cancelNotif = {
         booking_id: booking.id,
+        id: booking.id,
+        booking_reference: booking.booking_id,
+        booking_status: 'cancelled',
+        status: 'cancelled',
         booking: booking,
         message: req.body.cancelled_by === 'user' ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} has been cancelled`
     };
-    dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
-    adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
-    drivers.forEach(driverId => {
-        const socketId = driverSockets.get(driverId.toString());
+    emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
+    socketDriverIds.forEach(driverId => {
+        const socketId = getTenantSocket(driverSockets, dbName, driverId);
         if (socketId) {
             io.to(socketId).emit("booking-cancelled-event", cancelNotif);
         }
@@ -3937,9 +5184,10 @@ app.post("/send-new-booking", (req, res) => {
 
 app.post("/bid-accept", async (req, res) => {
     const { driverId, booking } = req.body;
-    const socketId = driverSockets.get(driverId.toString());
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const socketId = getTenantSocket(driverSockets, dbName, driverId);
     if (socketId) {
-        io.to(socketId).emit("bid-accept-event", booking);
+        io.to(socketId).emit("bid-accept-event", { ...booking, database: dbName });
     }
 
     if (req.tenantDb) {
@@ -3951,26 +5199,72 @@ app.post("/bid-accept", async (req, res) => {
 
 app.post("/place-bid", (req, res) => {
     const { userId, bid } = req.body;
-    const socketId = userSockets.get(userId.toString());
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const socketId = getTenantSocket(userSockets, dbName, userId);
     if (socketId) {
-        io.to(socketId).emit("place-bid-event", bid);
+        io.to(socketId).emit("place-bid-event", { ...bid, database: dbName });
     }
     return res.json({ success: true });
 });
 
 app.post("/waiting-time-event", (req, res) => {
     const { userId, status, booking } = req.body;
-    const socketId = userSockets.get(userId.toString());
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const socketId = getTenantSocket(userSockets, dbName, userId);
     if (socketId) {
-        io.to(socketId).emit("waiting-time-event", { status, booking });
+        io.to(socketId).emit("waiting-time-event", { status, booking, database: dbName });
     }
     return res.json({ success: true });
 });
 
+const reconcileDriverStatusForRideEvent = async ({ db, database, booking, status }) => {
+    if (!db || !booking?.id) return { driverId: booking?.driver || null };
+
+    const [bookingRows] = await db.query(
+        "SELECT id, booking_id, driver, booking_status FROM bookings WHERE id = ? LIMIT 1",
+        [booking.id]
+    );
+    const persistedBooking = bookingRows[0] || {};
+    const driverId = booking.driver || persistedBooking.driver;
+    if (!driverId) return { driverId: null };
+
+    const activeStatuses = ["arrived_driver", "ride_started"];
+    const terminalStatuses = ["complete_current_ride", "no_show", "driver_no_show", "cancel_confirm_ride", "cancel_ride"];
+
+    let nextDriverStatus = null;
+    if (activeStatuses.includes(status)) {
+        nextDriverStatus = "busy";
+    } else if (terminalStatuses.includes(status)) {
+        const [activeRows] = await db.query(
+            `SELECT COUNT(*) AS active_count
+             FROM bookings
+             WHERE driver = ?
+               AND id <> ?
+               AND booking_status IN ('ongoing', 'arrived', 'started')`,
+            [driverId, booking.id]
+        );
+        nextDriverStatus = Number(activeRows[0]?.active_count || 0) > 0 ? "busy" : "idle";
+    }
+
+    if (nextDriverStatus) {
+        await db.query("UPDATE drivers SET driving_status = ?, updated_at = NOW() WHERE id = ?", [nextDriverStatus, driverId]);
+        await emitDriverStatusForTenant({
+            db,
+            database,
+            driverId,
+            reason: `ride_${status}`,
+        });
+    }
+
+    return { driverId, driverStatus: nextDriverStatus };
+};
+
 app.post("/change-ride-status", async (req, res) => {
     const { userId, status, booking } = req.body;
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database']);
+    const normalizedStatus = status === "driver_no_show" ? "no_show" : status;
+    const db = req.tenantDb ? getConnection(req.tenantDb) : null;
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
-        const db = getConnection(req.tenantDb);
         const targetUserId = userId || booking.user_id;
 
         if (targetUserId) {
@@ -4010,18 +5304,55 @@ app.post("/change-ride-status", async (req, res) => {
         }
     }
 
-    const socketId = userSockets.get(userId.toString());
+    const socketId = getTenantSocket(userSockets, dbName, userId);
     if (socketId) {
-        io.to(socketId).emit("user-ride-status-event", { status, booking });
+        io.to(socketId).emit("user-ride-status-event", { status, booking, database: dbName });
+    }
+
+    if (booking?.id && ["no_show", "driver_no_show", "arrived_driver", "ride_started", "complete_current_ride"].includes(status)) {
+        const bookingStatus =
+            status === "arrived_driver" ? "arrived" :
+            status === "ride_started" ? "started" :
+            status === "complete_current_ride" ? "completed" :
+            normalizedStatus;
+        const driverState = db
+            ? await reconcileDriverStatusForRideEvent({ db, database: dbName, booking, status })
+            : { driverId: booking.driver };
+
+        const statusPayload = {
+            id: booking.id,
+            booking_id: booking.id,
+            booking_reference: booking.booking_id,
+            booking_status: bookingStatus,
+            status: bookingStatus,
+            database: dbName,
+            booking: { ...booking, driver: driverState.driverId || booking.driver, booking_status: bookingStatus, database: dbName },
+            driver_id: driverState.driverId || booking.driver,
+            driver_name: booking.driverDetail?.name || booking.driver_name,
+            message: bookingStatus === "no_show"
+                ? `Booking #${booking.booking_id} marked as no show`
+                : `Booking #${booking.booking_id} status updated to ${bookingStatus}`,
+        };
+
+        emitTenantRooms(dbName, "booking-status-updated", statusPayload);
+        emitTenantRooms(dbName, "booking-updated-event", statusPayload.booking);
+
+        if (bookingStatus === "no_show") {
+            emitTenantRooms(dbName, "booking-no-show-event", statusPayload);
+        }
     }
 
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         const cancelNotif = {
             booking_id: booking.id,
+            id: booking.id,
+            booking_reference: booking.booking_id,
+            booking_status: 'cancelled',
+            status: 'cancelled',
+            booking,
             message: status === "cancel_confirm_ride" ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} has been cancelled`
         };
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
-        adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+        emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
     }
 
     if (req.tenantDb) {
@@ -4033,9 +5364,10 @@ app.post("/change-ride-status", async (req, res) => {
 
 app.post("/user-message-notification", (req, res) => {
     const { userId, chat } = req.body;
-    const socketId = userSockets.get(userId.toString());
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
+    const socketId = getTenantSocket(userSockets, dbName, userId);
     if (socketId) {
-        io.to(socketId).emit("user-message-event", chat);
+        io.to(socketId).emit("user-message-event", { ...chat, database: dbName });
     }
     return res.json({ success: true });
 });
@@ -4047,12 +5379,12 @@ app.post("/driver-message-notification", (req, res) => {
         return res.status(400).json({ success: false, message: "Missing driverId or chat" });
     }
 
-    const driverIdStr = driverId.toString();
-    const socketId = driverSockets.get(driverIdStr);
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
+    const socketId = getTenantSocket(driverSockets, dbName, driverId);
     let delivered = false;
 
     if (socketId) {
-        io.to(socketId).emit("driver-message-event", chat);
+        io.to(socketId).emit("driver-message-event", { ...chat, database: dbName });
         delivered = true;
     }
 
@@ -4070,7 +5402,7 @@ app.post("/driver-force-logout", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4078,7 +5410,7 @@ app.post("/driver-force-logout", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
         const db = getConnection(req.tenantDb);
         const driverIdStr = driverId.toString();
 
@@ -4092,11 +5424,18 @@ app.post("/driver-force-logout", async (req, res) => {
         const driverName = rows[0]?.name;
 
         await removeFromQueue(driverId, dbName);
-        driverLastLocationTime.delete(driverIdStr);
+        const driverRuntimeKey = tenantSocketKey(dbName, driverIdStr);
+        if (driverRuntimeKey) {
+            driverLastLocationTime.delete(driverRuntimeKey);
+            knownDriverRuntimeKeys.delete(driverRuntimeKey);
+            driverLocationCache.delete(driverRuntimeKey);
+            driverLocationPersistTime.delete(driverRuntimeKey);
+            driverLocationPersistCoalescer.clear(driverRuntimeKey);
+        }
 
-        if (driverDisconnectTimers.has(driverIdStr)) {
-            clearTimeout(driverDisconnectTimers.get(driverIdStr));
-            driverDisconnectTimers.delete(driverIdStr);
+        if (driverRuntimeKey && driverDisconnectTimers.has(driverRuntimeKey)) {
+            clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
+            driverDisconnectTimers.delete(driverRuntimeKey);
         }
 
         if (plotId) {
@@ -4104,7 +5443,7 @@ app.post("/driver-force-logout", async (req, res) => {
         }
         await broadcastFullQueueToDrivers(dbName);
 
-        const driverSocketId = driverSockets.get(driverIdStr);
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driverIdStr);
         if (driverSocketId) {
             io.to(driverSocketId).emit("driver-forced-offline", {
                 driver_id: driverId,
@@ -4303,7 +5642,7 @@ app.post("/dispatcher-force-logout-all", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4311,7 +5650,7 @@ app.post("/dispatcher-force-logout-all", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing database header" });
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         io.to(`dispatcher_${dbName}`).emit("dispatcher-forced-logout", {
             message: "You have been logged out by admin",
@@ -4328,9 +5667,14 @@ app.post("/dispatcher-force-logout-all", async (req, res) => {
 
 app.post("/change-driver-ride-status", async (req, res) => {
     const { driverId, status, booking } = req.body;
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         let targetUserId = booking.user_id;
-        const db = getConnection(req.tenantDb);
+        const db = req.tenantDb ? getConnection(req.tenantDb) : null;
+
+        if (!db) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
 
         if (!targetUserId) {
             try {
@@ -4364,19 +5708,23 @@ app.post("/change-driver-ride-status", async (req, res) => {
         }
     }
 
-    const socketId = driverSockets.get(driverId.toString());
+    const socketId = getTenantSocket(driverSockets, dbName, driverId);
     if (socketId) {
-        io.to(socketId).emit("driver-ride-status-event", { status, booking });
+        io.to(socketId).emit("driver-ride-status-event", { status, booking, database: dbName });
     }
 
     if (status === "cancel_confirm_ride" || status === "cancel_ride") {
         const cancelNotif = {
             booking_id: booking.id,
+            id: booking.id,
+            booking_reference: booking.booking_id,
+            booking_status: 'cancelled',
+            status: 'cancelled',
             booking: booking,
+            database: dbName,
             message: status === "cancel_confirm_ride" ? `Booking #${booking.booking_id} has been cancelled by customer` : `Booking #${booking.booking_id} is cancelled by Admin or Dispatcher`
         };
-        dispatcherSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
-        adminSockets.forEach((sid) => io.to(sid).emit("booking-cancelled-event", cancelNotif));
+        emitTenantRooms(dbName, "booking-cancelled-event", cancelNotif);
         if (socketId) {
             io.to(socketId).emit("booking-cancelled-event", cancelNotif);
         }
@@ -4410,23 +5758,24 @@ app.post("/on-job-driver", async (req, res) => {
             }
         }
 
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
+
         const eventData = {
             driver_id: finalDriverId,
             driverName: finalDriverName,
             driver_name: finalDriverName,
-            status: 'busy'
+            status: 'busy',
+            driving_status: 'busy',
+            database: dbName,
         };
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
 
-        const socketId = clientSockets.get(clientId?.toString());
+        const socketId = getTenantSocket(clientSockets, dbName, clientId);
         if (socketId) {
             io.to(socketId).emit("on-job-driver-event", eventData);
         }
 
         if (dbName) {
-            io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventData);
-            io.to(`admin_${dbName}`).emit("on-job-driver-event", eventData);
-            io.to(`client_${dbName}`).emit("on-job-driver-event", eventData);
+            emitTenantOnJobDriver(dbName, eventData);
 
             if (finalDriverId) {
                 const [plotRows] = await db.query('SELECT plot_id FROM drivers WHERE id = ? LIMIT 1', [finalDriverId]);
@@ -4454,7 +5803,7 @@ app.post("/update-driver-rank", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4466,7 +5815,7 @@ app.post("/update-driver-rank", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing driver_id, plot_id, or rank" });
         }
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || req.tenantDb.replace("tenant", "");
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
         const result = await applyDriverRankUpdate(dbName, plot_id, driver_id, rank);
 
         if (result.success !== 1) {
@@ -4487,7 +5836,7 @@ app.post("/waiting-driver", async (req, res) => {
         if (!req.tenantDb) {
             const dbHeader = req.headers['database'] || req.headers['x-database'];
             if (dbHeader) {
-                req.tenantDb = `tenant${dbHeader}`;
+                req.tenantDb = toTenantDbName(dbHeader);
             }
         }
 
@@ -4499,7 +5848,8 @@ app.post("/waiting-driver", async (req, res) => {
         const db = getConnection(req.tenantDb);
 
         const [driverRows] = await db.query(
-            `SELECT d.id, d.name, d.driving_status, d.plot_id, p.name AS plot_name, d.priority_plot, d.updated_at
+            `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                    p.name AS plot_name, d.priority_plot, d.updated_at
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              WHERE d.id = ? 
@@ -4514,6 +5864,7 @@ app.post("/waiting-driver", async (req, res) => {
 
         const driver = driverRows[0];
         const plotId = driver.plot_id;
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
 
         // ✅ FIX: plot_name already comes from LEFT JOIN — real name like "USA"
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
@@ -4534,23 +5885,26 @@ app.post("/waiting-driver", async (req, res) => {
             driverName: driver.name,
             driver_name: driver.name,
             plot: plotId,
+            plot_id: plotId,
             plot_name: plotName,   // ✅ Real name e.g. "USA"
-            rank: rank
+            rank: rank,
+            status: driver.driving_status,
+            driving_status: driver.driving_status,
+            online_status: driver.online_status,
+            latitude: driver.latitude,
+            longitude: driver.longitude,
+            database: dbName,
         };
 
-        const dbName = req.headers['database'] || req.headers['x-database'] || (req.tenantDb ? req.tenantDb.replace("tenant", "") : null);
-
-        const socketId = clientSockets.get(clientId?.toString());
+        const socketId = getTenantSocket(clientSockets, dbName, clientId);
         if (socketId) {
             io.to(socketId).emit("waiting-driver-event", eventData);
         }
 
         if (dbName) {
-            io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventData);
-            io.to(`admin_${dbName}`).emit("waiting-driver-event", eventData);
-            io.to(`client_${dbName}`).emit("waiting-driver-event", eventData);
+            emitTenantWaitingDriver(dbName, eventData);
 
-            const driverSocketId = driverSockets.get(driver_id.toString());
+            const driverSocketId = getTenantSocket(driverSockets, dbName, driver_id);
             if (driverSocketId) {
                 io.to(driverSocketId).emit("waiting-driver-event", eventData);
             }
@@ -4597,7 +5951,7 @@ app.post("/send-reminder", (req, res) => {
     };
 
     if (clientId) {
-        const socketId = clientSockets.get(clientId.toString());
+        const socketId = getTenantSocket(clientSockets, dbName, clientId);
         if (socketId) {
             io.to(socketId).emit("send-reminder", payload);
         }
@@ -4610,7 +5964,7 @@ app.post("/send-reminder", (req, res) => {
     }
 
     if (driver_id) {
-        const driverSocketId = driverSockets.get(driver_id.toString());
+        const driverSocketId = getTenantSocket(driverSockets, dbName, driver_id);
         if (driverSocketId) {
             io.to(driverSocketId).emit("send-reminder", payload);
         }
@@ -4737,7 +6091,7 @@ app.get("/driver/:id/riding-details", async (req, res) => {
             });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [driverRows] = await db.query(
@@ -5056,7 +6410,7 @@ app.post("/account/collect-and-email", async (req, res) => {
             return res.status(400).json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
@@ -5179,7 +6533,7 @@ app.post('/driver/send-invoice', async (req, res) => {
         const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
         if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [driverRows] = await db.query("SELECT * FROM drivers WHERE id = ?", [driver_id]);
@@ -5262,7 +6616,7 @@ app.post('/user/send-invoice', async (req, res) => {
         const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
         if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [userRows] = await db.query("SELECT * FROM users WHERE id = ?", [user_id]);
@@ -5349,7 +6703,7 @@ app.post('/account/send-invoice', async (req, res) => {
             return res.status(400).json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [accountRows] = await db.query("SELECT * FROM accounts WHERE id = ?", [account_id]);
@@ -5487,7 +6841,7 @@ app.post('/sub-company/send-invoice', async (req, res) => {
             return res.status(400).json({ success: 0, message: "Database header is required" });
         }
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [subCompanyRows] = await db.query("SELECT * FROM sub_companies WHERE id = ?", [sub_company_id]);
@@ -5621,7 +6975,7 @@ app.post('/driver/send-package-history', async (req, res) => {
         const databaseHeader = req.headers["x-database"] || req.headers["database"] || req.query.database;
         if (!databaseHeader) return res.status(400).json({ success: 0, message: "Database header is required" });
 
-        const tenantDb = `tenant${databaseHeader}`;
+        const tenantDb = toTenantDbName(databaseHeader);
         const db = getConnection(tenantDb);
 
         const [settingsRows] = await db.query("SELECT * FROM settings ORDER BY id DESC LIMIT 1");
@@ -5718,7 +7072,7 @@ setInterval(async () => {
         const database = parts.slice(1).join('_');
 
         try {
-            const db = getConnection(`tenant${database}`);
+            const db = getConnection(toTenantDbName(database));
             const driverIds = queue.map(d => d.driver_id);
 
             const [drivers] = await db.query(
@@ -5730,9 +7084,10 @@ setInterval(async () => {
 
             for (const item of [...queue]) {
                 const driverIdStr = item.driver_id;
+                const runtimeKey = tenantSocketKey(database, driverIdStr);
                 const driverDb = drivers.find(d => d.id.toString() === driverIdStr);
 
-                const lastLocationTime = driverLastLocationTime.get(driverIdStr) || 0;
+                const lastLocationTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const isTimeout = lastLocationTime > 0 && (now - lastLocationTime) > LOCATION_TIMEOUT_MS;
 
                 let shouldRemove = false;
@@ -5755,7 +7110,7 @@ setInterval(async () => {
                 if (shouldRemove) {
                     console.log(`[QueueCheck] Removing driver #${driverIdStr} from ${plotKey}: ${reason}`);
                     await removeFromQueue(driverIdStr, database);
-                    driverLastLocationTime.delete(driverIdStr);
+                    if (runtimeKey) driverLastLocationTime.delete(runtimeKey);
                     queueChanged = true;
 
                     if (isTimeout) {
@@ -5766,7 +7121,7 @@ setInterval(async () => {
                             );
                             console.log(`[QueueCheck] Driver #${driverIdStr} → offline (15 min location timeout)`);
 
-                            const driverSocketId = driverSockets.get(driverIdStr);
+                            const driverSocketId = getTenantSocket(driverSockets, database, driverIdStr);
                             if (driverSocketId) {
                                 io.to(driverSocketId).emit("driver-forced-offline", {
                                     driver_id: driverIdStr,
@@ -5810,8 +7165,10 @@ setInterval(async () => {
     }
 
     for (const database of allDatabases) {
-        const hasReconnecting = Array.from(driverLastLocationTime.entries()).some(([driverIdStr, lastTime]) => {
-            return (now - lastTime) > RECONNECTING_THRESHOLD_MS && (now - lastTime) < LOCATION_TIMEOUT_MS;
+        const hasReconnecting = Array.from(driverLastLocationTime.entries()).some(([driverKey, lastTime]) => {
+            return String(driverKey).startsWith(`${database}:`)
+                && (now - lastTime) > RECONNECTING_THRESHOLD_MS
+                && (now - lastTime) < LOCATION_TIMEOUT_MS;
         });
 
         if (hasReconnecting) {
@@ -5838,7 +7195,8 @@ setInterval(async () => {
         for (const [plotKey, queue] of plotDriverQueues.entries()) {
             if (!plotKey.endsWith(`_${database}`)) continue;
             for (const item of queue) {
-                const lastTime = driverLastLocationTime.get(item.driver_id) || 0;
+                const runtimeKey = tenantSocketKey(database, item.driver_id);
+                const lastTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const timeSince = now - lastTime;
                 if (timeSince > RECONNECTING_THRESHOLD_MS && timeSince < LOCATION_TIMEOUT_MS) {
                     hasReconnectingDriver = true;
@@ -5854,6 +7212,6 @@ setInterval(async () => {
     }
 }, 10 * 1000)
 
-server.listen(3001, "0.0.0.0", () => {
-    console.log("🚀 Socket server running on port 3001");
+server.listen(3001, "0.0.0.0", SOCKET_LISTEN_BACKLOG, () => {
+    console.log(`🚀 Socket server running on port 3001 (backlog ${SOCKET_LISTEN_BACKLOG})`);
 });

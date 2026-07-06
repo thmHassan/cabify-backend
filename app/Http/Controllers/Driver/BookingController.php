@@ -137,6 +137,16 @@ class BookingController extends Controller
                 ->orderBy("id", "DESC")
                 ->with("userDetail")
                 ->get();
+            $placedBidIds = CompanyBid::where("driver_id", $driver->id)
+                ->whereIn("booking_id", $rideList->pluck("id"))
+                ->pluck("booking_id")
+                ->map(fn ($id) => (string) $id)
+                ->all();
+
+            $rideList->transform(function ($ride) use ($placedBidIds) {
+                $ride->placed = in_array((string) $ride->id, $placedBidIds, true);
+                return $ride;
+            });
 
             return response()->json([
                 'success' => 1,
@@ -230,18 +240,22 @@ class BookingController extends Controller
                 ], 403);
             }
             $vehicle = VehicleType::where("id", auth("driver")->user()->vehicle_type)->first();
+            $vehicleTypeName = $vehicle?->vehicle_type_name
+                ?? auth("driver")->user()->vehicle_name
+                ?? $booking?->vehicle
+                ?? '';
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/place-bid', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/place-bid', [
                         'userId' => $booking->user_id,
                         'bid' => [
                             'amount' => $newBid->amount,
                             'driver_name' => auth("driver")->user()->name,
                             'profile_image' => auth("driver")->user()->profile_image,
                             'vehicle_name' => auth("driver")->user()->vehicle_name,
-                            'vehicle_type' => $vehicle->vehicle_type_name,
+                            'vehicle_type' => $vehicleTypeName,
                             'rating' => auth("driver")->user()->rating,
                             'bid_id' => $newBid->id
                         ]
@@ -314,18 +328,20 @@ class BookingController extends Controller
                 $booking->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/driver/cancel-ride', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver/cancel-ride', [
                             'ride_id' => $booking->id,
                             'cancel_reason' => $request->cancel_reason,
                         ]);
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "cancel_confirm_ride",
+                            'database' => $request->header('database'),
                             'booking' => [
                                 'id' => $booking->id,
                                 'booking_id' => $booking->booking_id,
@@ -382,9 +398,9 @@ class BookingController extends Controller
             $driver->save();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
                         'clientId' => $request->header('database'),
                         'driver_id' => auth("driver")->user()->id,
                     ]);
@@ -423,6 +439,10 @@ class BookingController extends Controller
             $driverId = auth('driver')->user()->id;
             $isNearestDispatchOffer = NearestDispatch::isActiveOffer($booking->dispatcher_action);
             $isPlotDispatchOffer = PlotDispatch::isActiveOffer($booking->dispatcher_action);
+            $isPlotBiddingFallback = BookingDispatchCycle::where('booking_id', $booking->id)
+                ->where('status', 'exhausted')
+                ->where('fallback_to_bidding', true)
+                ->exists();
 
             if (!VehicleDispatchFilter::driverMatchesBooking(auth('driver')->user(), $booking)) {
                 return response()->json([
@@ -431,7 +451,7 @@ class BookingController extends Controller
                 ], 403);
             }
 
-            if (!$isNearestDispatchOffer && !$isPlotDispatchOffer && $booking->driver && (string) $booking->driver !== (string) $driverId) {
+            if (!$isNearestDispatchOffer && !$isPlotDispatchOffer && !$isPlotBiddingFallback && $booking->driver && (string) $booking->driver !== (string) $driverId) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Ride already accepted by another driver',
@@ -476,7 +496,7 @@ class BookingController extends Controller
 
             $newStatus = $this->resolveStatusAfterDriverAccept($booking, $isNearestDispatchOffer);
 
-            $claimed = DB::transaction(function () use ($booking, $driverId, $bookingAmount, $newStatus, $isNearestDispatchOffer, $isPlotDispatchOffer) {
+            $claimed = DB::transaction(function () use ($request, $booking, $driverId, $bookingAmount, $newStatus, $isNearestDispatchOffer, $isPlotDispatchOffer, $isPlotBiddingFallback) {
                 if ($isPlotDispatchOffer) {
                     $cycle = BookingDispatchCycle::where('booking_id', $booking->id)
                         ->where('status', 'in_progress')
@@ -487,46 +507,87 @@ class BookingController extends Controller
                         return false;
                     }
 
-                    $notifiedDriverIds = $cycle->notified_driver_ids ?? [];
-                    if (!in_array((string) $driverId, array_map('strval', $notifiedDriverIds), true)) {
-                        $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
-                            ->where('driver_id', $driverId)
-                            ->exists();
-                        if (!$wasNotified) {
-                            return false;
-                        }
+                    if ((string) $cycle->current_driver_id !== (string) $driverId) {
+                        return false;
                     }
 
-                    $cycle->update(['status' => 'accepted']);
+                    if ($cycle->offer_expires_at && $cycle->offer_expires_at->isPast()) {
+                        return false;
+                    }
+
+                    if ($request->filled('offer_token') && (int) $request->input('offer_token') !== (int) $cycle->offer_token) {
+                        return false;
+                    }
+
+                    $cycle->update([
+                        'status' => 'accepted',
+                        'current_driver_id' => $driverId,
+                        'offer_expires_at' => null,
+                    ]);
+                } elseif ($isPlotBiddingFallback) {
+                    $cycle = BookingDispatchCycle::where('booking_id', $booking->id)
+                        ->where('status', 'exhausted')
+                        ->where('fallback_to_bidding', true)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$cycle) {
+                        return false;
+                    }
+
+                    $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
+                        ->where('driver_id', $driverId)
+                        ->exists();
+
+                    if (!$wasNotified) {
+                        return false;
+                    }
+
+                    $cycle->update([
+                        'status' => 'accepted',
+                        'current_driver_id' => $driverId,
+                        'current_driver_rank' => null,
+                        'offer_expires_at' => null,
+                    ]);
                 }
 
                 return (bool) CompanyBooking::where('id', $booking->id)
                     ->where('booking_status', 'pending')
-                    ->where(function ($query) use ($driverId, $isNearestDispatchOffer, $isPlotDispatchOffer) {
-                        if ($isNearestDispatchOffer || $isPlotDispatchOffer) {
+                    ->where(function ($query) use ($driverId, $isNearestDispatchOffer, $isPlotDispatchOffer, $isPlotBiddingFallback) {
+                        if ($isPlotDispatchOffer) {
+                            $query->where('pending_driver_id', $driverId)
+                                ->whereNull('driver');
+                        } elseif ($isNearestDispatchOffer) {
                             $query->where(function ($inner) use ($driverId) {
                                 $inner->whereNull('driver')->orWhere('driver', $driverId);
                             });
+                        } elseif ($isPlotBiddingFallback) {
+                            $query->whereNull('driver');
                         } else {
                             $query->whereNull('driver')->orWhere('driver', $driverId);
                         }
                     })
                     ->update([
                         'driver' => $driverId,
+                        'pending_driver_id' => null,
                         'booking_amount' => $bookingAmount,
                         'booking_status' => $newStatus,
                         'dispatcher_action' => $isNearestDispatchOffer
                             ? "Nearest dispatch — accepted by driver #{$driverId}"
                             : ($isPlotDispatchOffer
                                 ? PlotDispatch::acceptedAction($driverId)
-                                : $booking->dispatcher_action),
+                                : ($isPlotBiddingFallback
+                                    ? "Fixed-fare bidding fallback — accepted by driver #{$driverId}"
+                                    : $booking->dispatcher_action)),
                     ]);
             });
 
             if (!$claimed) {
                 return response()->json([
                     'error' => 1,
-                    'message' => 'Ride already accepted by another driver',
+                    'message' => ($isPlotDispatchOffer || $isPlotBiddingFallback)
+                        ? 'Ride no longer available'
+                        : 'Ride already accepted by another driver',
                 ], 409);
             }
 
@@ -660,6 +721,24 @@ class BookingController extends Controller
         return 'started';
     }
 
+    private function isRejectableManualAssignment(CompanyBooking $booking, $driverId): bool
+    {
+        if ((string) $booking->driver !== (string) $driverId) {
+            return false;
+        }
+
+        if (!in_array($booking->booking_status, ['pending', 'ongoing'], true)) {
+            return false;
+        }
+
+        $action = strtolower((string) $booking->dispatcher_action);
+        return str_contains($action, 'assigned')
+            || str_contains($action, 'pre-job')
+            || str_contains($action, 'manual')
+            || str_contains($action, 'driver selected')
+            || str_contains($action, 'dispatching now');
+    }
+
     public function rejectRide(Request $request)
     {
         try {
@@ -677,16 +756,19 @@ class BookingController extends Controller
                 ], 404);
             }
 
-            if ($booking->booking_status !== 'pending') {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Ride is no longer available',
-                ], 400);
-            }
-
             $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
                 ->where('driver_id', $driverId)
                 ->exists();
+
+            if ($booking->booking_status !== 'pending' && !$this->isRejectableManualAssignment($booking, $driverId)) {
+                return response()->json([
+                    'success' => 1,
+                    'message' => $wasNotified
+                        ? 'Ride is no longer available'
+                        : 'Ride is no longer available',
+                    'skipped' => true,
+                ]);
+            }
 
             if ((string) $booking->driver !== (string) $driverId && !$wasNotified) {
                 return response()->json([
@@ -756,13 +838,16 @@ class BookingController extends Controller
             $driver->save();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                'database' => $request->header('database'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                         'userId' => $booking->user_id,
                         'status' => "arrived_driver",
+                        'database' => $request->header('database'),
                         'booking' => [
                             'id' => $booking->id,
                             'booking_id' => $booking->booking_id,
+                            'driver' => $booking->driver ?: auth("driver")->user()->id,
                             'pickup_point' => $booking->pickup_point,
                             'destination_point' => $booking->destination_point,
                             'offered_amount' => $booking->offered_amount,
@@ -830,10 +915,12 @@ class BookingController extends Controller
                 $waitingRecord->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/waiting-time-event', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-time-event', [
                     'userId' => $booking->user_id,
                     'status' => "start",
+                    'database' => $request->header('database'),
                     'booking' => [
                         'id' => $booking->id,
                         'booking_id' => $booking->booking_id,
@@ -868,10 +955,12 @@ class BookingController extends Controller
                 $waitingRecord->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/waiting-time-event', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-time-event', [
                     'userId' => $booking->user_id,
                     'status' => "stop",
+                    'database' => $request->header('database'),
                     'booking' => [
                         'id' => $booking->id,
                         'booking_id' => $booking->booking_id,
@@ -893,6 +982,80 @@ class BookingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function noShowRide(Request $request)
+    {
+        try {
+            $request->validate([
+                'booking_id' => 'required',
+            ]);
+
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $booking = CompanyBooking::where("id", $request->booking_id)
+                ->where("driver", $driver->id)
+                ->first();
+
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found for this driver',
+                ], 404);
+            }
+
+            if ($booking->booking_status !== 'arrived') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'No show can only be marked after arriving at pickup',
+                ], 422);
+            }
+
+            $booking->booking_status = "no_show";
+            $booking->dispatcher_action = trim(($driver->name ?? 'Driver') . ' marked this ride as no show');
+            $booking->save();
+
+            $driver->driving_status = "idle";
+            $driver->save();
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                'database' => $request->header('database'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
+                'userId' => $booking->user_id,
+                'status' => "driver_no_show",
+                'database' => $request->header('database'),
+                'booking' => [
+                    'id' => $booking->id,
+                    'booking_id' => $booking->booking_id,
+                    'pickup_point' => $booking->pickup_point,
+                    'pickup_location' => $booking->pickup_location,
+                    'destination_point' => $booking->destination_point,
+                    'destination_location' => $booking->destination_location,
+                    'offered_amount' => $booking->offered_amount,
+                    'distance' => $booking->distance,
+                    'driver' => $booking->driver,
+                    'booking_status' => $booking->booking_status,
+                    'booking_date' => $booking->booking_date,
+                    'pickup_time' => $booking->pickup_time,
+                    'driverDetail' => [
+                        'id' => $driver->id,
+                        'name' => $driver->name,
+                        'phone_no' => $driver->phone_no,
+                    ],
+                ],
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride marked as no show',
+                'booking' => $booking,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -924,14 +1087,22 @@ class BookingController extends Controller
                 $booking->driver_pickup_time = now()->format('Y-m-d H:i:s');
                 $booking->save();
 
+                $driverId = $booking->driver ?: auth('driver')->user()->id;
+                if ($driverId) {
+                    CompanyDriver::where("id", $driverId)->update(["driving_status" => "busy"]);
+                }
+
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                             'userId' => $booking->user_id,
                             'status' => "ride_started",
+                            'database' => $request->header('database'),
                             'booking' => [
                                 'id' => $booking->id,
                                 'booking_id' => $booking->booking_id,
+                                'driver' => $driverId,
                                 'pickup_point' => $booking->pickup_point,
                                 'destination_point' => $booking->destination_point,
                                 'offered_amount' => $booking->offered_amount,
@@ -994,15 +1165,19 @@ class BookingController extends Controller
             $booking->driver_dropoff_time = now()->format('Y-m-d H:i:s');
             $booking->save();
 
+            $driverId = $booking->driver ?: auth('driver')->user()->id;
+
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-ride-status', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-ride-status', [
                         'userId' => $booking->user_id,
                         'status' => "complete_current_ride",
+                        'database' => $request->header('database'),
                         'booking' => [
                             'id' => $booking->id,
                             'booking_id' => $booking->booking_id,
+                            'driver' => $driverId,
                             'pickup_point' => $booking->pickup_point,
                             'destination_point' => $booking->destination_point,
                             'offered_amount' => $booking->offered_amount,
@@ -1043,16 +1218,18 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyDriver::where("id", auth('driver')->user()->id)->first();
-            $driver->driving_status = "idle";
-            $driver->save();
+            $driver = CompanyDriver::where("id", $driverId)->first();
+            if ($driver) {
+                $driver->driving_status = "idle";
+                $driver->save();
+            }
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
-                'driver_id' => auth('driver')->user()->id,
+                'driver_id' => $driverId,
             ]);
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();

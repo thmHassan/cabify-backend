@@ -21,6 +21,7 @@ use App\Services\DriverSessionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenBlacklistedException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException;
@@ -145,9 +146,7 @@ class AuthController extends Controller
                     ],
                     'isActive' => true,
                     'sortOrder' => $document->id,
-                    'allowedFormats' => $documentType === 'file'
-                        ? ['pdf', 'jpg', 'jpeg', 'png', 'heic', 'heif']
-                        : ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'],
+                    'allowedFormats' => ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'],
                 ];
             })->values();
 
@@ -204,6 +203,7 @@ class AuthController extends Controller
             $user->email = $request->email;
             $user->name = $request->name;
             $user->country_code = $request->country_code;
+            $user->email_verified = false;
             $user->password = Hash::make($request->password);
             if ($request->filled('fcm_token')) {
                 $user->fcm_token = $request->fcm_token;
@@ -341,7 +341,7 @@ class AuthController extends Controller
             ], 400);
         }
 
-        if (!Hash::check($request->password, $user->password)) {
+        if (!$this->passwordMatchesAndUpgrade($user, (string) $request->password)) {
             return response()->json([
                 'error' => 1,
                 'message' => 'Invalid Password',
@@ -352,14 +352,61 @@ class AuthController extends Controller
         $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
         $user->save();
 
+        if (!$this->driverEmailVerified($user)) {
+            return $this->sendOtpRequiredResponse($user, $request);
+        }
+
         $token = JWTAuth::fromUser($user);
+
+        $profileData = $this->formatDriverProfileData($user);
 
         return response()->json([
             'success' => 1,
             'message' => 'Login successful',
             'token' => $token,
-            'data' => $this->formatDriverProfileData($user),
+            'data' => $profileData,
+            'user' => $profileData,
         ]);
+    }
+
+    public function resendOtp(Request $request)
+    {
+        try {
+            $request->validate([
+                'companyCode' => 'required',
+                'email' => 'required|email',
+                'phone' => 'required',
+                'country_code' => 'required',
+                'device_token' => 'nullable',
+                'deviceToken' => 'nullable',
+                'fcm_token' => 'nullable',
+                'fcmToken' => 'nullable',
+            ]);
+
+            $driver = CompanyDriver::where('phone_no', $request->phone)
+                ->where('country_code', $request->country_code)
+                ->where('email', $request->email)
+                ->first();
+
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User does not exist',
+                ], 404);
+            }
+
+            $this->finalizeDriverRegistration($driver, $request);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'OTP resent successfully',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
     }
 
     private function isAppRegistrationFlow(Request $request): bool
@@ -381,7 +428,11 @@ class AuthController extends Controller
         $request->validate([
             'firstName' => 'required|string|max:255',
             'lastName' => 'required|string|max:255',
-            'email' => 'required|email|unique:drivers,email',
+            'email' => [
+                'required',
+                'email',
+                Rule::unique('drivers', 'email')->whereNull('deleted_at'),
+            ],
             'password' => ['required', 'string', 'min:8', 'regex:/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/'],
             'confirmPassword' => 'required|same:password',
             'phone' => 'required',
@@ -410,15 +461,15 @@ class AuthController extends Controller
             'documentNumbers' => 'nullable',
             'document_numbers' => 'nullable',
             'documents' => 'nullable',
-            'documents.*' => 'file|max:8192',
+            'documents.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentFrontPhotos' => 'nullable',
-            'documentFrontPhotos.*' => 'file|max:8192',
+            'documentFrontPhotos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentBackPhotos' => 'nullable',
-            'documentBackPhotos.*' => 'file|max:8192',
+            'documentBackPhotos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentProfilePhotos' => 'nullable',
-            'documentProfilePhotos.*' => 'file|max:8192',
+            'documentProfilePhotos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentFiles' => 'nullable',
-            'documentFiles.*' => 'file|max:8192',
+            'documentFiles.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'photo' => 'required|image|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'fcmToken' => 'nullable',
             'deviceToken' => 'nullable',
@@ -493,6 +544,7 @@ class AuthController extends Controller
         $driver->email = $request->email;
         $driver->phone_no = $request->phone;
         $driver->country_code = $request->countryCode;
+        $driver->email_verified = false;
         $driver->password = Hash::make($request->password);
         $driver->address = $request->address;
         $driver->city = $request->city;
@@ -636,29 +688,29 @@ class AuthController extends Controller
                 && $documentType->back_photo !== 'yes'
                 && $documentType->profile_photo !== 'yes'
             ) {
-                if (!$genericFile) {
+                $imageOnlyDocument = $frontPhoto ?? $backPhoto ?? $profilePhoto ?? $genericFile;
+
+                if (!$imageOnlyDocument) {
                     return response()->json([
                         'error' => 1,
-                        'message' => "Document file is required for {$documentKey}.",
+                        'message' => "Document image is required for {$documentKey}.",
                     ], 422);
                 }
 
-                $driverDocument->front_photo = $this->storeDriverFile($genericFile, (string) $request->input('companyCode'), 'driver_documents');
+                $driverDocument->front_photo = $this->storeDriverFile($imageOnlyDocument, (string) $request->input('companyCode'), 'driver_documents');
             }
 
             $driverDocument->status = 'pending';
             $driverDocument->save();
         }
 
-        $this->storeDriverTokenRecord(
-            $driver,
-            $request->input('deviceToken'),
-            $request->input('fcmToken')
-        );
+        $this->finalizeDriverRegistration($driver, $request);
+
+        $this->finalizeDriverRegistration($driver, $request);
 
         return response()->json([
             'success' => 1,
-            'message' => 'Driver registration submitted successfully',
+            'message' => 'Driver registration submitted successfully and OTP sent',
             'profileVerified' => false,
             'profileStatus' => 'pending',
             'accountStatus' => 'pending',
@@ -686,8 +738,8 @@ class AuthController extends Controller
 
         if ($countDriver >= ($dataCheck->data['drivers_allowed'] ?? 0)) {
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                 'clientId' => $databaseId,
                 'title' => 'Driver Limit',
                 'description' => 'You have reached your driver limits'
@@ -710,8 +762,17 @@ class AuthController extends Controller
         $user->otp_expires_at = $expiresAt;
         $user->save();
 
-        $this->storeDriverTokenRecord($user, $request->input('device_token'), $request->input('fcm_token'));
+        $this->storeDriverTokenRecord(
+            $user,
+            $request->input('deviceToken', $request->input('device_token')),
+            $request->input('fcmToken', $request->input('fcm_token'))
+        );
 
+        $this->sendDriverOtpEmail($user, $otp);
+    }
+
+    private function sendDriverOtpEmail(CompanyDriver $user, int $otp): void
+    {
         $settingData = CompanySetting::orderBy('id', 'DESC')->first();
         if (isset($user->email) && $user->email != null) {
             $mailer = \App\Services\MailConfigurationService::resolveMailer($settingData);
@@ -802,11 +863,7 @@ class AuthController extends Controller
 
     private function resolveDriverRequirementType(CompanyDocumentType $document): string
     {
-        return ($document->front_photo === 'yes'
-            || $document->back_photo === 'yes'
-            || $document->profile_photo === 'yes')
-            ? 'image'
-            : 'file';
+        return 'image';
     }
 
     private function resolveDriverDocumentStorageField(?CompanyDocumentType $documentType): string
@@ -859,15 +916,6 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            $status = strtolower((string) ($driver->status ?? 'pending'));
-            $approvedStatuses = ['accepted', 'approved', 'active'];
-            if (!in_array($status, $approvedStatuses, true)) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Driver is not approved by Company Admin',
-                ], 400);
-            }
-
             $newToken = auth('driver')
                 ->claims(['auth_version' => (int) ($driver->auth_version ?? 0)])
                 ->setToken($token)
@@ -914,7 +962,14 @@ class AuthController extends Controller
                 'password' => 'required'
             ]);   
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
+            $userQuery = CompanyDriver::where('phone_no', $request->phone)
+                ->where('country_code', $request->country_code);
+
+            if ($request->filled('email')) {
+                $userQuery->where('email', $request->email);
+            }
+
+            $user = $userQuery->first();
 
             if(!isset($user) || $user == NULL){
                 return response()->json([
@@ -923,21 +978,28 @@ class AuthController extends Controller
                 ]);
             }
 
-             if (!Hash::check($request->password, $user->password)){
-                return response()->json(['error' => 1, 'message' => 'Invalid Password']);
+            if (!$this->passwordMatchesAndUpgrade($user, (string) $request->password)){
+                return response()->json(['error' => 1, 'message' => 'Invalid Password'], 400);
             }
             
-            $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
-            $user->fcm_token = $request->fcm_token;
+            $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
+            $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
             $user->save();
 
+            if (!$this->driverEmailVerified($user)) {
+                return $this->sendOtpRequiredResponse($user, $request);
+            }
+
             $token = JWTAuth::fromUser($user);
+
+            $profileData = $this->formatDriverProfileData($user);
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Login successful',
                 'token' => $token,
-                'data' => $this->formatDriverProfileData($user),
+                'data' => $profileData,
+                'user' => $profileData,
             ]);
         }
         catch(\Exception $e){
@@ -956,7 +1018,14 @@ class AuthController extends Controller
                 'otp' => 'required'
             ]);   
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
+            $userQuery = CompanyDriver::where('phone_no', $request->phone)
+                ->where('country_code', $request->country_code);
+
+            if ($request->filled('email')) {
+                $userQuery->where('email', $request->email);
+            }
+
+            $user = $userQuery->first();
 
             if(!isset($user) || $user == NULL){
                 return response()->json([
@@ -975,16 +1044,21 @@ class AuthController extends Controller
 
             $user->otp = null;
             $user->otp_expires_at = null;
-            $user->fcm_token = $request->fcm_token;
-            $user->device_token = isset($request->device_token) ? $request->device_token : $user->device_token;
+            $user->email_verified = true;
+            $user->email_verified_at = now();
+            $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
+            $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
             $user->save();
 
             $token = JWTAuth::fromUser($user);
+            $profileData = $this->formatDriverProfileData($user);
 
             return response()->json([
+                'success' => 1,
                 'message' => 'Login successful',
                 'token' => $token,
-                'user' => $user
+                'data' => $profileData,
+                'user' => $profileData,
             ]);
         }
         catch(\Exception $e){
@@ -1113,6 +1187,34 @@ class AuthController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function driverEmailVerified(CompanyDriver $user): bool
+    {
+        return (bool) ($user->email_verified ?? false);
+    }
+
+    private function sendOtpRequiredResponse(CompanyDriver $user, Request $request)
+    {
+        if (!filled($user->email)) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Email address is required to send OTP.',
+            ], 400);
+        }
+
+        $this->finalizeDriverRegistration($user, $request);
+        $profileData = $this->formatDriverProfileData($user->fresh());
+
+        return response()->json([
+            'success' => 1,
+            'requiresOtp' => true,
+            'requires_otp' => true,
+            'email_verified' => false,
+            'message' => 'OTP sent to email. Please verify your account.',
+            'data' => $profileData,
+            'user' => $profileData,
+        ]);
     }
 
     public function getProfile(Request $request){
@@ -1362,7 +1464,7 @@ class AuthController extends Controller
                 ]
             ]);
         }
-        catch(Exception $e){
+        catch(\Exception $e){
             return response()->json([
                 'error' => 1,
                 'message' => 'SOmething went wrong'
@@ -1409,10 +1511,29 @@ class AuthController extends Controller
             ->get();
 
         $data = Arr::except($profile, array_merge($vehicleFields, $documentFields));
+        $data['email_verified'] = (bool) ($user->email_verified ?? false);
+        $data['email_verified_at'] = $user->email_verified_at;
         $data['vehicle'] = $vehicle;
         $data['document'] = $document;
 
         return $data;
+    }
+
+    private function passwordMatchesAndUpgrade(CompanyDriver $user, string $plainPassword): bool
+    {
+        $storedPassword = (string) ($user->password ?? '');
+        $storedPasswordIsBcrypt = preg_match('/^\$2[ayb]\$/', $storedPassword) === 1;
+
+        if ($storedPasswordIsBcrypt) {
+            return Hash::check($plainPassword, $storedPassword);
+        }
+
+        if ($storedPassword !== '' && hash_equals($storedPassword, $plainPassword)) {
+            $user->password = Hash::make($plainPassword);
+            return true;
+        }
+
+        return false;
     }
 
     private function getDriverTokenPayload(string $token)

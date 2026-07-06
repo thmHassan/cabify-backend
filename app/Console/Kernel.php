@@ -13,12 +13,12 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         // $schedule->command('inspire')->hourly();
-        $schedule->command('app:check-upcoming-ride')
+        $schedule->command('app:release-due-pre-bookings')
                  ->everyMinute()
                  ->withoutOverlapping();
         
         $schedule->command('app:make-cancel-ride-zero')
-                 ->everyDay()
+                 ->daily()
                  ->withoutOverlapping();
     }
 

@@ -19,7 +19,8 @@ class ReleasePreBookingJob implements ShouldQueue
     public function __construct(
         public int $bookingId,
         public string $tenantDatabase,
-        public ?string $expectedPickupAt = null
+        public ?string $expectedPickupAt = null,
+        public ?string $expectedReleaseAt = null
     ) {
     }
 
@@ -38,8 +39,16 @@ class ReleasePreBookingJob implements ShouldQueue
         }
 
         if ($this->expectedPickupAt) {
-            $currentPickupAt = app(PreBookingService::class)->resolvePickupSnapshot($booking);
+            $preBookingService = app(PreBookingService::class);
+            $currentPickupAt = $preBookingService->resolvePickupSnapshot($booking);
             if ($currentPickupAt !== $this->expectedPickupAt) {
+                return;
+            }
+        }
+
+        if ($this->expectedReleaseAt) {
+            $currentReleaseAt = app(PreBookingService::class)->resolveReleaseSnapshot($booking);
+            if ($currentReleaseAt !== $this->expectedReleaseAt) {
                 return;
             }
         }

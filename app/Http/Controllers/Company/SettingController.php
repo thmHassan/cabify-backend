@@ -53,9 +53,11 @@ class SettingController extends Controller
                 $data['company_timezone'] = $settings->data['time_zone'];
                 $data['company_description'] = "";
                 $data['search_radius'] = CompanySetting::resolveSearchRadiusKm();
+                $data['dispatch_timeout'] = CompanySetting::resolveDispatchTimeoutSeconds();
                 $data = (object) $data;
             } else {
                 $data->search_radius = CompanySetting::resolveSearchRadiusKm($settings);
+                $data->dispatch_timeout = CompanySetting::resolveDispatchTimeoutSeconds($settings);
             }
             return response()->json([
                 'success' => 1,
@@ -139,6 +141,9 @@ class SettingController extends Controller
 
                 $rules['search_radius'] = 'required|numeric|min:1';
             }
+            if ($request->has('dispatch_timeout') && $request->dispatch_timeout !== null && $request->dispatch_timeout !== '') {
+                $rules['dispatch_timeout'] = 'required|integer|min:5|max:300';
+            }
 
             $request->validate($rules);
 
@@ -161,6 +166,9 @@ class SettingController extends Controller
 
             if ($nearestDriverDispatchEnabled && $request->has('search_radius') && $request->search_radius !== null && $request->search_radius !== '') {
                 $settings->search_radius = $request->search_radius;
+            }
+            if ($request->has('dispatch_timeout') && $request->dispatch_timeout !== null && $request->dispatch_timeout !== '') {
+                $settings->dispatch_timeout = (int) $request->dispatch_timeout;
             }
 
             $settings->save();
@@ -1210,35 +1218,69 @@ class SettingController extends Controller
                 ],
             ];
 
+            $knownDispatchSystems = array_merge(array_keys($map), ['manual_dispatch_only']);
+            $selectedDispatchSystem = $request->input('selected_dispatch_system');
+            $selectedDispatchSystem = in_array($selectedDispatchSystem, $knownDispatchSystems, true)
+                ? $selectedDispatchSystem
+                : null;
+
+            if ($selectedDispatchSystem) {
+                CompanyDispatchSystem::where('dispatch_system', '!=', $selectedDispatchSystem)
+                    ->update(['status' => 'disable']);
+            }
+
             foreach ($map as $dispatchSystem => $steps) {
 
                 if (!$request->has($dispatchSystem)) {
                     continue;
                 }
 
+                $systemIsSelected = !$selectedDispatchSystem || $selectedDispatchSystem === $dispatchSystem;
                 $priority = $request->$dispatchSystem['priority'] ?? null;
 
                 foreach ($steps as $step) {
-
-                    if (!isset($request->$dispatchSystem[$step])) {
-                        continue;
-                    }
-
                     CompanyDispatchSystem::where('dispatch_system', $dispatchSystem)
                         ->where('steps', $step)
                         ->update([
-                            'status' => $request->$dispatchSystem[$step],
+                            'status' => $systemIsSelected
+                                ? ($request->$dispatchSystem[$step] ?? 'disable')
+                                : 'disable',
                             'priority' => $priority,
                         ]);
                 }
             }
 
             if ($request->has('manual_dispatch_only')) {
+                $manualIsSelected = !$selectedDispatchSystem || $selectedDispatchSystem === 'manual_dispatch_only';
                 CompanyDispatchSystem::where('dispatch_system', 'manual_dispatch_only')
                     ->update([
-                        'status' => $request->manual_dispatch_only['status'],
+                        'status' => $manualIsSelected
+                            ? $request->manual_dispatch_only['status']
+                            : 'disable',
                         'priority' => $request->manual_dispatch_only['priority'],
                     ]);
+            }
+
+            if ($request->has('auto_release')) {
+                $release = $request->input('auto_release', []);
+                $settings = CompanySetting::orderBy('id', 'DESC')->first() ?? new CompanySetting;
+
+                if (array_key_exists('enabled', $release)) {
+                    $settings->auto_release_enabled = filter_var($release['enabled'], FILTER_VALIDATE_BOOLEAN);
+                }
+
+                if (array_key_exists('lead_minutes', $release)) {
+                    $settings->default_release_lead_minutes = max(0, min((int) $release['lead_minutes'], 1440));
+                }
+
+                if (array_key_exists('mode', $release)) {
+                    $mode = strtolower(trim((string) $release['mode']));
+                    $settings->default_release_mode = in_array($mode, CompanySetting::RELEASE_MODES, true)
+                        ? $mode
+                        : CompanySetting::DEFAULT_RELEASE_MODE;
+                }
+
+                $settings->save();
             }
 
             $tenantId = TenantRequestContext::databaseId($request);
@@ -1291,10 +1333,12 @@ class SettingController extends Controller
     {
         try {
             $data = CompanyDispatchSystem::orderBy("id", "ASC")->get();
+            $settings = CompanySetting::orderBy('id', 'DESC')->first();
 
             return response()->json([
                 'success' => 1,
-                'data' => $data
+                'data' => $data,
+                'release_settings' => CompanySetting::resolveReleaseSettings($settings),
             ]);
         } catch (\Exception $e) {
             return response()->json([

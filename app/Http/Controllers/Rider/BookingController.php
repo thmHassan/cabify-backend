@@ -26,6 +26,7 @@ use App\Models\WalletTransaction;
 use App\Services\BookingDispatchService;
 use App\Services\BookingLocationResolver;
 use App\Services\PickupPlotResolver;
+use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
 
@@ -393,16 +394,27 @@ class BookingController extends Controller
                 'recommended_amount' => 'required',
                 'distance' => 'required',
                 'payment_method' => 'required',
+                'pickup_time_type' => 'nullable|in:asap,time',
+                'dispatch_release_enabled' => 'nullable|in:yes,no,1,0,true,false',
+                'auto_release' => 'nullable|in:yes,no,1,0,true,false',
+                'dispatch_release_at' => 'nullable|date',
+                'dispatch_release_mode' => 'nullable|in:auto_dispatch,bidding,auto_then_bidding,manual_review',
             ]);
 
 
             app(BookingLocationResolver::class)->resolveFromRequest($request);
 
             $distance = $request->distance;
+            $preBookingService = app(PreBookingService::class);
+            $pickupTimeType = $preBookingService->resolvePickupTimeType($request);
+            $isScheduled = $pickupTimeType === 'time';
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
             $newBooking->pickup_time = (isset($request->pickup_time) && $request->pickup_time != NULL) ? $request->pickup_time : now()->format('H:i:s');
             $newBooking->booking_date = (isset($request->booking_date) && $request->booking_date != NULL) ? $request->booking_date : date("Y-m-d");
+            $newBooking->pickup_time_type = $pickupTimeType;
+            $newBooking->is_scheduled = $isScheduled;
+            $newBooking->dispatch_released = false;
             $newBooking->booking_type = $request->booking_type;
             $newBooking->pickup_point = $request->pickup_point;
             $newBooking->pickup_plot_id = $request->pickup_plot_id ?? $request->pickup_point_id;
@@ -421,8 +433,12 @@ class BookingController extends Controller
             $newBooking->vehicle = $request->vehicle;
             $newBooking->booking_status = 'pending';
             $newBooking->distance = $distance;
+            $newBooking->passenger = $request->passenger;
+            $newBooking->luggage = $request->luggage;
+            $newBooking->hand_luggage = $request->hand_luggage;
             $newBooking->offered_amount = $request->offered_amount;
             $newBooking->recommended_amount = $request->recommended_amount;
+            $newBooking->booking_amount = $request->offered_amount;
             $newBooking->note = $request->note;
             $newBooking->payment_method = $request->payment_method;
             $newBooking->otp = rand(1000,9999);
@@ -437,20 +453,37 @@ class BookingController extends Controller
                 }
             }
 
+            $preBookingService->applyDispatchReleaseDefaults($newBooking, $request);
+            $newBooking->dispatcher_action = $this->initialRiderDispatcherAction($newBooking, $preBookingService);
             $newBooking->save();
 
             $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
-            $bookingDispatchService->notifyImmediateBookingCreated(
-                $newBooking,
-                (string) $request->header('database'),
-                false,
-                $socketApiBaseUrl
-            );
+            if ($isScheduled) {
+                $preBookingService->scheduleDispatchRelease(
+                    $newBooking,
+                    (string) $request->header('database')
+                );
+                $bookingDispatchService->notifyPreBookingCreated(
+                    $newBooking,
+                    (string) $request->header('database'),
+                    $socketApiBaseUrl
+                );
+            } else {
+                $bookingDispatchService->notifyImmediateBookingCreated(
+                    $newBooking,
+                    (string) $request->header('database'),
+                    false,
+                    $socketApiBaseUrl
+                );
+            }
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Booking created successfully',
-                'newBooking' => $newBooking
+                'newBooking' => $newBooking,
+                'is_scheduled' => $isScheduled,
+                'pickup_time_type' => $pickupTimeType,
+                'pre_booking' => $isScheduled && !$newBooking->dispatch_released,
             ]);
         }
         catch(\Exception $e){
@@ -459,6 +492,23 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function initialRiderDispatcherAction(CompanyBooking $booking, PreBookingService $preBookingService): string
+    {
+        $prefix = 'Created by customer app.';
+
+        if ($preBookingService->isScheduledBooking($booking)) {
+            if ($booking->dispatch_release_at && $booking->dispatch_release_mode !== PreBookingService::RELEASE_MODE_MANUAL_REVIEW) {
+                return $prefix . ' No driver selected - scheduled for auto release at '
+                    . $preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at, 'd M H:i')
+                    . '.';
+            }
+
+            return $prefix . ' No driver selected - held for manual dispatch.';
+        }
+
+        return $prefix . ' No driver selected - dispatching now.';
     }
 
     public function listBids(Request $request){
@@ -532,9 +582,9 @@ class BookingController extends Controller
                 }
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/bid-accept', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/bid-accept', [
                     'driverId' => $bid->driver_id,
                     'booking' => [
                         'id' => $booking->id,
@@ -581,9 +631,9 @@ class BookingController extends Controller
                 $driver->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/on-job-driver', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/on-job-driver', [
                     'clientId' => $request->header('database'),
                     'driverName' => $driver->name,
                 ]);
@@ -640,9 +690,9 @@ class BookingController extends Controller
             $driversList = CompanySendNewRide::where("booking_id", $booking->id)->groupBy("driver_id")->pluck("driver_id");
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/change-cancel-ride', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-cancel-ride', [
                 'drivers' => $driversList,
                 'status' => "cancel_ride",
                 'cancelled_by' => 'user',
@@ -690,9 +740,9 @@ class BookingController extends Controller
                 $driver->save();
 
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->post(env('NODE_SOCKET_URL') . '/change-driver-ride-status', [
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-driver-ride-status', [
                     'driverId' => $booking->driver,
                     'status' => "cancel_confirm_ride",
                     'booking' => [
@@ -749,9 +799,9 @@ class BookingController extends Controller
                 $driver->save();
             }
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $request->header('database'),
-            ])->post(env('NODE_SOCKET_URL') . '/waiting-driver', [
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
                 'clientId' => $request->header('database'),
                 'driver_id' => $booking->driver,
             ]);

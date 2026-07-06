@@ -43,6 +43,11 @@ class CheckUpcomingRide extends Command
                 $bookings = CompanyBooking::on('tenant')
                     ->whereDate('booking_date', Carbon::today())
                     ->where('booking_status', 'pending')
+                    ->whereNotNull('driver')
+                    ->where(function ($query) {
+                        $query->where('dispatch_released', true)
+                            ->orWhere('dispatch_released', 1);
+                    })
                     ->whereTime(
                         'pickup_time',
                         '<=',
@@ -51,10 +56,9 @@ class CheckUpcomingRide extends Command
                     ->get();
 
                     foreach($bookings as $booking){
-                        $booking->booking_status = "started";
-                        $booking->save();
-            
-                        \Log::info("upcoming to current booking ". $booking->id);
+                        \Log::info("upcoming ride is due; driver app must start it", [
+                            'booking_id' => $booking->id,
+                        ]);
                     }
 
                 } catch (\Throwable $e) {

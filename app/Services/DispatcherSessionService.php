@@ -69,9 +69,9 @@ class DispatcherSessionService
     {
         try {
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                 'database' => $tenantId,
-            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/dispatcher-force-logout-all', []);
+            ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/dispatcher-force-logout-all', []);
         } catch (\Throwable $e) {
             Log::warning('Dispatcher force logout socket call failed', [
                 'tenant_id' => $tenantId,

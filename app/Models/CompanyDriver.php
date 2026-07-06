@@ -25,6 +25,11 @@ class CompanyDriver extends Authenticatable implements JWTSubject
         'otp',
     ];
 
+    protected $casts = [
+        'email_verified' => 'boolean',
+        'email_verified_at' => 'datetime',
+    ];
+
     public function getJWTIdentifier()
     {
         return $this->getKey();

@@ -22,6 +22,27 @@ class PlotDispatchTest extends TestCase
         $this->assertFalse(PlotDispatch::isInProgressAction(PlotDispatch::EXHAUSTED_ACTION));
     }
 
+    public function test_exhausted_bidding_action_is_not_in_progress(): void
+    {
+        $this->assertTrue(PlotDispatch::isExhaustedAction(PlotDispatch::EXHAUSTED_BIDDING_ACTION));
+        $this->assertFalse(PlotDispatch::isInProgressAction(PlotDispatch::EXHAUSTED_BIDDING_ACTION));
+    }
+
+    public function test_missing_pickup_plot_action_is_not_in_progress(): void
+    {
+        $this->assertTrue(PlotDispatch::isExhaustedAction(PlotDispatch::MISSING_PICKUP_PLOT_ACTION));
+        $this->assertFalse(PlotDispatch::isInProgressAction(PlotDispatch::MISSING_PICKUP_PLOT_ACTION));
+    }
+
+    public function test_single_offer_action_is_in_progress(): void
+    {
+        $action = PlotDispatch::singleOfferAction(208, 1, 5, false, 30);
+
+        $this->assertTrue(PlotDispatch::isActiveOffer($action));
+        $this->assertTrue(PlotDispatch::isInProgressAction($action));
+        $this->assertFalse(PlotDispatch::isExhaustedAction($action));
+    }
+
     public function test_accepted_action_is_not_in_progress(): void
     {
         $action = PlotDispatch::acceptedAction(42);

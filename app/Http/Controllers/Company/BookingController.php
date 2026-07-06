@@ -20,11 +20,15 @@ use App\Services\BookingDispatchService;
 use App\Services\BookingLocationResolver;
 use App\Services\BookingReminderService;
 use App\Services\BookingUpdateService;
+use App\Services\DuePreBookingReleaseService;
 use App\Services\PickupPlotResolver;
 use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
+use App\Support\TenantRequestContext;
 use App\Support\MapsApi;
 use App\Support\VehicleDispatchFilter;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class BookingController extends Controller
 {
@@ -35,7 +39,8 @@ class BookingController extends Controller
         private readonly BookingDispatchService $bookingDispatchService,
         private readonly BookingUpdateService $bookingUpdateService,
         private readonly PickupPlotResolver $pickupPlotResolver,
-        private readonly BookingLocationResolver $bookingLocationResolver
+        private readonly BookingLocationResolver $bookingLocationResolver,
+        private readonly DuePreBookingReleaseService $duePreBookingReleaseService
     ) {
     }
 
@@ -135,12 +140,13 @@ class BookingController extends Controller
                 'payment_method' => 'required',
                 'driver' => $plotDispatchEnabled ? 'nullable' : 'required_without:booking_system',
                 'booking_system' => $plotDispatchEnabled ? 'nullable' : 'required_without:driver',
+                'bidding_fallback' => 'nullable|in:yes,no,1,0,true,false',
                 'pickup_time_type' => 'nullable|in:asap,time',
+                'dispatch_release_enabled' => 'nullable|in:yes,no,1,0,true,false',
+                'auto_release' => 'nullable|in:yes,no,1,0,true,false',
+                'dispatch_release_at' => 'nullable|date',
+                'dispatch_release_mode' => 'nullable|in:auto_dispatch,bidding,auto_then_bidding,manual_review',
             ]);
-
-            if ($plotDispatchEnabled) {
-                $request->merge(['driver' => null]);
-            }
 
             $this->bookingReminderService->validateReminderRequest($request);
 
@@ -415,6 +421,10 @@ class BookingController extends Controller
                 'payment_method' => 'sometimes|required',
                 'pickup_time_type' => 'nullable|in:asap,time',
                 'reminder_minutes' => 'nullable|integer|in:5,15,30,50',
+                'dispatch_release_enabled' => 'nullable|in:yes,no,1,0,true,false',
+                'auto_release' => 'nullable|in:yes,no,1,0,true,false',
+                'dispatch_release_at' => 'nullable|date',
+                'dispatch_release_mode' => 'nullable|in:auto_dispatch,bidding,auto_then_bidding,manual_review',
             ]);
 
             $this->bookingReminderService->validateReminderRequest($request);
@@ -502,7 +512,7 @@ class BookingController extends Controller
 
     private function canEditBooking(Request $request): bool
     {
-        if ($request->bearerToken() === env('NODE_INTERNAL_SECRET')) {
+        if ($request->bearerToken() === config('services.node_socket.internal_secret')) {
             return true;
         }
 
@@ -863,6 +873,8 @@ class BookingController extends Controller
     public function bookingList(Request $request)
     {
         try {
+            $this->releaseDuePreBookingsBeforeListing($request);
+
             $query = CompanyBooking::orderBy('booking_date', 'DESC')->orderBy('id', 'DESC');
 
             if ($request->filled('filter')) {
@@ -900,6 +912,32 @@ class BookingController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function releaseDuePreBookingsBeforeListing(Request $request): void
+    {
+        $tenantDatabase = TenantRequestContext::databaseId($request);
+        if (!$tenantDatabase) {
+            return;
+        }
+
+        $cacheKey = 'due_pre_booking_release:list:' . sha1($tenantDatabase);
+        if (!Cache::add($cacheKey, true, now()->addSeconds(20))) {
+            return;
+        }
+
+        try {
+            $this->duePreBookingReleaseService->releaseDueForCurrentTenant(
+                $tenantDatabase,
+                SocketApiUrlResolver::resolve($request),
+                25
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Panel due pre-booking release sweep failed', [
+                'tenant' => $tenantDatabase,
+                'error' => $e->getMessage(),
             ]);
         }
     }
@@ -1009,6 +1047,7 @@ class BookingController extends Controller
         $newBooking->special_request = $request->special_request;
         $newBooking->payment_reference = $request->payment_reference;
         $newBooking->booking_system = $request->booking_system;
+        $newBooking->bidding_fallback = filter_var($request->input('bidding_fallback', false), FILTER_VALIDATE_BOOLEAN);
         $newBooking->parking_charge = $request->parking_charge;
         $newBooking->waiting_charge = $request->waiting_charge;
         $newBooking->ac_fares = $request->ac_fares;
@@ -1027,8 +1066,44 @@ class BookingController extends Controller
         $newBooking->start_at = $request->start_at;
         $newBooking->end_at = $request->end_at;
         $newBooking->payment_method = $request->payment_method;
+        $this->preBookingService->applyDispatchReleaseDefaults($newBooking, $request);
+        $newBooking->dispatcher_action = $this->buildInitialDispatcherAction($newBooking, $request);
 
         return $newBooking;
+    }
+
+    private function buildInitialDispatcherAction(CompanyBooking $booking, Request $request): string
+    {
+        $dispatcherName = trim((string) $request->input('dispatcher_name', 'Dispatcher'));
+        if ($dispatcherName === '') {
+            $dispatcherName = 'Dispatcher';
+        }
+
+        $prefix = "Created by {$dispatcherName}.";
+
+        if ($this->preBookingService->isScheduledBooking($booking)) {
+            if ($booking->pending_driver_id) {
+                $releaseText = $booking->dispatch_release_at
+                    ? ' Driver selected - scheduled for release at ' . $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at, 'd M H:i') . '.'
+                    : ' Driver selected - held until manual release.';
+
+                return $prefix . $releaseText;
+            }
+
+            if ($booking->dispatch_release_at && $booking->dispatch_release_mode !== PreBookingService::RELEASE_MODE_MANUAL_REVIEW) {
+                return $prefix . ' No driver selected - scheduled for auto release at '
+                    . $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at, 'd M H:i')
+                    . '.';
+            }
+
+            return $prefix . ' No driver selected - held for manual dispatch.';
+        }
+
+        if ($booking->driver) {
+            return $prefix . ' Driver selected - dispatching now.';
+        }
+
+        return $prefix . ' No driver selected - dispatching now.';
     }
 
     private function applyPlotDispatchBookingDefaults(CompanyBooking $booking): void
@@ -1037,7 +1112,7 @@ class BookingController extends Controller
             return;
         }
 
-        if (!$booking->is_scheduled) {
+        if (!$booking->is_scheduled && !$booking->driver) {
             $booking->driver = null;
             $booking->pending_driver_id = null;
         }
@@ -1058,6 +1133,10 @@ class BookingController extends Controller
             'booking_date' => $booking->booking_date,
             'pickup_time' => $booking->pickup_time,
             'reminder_minutes' => $booking->reminder_minutes,
+            'dispatch_release_at' => $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at),
+            'dispatch_release_mode' => $booking->dispatch_release_mode,
+            'dispatch_release_override' => (bool) $booking->dispatch_release_override,
+            'dispatch_released' => (bool) $booking->dispatch_released,
             'pending_driver_id' => $booking->pending_driver_id,
         ];
     }

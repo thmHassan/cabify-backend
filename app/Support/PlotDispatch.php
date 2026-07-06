@@ -12,6 +12,8 @@ class PlotDispatch
     public const ACTIVE_PREFIX = 'PLOT_DISPATCH_ACTIVE|';
 
     public const EXHAUSTED_ACTION = 'Plot dispatch failed — no driver accepted across primary/backup plots. Available for manual dispatch.';
+    public const EXHAUSTED_BIDDING_ACTION = 'Plot dispatch failed — no driver accepted across primary/backup plots. Available for manual dispatch and fixed-fare bidding.';
+    public const MISSING_PICKUP_PLOT_ACTION = 'Pickup is outside all service plots. Manual dispatch required.';
 
     public static function isActiveOffer(?string $dispatcherAction): bool
     {
@@ -35,6 +37,7 @@ class PlotDispatch
             'plot dispatch failed',
             'all plots exhausted',
             'available for manual',
+            'manual dispatch required',
             'accepted by driver',
         ] as $excluded) {
             if (str_contains($normalized, $excluded)) {
@@ -47,6 +50,7 @@ class PlotDispatch
             'broadcast to',
             'driver(s) in plot',
             'driver(s) in backup plot',
+            'offered to driver',
             'dispatched to primary plot',
             'dispatched to backup plot',
             'plot dispatch',
@@ -73,6 +77,7 @@ class PlotDispatch
             'plot dispatch failed',
             'all plots exhausted',
             'available for manual',
+            'manual dispatch required',
         ] as $needle) {
             if (str_contains($normalized, $needle)) {
                 return true;
@@ -101,6 +106,15 @@ class PlotDispatch
         );
     }
 
+    public static function singleOfferAction(int $driverId, int $rank, int $plotId, bool $isBackup, int $timeoutSeconds): string
+    {
+        $plotLabel = $isBackup ? 'backup plot' : 'primary plot';
+
+        return self::activeAction(
+            "Offered to driver #{$driverId} rank {$rank} in {$plotLabel} #{$plotId} — waiting up to {$timeoutSeconds}s"
+        );
+    }
+
     public static function dispatchedPlotAction(int $plotId, bool $isBackup): string
     {
         $label = $isBackup ? 'backup plot' : 'primary plot';
@@ -115,38 +129,11 @@ class PlotDispatch
 
     public static function applyTodaysBookingVisibilityFilter(Builder $query): Builder
     {
-        return $query
-            ->whereIn('booking_status', ['pending', 'pending_acceptance', 'started', 'unassigned'])
-            ->where(function (Builder $visible) {
+        return $query->where(function (Builder $visible) {
             $visible
-                ->where(function (Builder $notInProgress) {
-                    $notInProgress
-                        ->whereNull('dispatcher_action')
-                        ->orWhere(function (Builder $action) {
-                            $action
-                                ->where('dispatcher_action', 'not like', self::ACTIVE_PREFIX . '%')
-                                ->where('dispatcher_action', 'not like', '%started plot-based dispatch%')
-                                ->where('dispatcher_action', 'not like', '%Broadcast to %driver(s) in plot%')
-                                ->where('dispatcher_action', 'not like', '%Broadcast to %driver(s) in backup plot%')
-                                ->where('dispatcher_action', 'not like', '%Dispatched to primary plot%')
-                                ->where('dispatcher_action', 'not like', '%Dispatched to backup plot%')
-                                ->where('dispatcher_action', 'not like', '%plot dispatch%in progress%');
-                        });
-                })
-                ->where(function (Builder $notAwaitingDispatch) {
-                    $notAwaitingDispatch
-                        ->whereNotNull('dispatcher_action')
-                        ->orWhereNotNull('driver')
-                        ->orWhere('pickup_time', '!=', 'asap')
-                        ->orWhere('pickup_time_type', '!=', 'asap')
-                        ->orWhere('is_scheduled', true);
-                })
-                ->orWhere('booking_status', 'unassigned')
-                ->orWhere('dispatcher_action', 'like', '%no driver accepted%')
-                ->orWhere('dispatcher_action', 'like', '%plot dispatch failed%')
-                ->orWhere('dispatcher_action', 'like', '%all plots exhausted%')
-                ->orWhere('dispatcher_action', 'like', '%available for manual%');
-            });
+                ->whereNull('booking_status')
+                ->orWhereNotIn('booking_status', ['completed', 'no_show', 'cancelled']);
+        });
     }
 
     public static function isFreshAsapAwaitingDispatch(CompanyBooking $booking): bool

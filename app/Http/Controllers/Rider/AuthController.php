@@ -69,8 +69,8 @@ class AuthController extends Controller
 
             if($countUser >= $dataCheck->data['passengers_allowed']){
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                     'clientId' => $request->header('database'),
                     'title' => "Passenger Limit",
                     'description' => "You have reached your passenger limits"

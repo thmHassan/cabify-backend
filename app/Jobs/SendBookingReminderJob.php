@@ -61,8 +61,8 @@ class SendBookingReminderJob implements ShouldQueue
 
         try {
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                 'clientId' => $this->tenantDatabase,
                 'tenantDb' => $this->tenantDatabase,
                 'title' => $title,

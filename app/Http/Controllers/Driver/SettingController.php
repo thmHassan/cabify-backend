@@ -25,6 +25,8 @@ use App\Models\Setting;
 use App\Models\MobileAppSetting;
 use App\Models\PackageRideCountSetting;
 use App\Models\CompanyPlot;
+use App\Models\CompanyDispatchSystem;
+use Illuminate\Support\Facades\Schema;
 
 class SettingController extends Controller
 {
@@ -259,6 +261,8 @@ class SettingController extends Controller
                 $company_booking_system = "bidding";
             }
 
+            $dispatchContext = $this->driverDispatchContext($company_booking_system);
+
             $data = [
                 'stripe_key' => $stripe_key,
                 'stripe_secret_key' => $stripe_secret_key,
@@ -272,6 +276,11 @@ class SettingController extends Controller
                 'support_rescue_number' => $support_rescue_number,
                 'country_of_user' => $country_of_user,
                 'company_booking_system' => $company_booking_system,
+                'dispatch_system' => $dispatchContext['dispatch_system'],
+                'supports_rank' => $dispatchContext['supports_rank'],
+                'supports_bidding' => $dispatchContext['supports_bidding'],
+                'supports_manual_assignment' => $dispatchContext['supports_manual_assignment'],
+                'show_rank' => $dispatchContext['show_rank'],
             ];
 
             return response()->json([
@@ -302,9 +311,11 @@ class SettingController extends Controller
             $booking = CompanyBooking::where("id", $request->ride_id)->first();
 
             Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-            ])->post(env('NODE_SOCKET_URL') . '/user-message-notification', [
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                'database' => $request->header('database'),
+            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/user-message-notification', [
                 'userId' => $request->user_id,
+                'database' => $request->header('database'),
                 'chat' => $chat
             ]);
 
@@ -592,11 +603,295 @@ class SettingController extends Controller
         }
     }
 
+    public function driverRanking(Request $request)
+    {
+        try {
+            $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $dispatchContext = $this->driverDispatchContext($setting?->company_booking_system ?? "auto_dispatch");
+
+            $plots = CompanyPlot::orderBy("id", "DESC")->get();
+            $driver = $this->syncDriverPlotFromCoordinates($driver);
+
+            $liveDrivers = CompanyDriver::query()
+                ->whereNotNull("plot_id")
+                ->where("online_status", "online")
+                ->where("driving_status", "idle")
+                ->where("updated_at", ">=", now()->subMinutes(15))
+                ->orderByRaw("priority_plot IS NULL, CAST(priority_plot AS UNSIGNED) ASC")
+                ->orderBy("id", "ASC")
+                ->get();
+
+            $driversByPlot = $liveDrivers->groupBy(fn ($item) => (string) $item->plot_id);
+            $rank = null;
+            $currentPlotDriverCount = 0;
+
+            foreach ($plots as $plot) {
+                $plotDrivers = $driversByPlot->get((string) $plot->id, collect())->values();
+                $this->syncPlotQueue((int) $plot->id, $plotDrivers);
+
+                if ($driver && (string) $driver->plot_id === (string) $plot->id) {
+                    $currentPlotDriverCount = $plotDrivers->count();
+                    $position = $plotDrivers->search(fn ($item) => (string) $item->id === (string) $driver->id);
+                    if ($position !== false) {
+                        $rank = $position + 1;
+                    }
+                }
+            }
+            if ($driver?->plot_id && $rank !== null && $currentPlotDriverCount < 1) {
+                $currentPlotDriverCount = 1;
+            }
+
+            $plotRows = $plots->map(function ($plot) use ($driversByPlot, $driver, $currentPlotDriverCount) {
+                $driverCount = $driversByPlot->get((string) $plot->id, collect())->count();
+                $isCurrent = $driver && (string) $driver->plot_id === (string) $plot->id;
+                if ($isCurrent && $currentPlotDriverCount > $driverCount) {
+                    $driverCount = $currentPlotDriverCount;
+                }
+                return [
+                    "id" => $plot->id,
+                    "name" => $plot->name,
+                    "plot_name" => $plot->name,
+                    "driver_count" => $driverCount,
+                    "is_current" => $isCurrent,
+                ];
+            })->values();
+
+            $currentPlot = $driver?->plot_id
+                ? CompanyPlot::where("id", $driver->plot_id)->first()
+                : null;
+
+            return response()->json([
+                "success" => 1,
+                "message" => "Driver dispatch context fetched successfully",
+                "data" => [
+                    ...$dispatchContext,
+                    "rank_available" => $rank !== null,
+                    "current_plot_driver_count" => $currentPlotDriverCount,
+                    "current_plot" => $currentPlot ? [
+                        "id" => $currentPlot->id,
+                        "name" => $currentPlot->name,
+                        "driver_count" => $currentPlotDriverCount,
+                    ] : null,
+                    "current_driver" => [
+                        "id" => $driver?->id,
+                        "driver_id" => $driver?->id,
+                        "name" => $driver?->name,
+                        "profile_image" => $driver?->profile_image,
+                        "rating" => $driver?->rating ?? "0",
+                        "rank" => $rank ? (int) $rank : null,
+                        "plot_name" => $currentPlot?->name,
+                        "is_current_driver" => true,
+                    ],
+                    "plots" => $plotRows,
+                    "rankings" => [],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                "error" => 1,
+                "message" => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function driverDispatchContext(?string $companyBookingSystem = null): array
+    {
+        $enabledSystems = [];
+        if (Schema::connection("tenant")->hasTable("dispatch_system")) {
+            $enabledSystems = CompanyDispatchSystem::where("status", "enable")
+                ->orderByRaw("priority IS NULL, priority ASC")
+                ->orderBy("id", "ASC")
+                ->pluck("dispatch_system")
+                ->values()
+                ->all();
+        }
+
+        $dispatchSystem = $enabledSystems[0] ?? null;
+        if (!$dispatchSystem) {
+            $dispatchSystem = $companyBookingSystem === "bidding"
+                ? "bidding"
+                : "auto_dispatch_plot_base";
+        }
+
+        return [
+            "dispatch_system" => $dispatchSystem,
+            "company_booking_system" => $companyBookingSystem ?: "auto_dispatch",
+            "supports_rank" => $dispatchSystem === "auto_dispatch_plot_base",
+            "supports_bidding" => in_array($dispatchSystem, [
+                "bidding",
+                "bidding_fixed_fare_plot_base",
+                "bidding_fixed_fare_nearest_driver",
+            ], true),
+            "supports_manual_assignment" => true,
+            "show_rank" => $dispatchSystem === "auto_dispatch_plot_base",
+        ];
+    }
+
+    private function syncDriverPlotFromCoordinates(?CompanyDriver $driver): ?CompanyDriver
+    {
+        if (!$driver || !$this->isValidCoordinate($driver->latitude, $driver->longitude)) {
+            return $driver;
+        }
+
+        $plotId = $this->resolvePlotIdFromCoordinates((float) $driver->latitude, (float) $driver->longitude);
+        if ((string) ($driver->plot_id ?? '') === (string) ($plotId ?? '')) {
+            return $driver;
+        }
+
+        $driver->plot_id = $plotId;
+        if (!$plotId) {
+            $driver->priority_plot = null;
+        } elseif (!$driver->priority_plot) {
+            $driver->priority_plot = CompanyDriver::where("plot_id", $plotId)->max("priority_plot") + 1;
+        }
+        $driver->save();
+
+        return $driver->fresh();
+    }
+
+    private function syncPlotQueue(int $plotId, $drivers): void
+    {
+        if (!Schema::connection("tenant")->hasTable("plot_driver_queues")) {
+            return;
+        }
+
+        DB::table("plot_driver_queues")->where("plot_id", $plotId)->delete();
+
+        $rows = [];
+        foreach ($drivers->values() as $index => $driver) {
+            $rows[] = [
+                "plot_id" => $plotId,
+                "driver_id" => $driver->id,
+                "rank" => $index + 1,
+                "created_at" => now(),
+                "updated_at" => now(),
+            ];
+        }
+
+        if ($rows) {
+            DB::table("plot_driver_queues")->insert($rows);
+        }
+    }
+
+    private function resolvePlotIdFromCoordinates(float $lat, float $lng): ?int
+    {
+        foreach (CompanyPlot::orderBy("id", "DESC")->get() as $plot) {
+            $polygon = $this->plotPolygon($plot->features);
+            if ($polygon && $this->pointInPolygon($lat, $lng, $polygon)) {
+                return (int) $plot->id;
+            }
+        }
+
+        return null;
+    }
+
+    private function plotPolygon($features): ?array
+    {
+        try {
+            $feature = is_string($features) ? json_decode($features, true) : $features;
+            if (isset($feature["features"][0]["geometry"])) {
+                $feature = $feature["features"][0];
+            }
+
+            $geometry = $feature["geometry"] ?? $feature;
+            $coordinates = $geometry["coordinates"] ?? null;
+            $coordinates = is_string($coordinates) ? json_decode($coordinates, true) : $coordinates;
+
+            if (!is_array($coordinates)) {
+                return null;
+            }
+
+            return is_array($coordinates[0][0] ?? null) ? $coordinates[0] : $coordinates;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function pointInPolygon(float $lat, float $lng, array $polygon): bool
+    {
+        if (count($polygon) === 2) {
+            $lng1 = $polygon[0][0];
+            $lat1 = $polygon[0][1];
+            $lng2 = $polygon[1][0];
+            $lat2 = $polygon[1][1];
+
+            return $lat >= min($lat1, $lat2)
+                && $lat <= max($lat1, $lat2)
+                && $lng >= min($lng1, $lng2)
+                && $lng <= max($lng1, $lng2);
+        }
+
+        $inside = false;
+        $x = $lng;
+        $y = $lat;
+        $numPoints = count($polygon);
+
+        for ($i = 0, $j = $numPoints - 1; $i < $numPoints; $j = $i++) {
+            $xi = $polygon[$i][0];
+            $yi = $polygon[$i][1];
+            $xj = $polygon[$j][0];
+            $yj = $polygon[$j][1];
+
+            $intersect = (($yi > $y) !== ($yj > $y))
+                && ($x < ($xj - $xi) * ($y - $yi) / ($yj - $yi) + $xi);
+
+            if ($intersect) {
+                $inside = !$inside;
+            }
+        }
+
+        return $inside;
+    }
+
+    private function isValidCoordinate($lat, $lng): bool
+    {
+        $latitude = is_numeric($lat) ? (float) $lat : null;
+        $longitude = is_numeric($lng) ? (float) $lng : null;
+
+        return $latitude !== null
+            && $longitude !== null
+            && $latitude >= -90
+            && $latitude <= 90
+            && $longitude >= -180
+            && $longitude <= 180
+            && !($latitude == 0.0 && $longitude == 0.0);
+    }
+
     public function changeStatus(Request $request){
         try{
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $driver->online_status = $request->status;
+            $activeRideExists = CompanyBooking::where("driver", $driver->id)
+                ->whereIn("booking_status", ["ongoing", "arrived", "started"])
+                ->exists();
+            $drivingStatus = $activeRideExists ? "busy" : "idle";
+            $driver->driving_status = $drivingStatus;
             $driver->save();
+
+            $tenantId = $request->header('database') ?: $request->header('x-database');
+            $socketUrl = rtrim((string) config('services.node_socket.url'), '/');
+            $socketSecret = (string) config('services.node_socket.internal_secret');
+
+            if ($tenantId && $socketUrl && $socketSecret) {
+                try {
+                    Http::withHeaders([
+                        'Authorization' => 'Bearer ' . $socketSecret,
+                        'database' => $tenantId,
+                    ])->timeout(5)->post($socketUrl . '/driver-status-change', [
+                        'driver_id' => $driver->id,
+                        'status' => $request->status,
+                        'online_status' => $request->status,
+                        'driving_status' => $drivingStatus,
+                    ]);
+                } catch (\Throwable $socketException) {
+                    \Log::warning('Driver status socket sync failed', [
+                        'driver_id' => $driver->id,
+                        'tenant_id' => $tenantId,
+                        'error' => $socketException->getMessage(),
+                    ]);
+                }
+            }
             
             return response()->json([
                 'success' => 1,

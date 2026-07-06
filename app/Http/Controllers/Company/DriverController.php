@@ -27,17 +27,23 @@ class DriverController extends Controller
         try {
             $request->validate([
                 'name' => 'required|max:255',
-                'email' => 'required|email|unique:drivers,email',
+                'email' => [
+                    'required',
+                    'email',
+                    Rule::unique('drivers', 'email')->whereNull('deleted_at'),
+                ],
+                'password' => 'required|string|min:6',
                 'phone_no' => [
                     'required',
                     'max:255',
-                    Rule::unique('drivers')->where(function ($query) use ($request) {
-                        return $query->where('country_code', $request->country_code);
+                    Rule::unique('drivers', 'phone_no')->where(function ($query) use ($request) {
+                        return $query->where('country_code', $request->country_code)
+                            ->whereNull('deleted_at');
                     }),
                 ],
                 'address' => 'required|max:255',
                 'driver_license' => 'required|max:255',
-                'joined_date' => 'required'
+                'joined_date' => 'nullable|date'
             ]);
 
             $dataCheck = (new TenantUser)
@@ -49,8 +55,8 @@ class DriverController extends Controller
 
             if ($countDriver >= $dataCheck->data['drivers_allowed']) {
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                             'clientId' => $request->header('database'),
                             'title' => "Driver Limit",
                             'description' => "You have reached your driver limits"
@@ -67,6 +73,7 @@ class DriverController extends Controller
             $driver = new CompanyDriver;
             $driver->name = $request->name;
             $driver->email = $request->email;
+            $driver->password = Hash::make($request->password);
             $driver->country_code = $request->country_code;
             $driver->phone_no = $request->phone_no;
             $driver->address = $request->address;
@@ -75,8 +82,8 @@ class DriverController extends Controller
             $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
             $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
             $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
-            $driver->status = "pending";
-            $driver->joined_date = $request->joined_date;
+            $driver->status = "accepted";
+            $driver->joined_date = $request->filled('joined_date') ? $request->joined_date : now()->toDateString();
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
             $driver->dispatcher_id = $request->dispatcher_id;
@@ -103,18 +110,21 @@ class DriverController extends Controller
                 'email' => [
                     'required',
                     'email',
-                    Rule::unique('drivers')->ignore($request->id),
+                    Rule::unique('drivers', 'email')
+                        ->whereNull('deleted_at')
+                        ->ignore($request->id),
                 ],
                 'phone_no' => [
                     'required',
                     'max:255',
                     Rule::unique('drivers', 'phone_no')
-                        ->where(fn ($q) => $q->where('country_code', $request->country_code))
+                        ->where(fn ($q) => $q->where('country_code', $request->country_code)
+                            ->whereNull('deleted_at'))
                         ->ignore($request->id),
                 ],
-                'address' => 'required|max:255',
-                'driver_license' => 'required|max:255',
-                'joined_date' => 'required',
+                'address' => 'nullable|max:255',
+                'driver_license' => 'nullable|max:255',
+                'joined_date' => 'nullable',
                 'profile_image' => 'nullable|image|mimes:jpg,jpeg,png,gif,webp|max:5120',
             ]);
             
@@ -151,38 +161,43 @@ class DriverController extends Controller
             $driver->name = isset($request->name) ? $request->name : $driver->name;
             $driver->email = isset($request->email) ? $request->email : $driver->email;
             $driver->country_code = isset($request->country_code) ? $request->country_code : $driver->country_code; 
-            $driver->password = isset($request->password) ? Hash::make($request->password) : $driver->password; 
+            $driver->password = $request->filled('password') ? Hash::make($request->password) : $driver->password;
             $driver->phone_no = isset($request->phone_no) ? $request->phone_no : $driver->phone_no; 
-            $driver->address = isset($request->address) ? $request->address : $driver->address;
-            $driver->driver_license = isset($request->driver_license) ? $request->driver_license : $driver->driver_license;
-            $driver->assigned_vehicle = isset($request->assigned_vehicle) ? $request->assigned_vehicle : $driver->assigned_vehicle;
+            $driver->address = $request->filled('address') ? $request->address : $driver->address;
+            $driver->driver_license = $request->filled('driver_license') ? $request->driver_license : $driver->driver_license;
+            $assignedVehicleId = $request->filled('assigned_vehicle') ? $request->assigned_vehicle : null;
+            if (!$assignedVehicleId && $request->filled('vehicle_type') && is_numeric($request->vehicle_type)) {
+                $assignedVehicleId = $request->vehicle_type;
+            }
 
-            if (isset($request->assigned_vehicle) && !empty($request->assigned_vehicle)) {
-                $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
+            if ($assignedVehicleId) {
+                $vehicleDetail = CompanyVehicleType::where("id", $assignedVehicleId)->first();
                 if ($vehicleDetail) {
-                    $driver->vehicle_name = $vehicleDetail->vehicle_type_name;
+                    $driver->assigned_vehicle = $assignedVehicleId;
+                    $driver->vehicle_name = $request->filled('vehicle_name') ? $request->vehicle_name : $vehicleDetail->vehicle_type_name;
                     $driver->vehicle_type = $vehicleDetail->vehicle_type_service;
                     $driver->vehicle_service = $vehicleDetail->vehicle_type_service;
                 }
+            } else {
+                $driver->vehicle_name = $request->filled('vehicle_name') ? $request->vehicle_name : $driver->vehicle_name;
+                $driver->vehicle_type = $request->filled('vehicle_type') ? $request->vehicle_type : $driver->vehicle_type;
+                $driver->vehicle_service = $request->filled('vehicle_service') ? $request->vehicle_service : $driver->vehicle_service;
             }
 
-            $driver->vehicle_name = isset($request->vehicle_name) ? $request->vehicle_name : $driver->vehicle_name;
-            $driver->vehicle_type = isset($request->vehicle_type) ? $request->vehicle_type : $driver->vehicle_type;
-            $driver->vehicle_service = isset($request->vehicle_service) ? $request->vehicle_service : $driver->vehicle_service;
-            $driver->seats = isset($request->seats) ? $request->seats : $driver->seats;
-            $driver->color = isset($request->color) ? $request->color : $driver->color;
-            $driver->plate_no = isset($request->plate_no) ? $request->plate_no : $driver->plate_no;
-            $driver->vehicle_registration_date = isset($request->vehicle_registration_date) ? $request->vehicle_registration_date : $driver->vehicle_registration_date;
+            $driver->seats = $request->filled('seats') ? $request->seats : $driver->seats;
+            $driver->color = $request->filled('color') ? $request->color : $driver->color;
+            $driver->plate_no = $request->filled('plate_no') ? $request->plate_no : $driver->plate_no;
+            $driver->vehicle_registration_date = $request->filled('vehicle_registration_date') ? $request->vehicle_registration_date : $driver->vehicle_registration_date;
 
-            $driver->joined_date = isset($request->joined_date) ? $request->joined_date : $driver->joined_date;
-            $driver->sub_company = isset($request->sub_company) ? $request->sub_company : $driver->sub_company;
-            $driver->package_id = $request->package_id;
+            $driver->joined_date = $request->filled('joined_date') ? $request->joined_date : $driver->joined_date;
+            $driver->sub_company = $request->filled('sub_company') ? $request->sub_company : $driver->sub_company;
+            $driver->package_id = $request->filled('package_id') ? $request->package_id : $driver->package_id;
             $driver->bank_name = isset($request->bank_name) ? $request->bank_name : $driver->bank_name;
             $driver->bank_account_number = isset($request->bank_account_number) ? $request->bank_account_number : $driver->bank_account_number;
             $driver->account_holder_name = isset($request->account_holder_name) ? $request->account_holder_name : $driver->account_holder_name;
             $driver->bank_phone_no = isset($request->bank_phone_no) ? $request->bank_phone_no : $driver->bank_phone_no;
             $driver->iban_no = isset($request->iban_no) ? $request->iban_no : $driver->iban_no;
-            $driver->dispatcher_id = $request->dispatcher_id;
+            $driver->dispatcher_id = $request->filled('dispatcher_id') ? $request->dispatcher_id : $driver->dispatcher_id;
             $driver->save();
 
             return response()->json([
@@ -540,8 +555,34 @@ class DriverController extends Controller
             ]);
 
             $driver = CompanyDriver::where("id", $request->id)->first();
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found'
+                ], 404);
+            }
             $driver->status = $request->status;
             $driver->save();
+
+            $normalizedStatus = strtolower((string) $request->status);
+            $statusLabel = match ($normalizedStatus) {
+                'accepted', 'approved', 'active' => 'approved',
+                'rejected', 'blocked', 'inactive' => $normalizedStatus,
+                default => $normalizedStatus,
+            };
+            $title = 'Driver Account Status Updated';
+            $message = $statusLabel === 'approved'
+                ? 'Your driver account has been approved.'
+                : "Your driver account status has been updated to {$statusLabel}.";
+
+            $this->notifyDriverLifecycle(
+                $request,
+                $driver,
+                $title,
+                $message,
+                'driver_status',
+                ['status' => $normalizedStatus]
+            );
 
             return response()->json([
                 'success' => 1,
@@ -564,8 +605,27 @@ class DriverController extends Controller
             ]);
 
             $driver = CompanyDriver::where("id", $request->id)->first();
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found'
+                ], 404);
+            }
             $driver->wallet_balance += $request->amount;
             $driver->save();
+
+            $amount = number_format((float) $request->amount, 2, '.', '');
+            $this->notifyDriverLifecycle(
+                $request,
+                $driver,
+                'Wallet Updated',
+                "Your wallet has been credited with {$amount}.",
+                'wallet_update',
+                [
+                    'amount' => $amount,
+                    'wallet_balance' => (string) $driver->wallet_balance,
+                ]
+            );
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
 
@@ -700,6 +760,7 @@ class DriverController extends Controller
                     $document->save();
                 }
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, 'approved');
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 
@@ -750,6 +811,7 @@ class DriverController extends Controller
                 }
 
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, 'rejected');
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 // if(isset($user->email) && $user->email != NULL){
@@ -796,6 +858,7 @@ class DriverController extends Controller
                 $document->save();
 
                 $user = CompanyDriver::where("id", $request->driver_id)->first();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, (string) $request->status);
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 // if(isset($user->email) && $user->email != NULL){
@@ -840,6 +903,7 @@ class DriverController extends Controller
                 $driver = CompanyDriver::where("id", $request->driver_id)->first();
                 $driver->document_approved_office = 1;
                 $driver->save();
+                $this->notifyDriverDocumentStatus($request, (int) $request->driver_id, 'approved');
 
                 $settingData = CompanySetting::orderBy("id", "DESC")->first();
                 // if(isset($driver->email) && $driver->email != NULL){
@@ -928,6 +992,57 @@ class DriverController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    private function notifyDriverDocumentStatus(Request $request, int $driverId, string $status): void
+    {
+        if ($driverId <= 0) {
+            return;
+        }
+
+        $normalizedStatus = match (strtolower($status)) {
+            'verified', 'approve', 'approved' => 'approved',
+            'failed', 'reject', 'rejected' => 'rejected',
+            default => strtolower($status),
+        };
+
+        $title = 'Document Status Updated';
+        $message = "Your document status has been {$normalizedStatus}.";
+
+        $notification = new CompanyNotification;
+        $notification->user_type = 'driver';
+        $notification->user_id = $driverId;
+        $notification->title = $title;
+        $notification->message = $message;
+        $notification->status = 'unread';
+        $notification->save();
+
+        $dataCheck = (new TenantUser)
+            ->setConnection('central')
+            ->where('id', $request->header('database'))
+            ->first();
+
+        $pushEnabled = !isset($dataCheck) || ($dataCheck->data['push_notification'] ?? 'enable') === 'enable';
+        if (!$pushEnabled) {
+            return;
+        }
+
+        $tokens = CompanyToken::where('user_id', $driverId)
+            ->where('user_type', 'driver')
+            ->get();
+
+        foreach ($tokens as $token) {
+            FCMService::sendToDevice(
+                $token->fcm_token,
+                $title,
+                $message,
+                [
+                    'type' => 'document_status',
+                    'status' => $normalizedStatus,
+                    'notification_id' => (string) $notification->id,
+                ]
+            );
         }
     }
 
@@ -1035,9 +1150,11 @@ class DriverController extends Controller
 
             try {
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/driver-message-notification', [
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-message-notification', [
                     'driverId' => $request->driver_id,
+                    'database' => $request->header('database'),
                     'chat' => $chatPayload,
                 ]);
             } catch (\Exception $socketException) {
@@ -1082,9 +1199,9 @@ class DriverController extends Controller
 
             try {
                 Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                     'database' => $request->header('database'),
-                ])->timeout(5)->post(env('NODE_SOCKET_URL') . '/driver-force-logout', [
+                ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-force-logout', [
                     'driverId' => $request->driver_id,
                     'auth_version' => $driver->auth_version,
                 ]);
@@ -1106,6 +1223,51 @@ class DriverController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function notifyDriverLifecycle(
+        Request $request,
+        CompanyDriver $driver,
+        string $title,
+        string $message,
+        string $type,
+        array $data = []
+    ): void {
+        $record = new CompanyNotification;
+        $record->user_type = 'driver';
+        $record->user_id = $driver->id;
+        $record->title = $title;
+        $record->message = $message;
+        $record->status = 'unread';
+        $record->save();
+
+        $dataCheck = (new TenantUser)
+            ->setConnection('central')
+            ->where('id', $request->header('database'))
+            ->first();
+
+        $pushEnabled = !isset($dataCheck) || ($dataCheck->data['push_notification'] ?? 'enable') === 'enable';
+        if (!$pushEnabled) {
+            return;
+        }
+
+        $payload = array_merge($data, [
+            'type' => $type,
+            'driver_id' => (string) $driver->id,
+            'notification_id' => (string) $record->id,
+        ]);
+
+        $tokens = CompanyToken::where('user_id', $driver->id)
+            ->where('user_type', 'driver')
+            ->pluck('fcm_token');
+
+        if ($driver->fcm_token) {
+            $tokens->prepend($driver->fcm_token);
+        }
+
+        foreach ($tokens->unique()->filter() as $token) {
+            FCMService::sendToDevice($token, $title, $message, $payload);
         }
     }
 
@@ -1264,8 +1426,8 @@ class DriverController extends Controller
 
 //             if ($countDriver >= $dataCheck->data['drivers_allowed']) {
 //                 Http::withHeaders([
-//                     'Authorization' => 'Bearer ' . env('NODE_INTERNAL_SECRET'),
-//                 ])->post(env('NODE_SOCKET_URL') . '/send-reminder', [
+//                     'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+//                 ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
 //                             'clientId' => $request->header('database'),
 //                             'title' => "Driver Limit",
 //                             'description' => "You have reached your driver limits"

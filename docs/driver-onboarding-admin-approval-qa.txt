@@ -1,0 +1,125 @@
+Driver Onboarding And Admin Approval QA
+======================================
+
+Purpose
+-------
+This runbook covers the driver onboarding fixes for registration, email OTP,
+pending-driver access, admin document review, and approval unlock. It applies
+to all tenants, not only one company.
+
+Issues Covered
+--------------
+- Registration failed when tenant drivers tables did not have email_verified
+  or email_verified_at.
+- Pending drivers were blocked from basic authenticated APIs by the
+  company-admin approval guard.
+- Drivers who registered but closed the app before OTP verification needed a
+  send/resend OTP path on next login.
+- Client Admin document request modal did not show uploaded front/back/profile
+  document images.
+- Issue date, expiry date, and document number values must remain visible when
+  submitted.
+
+Implementation Rules
+--------------------
+- Do not change upload folders, stored image paths, mail settings,
+  notification settings, dispatch settings, sockets, GPS, or DB env.
+- POST /api/driver/resend-otp is the official driver send/resend OTP endpoint.
+- Pending drivers may access setup/profile APIs but not operational
+  ride/dispatch APIs.
+- Approved-driver-only APIs must keep check.app.availibility.
+- get-profile must return profile data for authenticated pending drivers,
+  including status and email_verified.
+
+Tenant Schema Verification
+--------------------------
+Before live QA, verify every tenant has the email verification columns:
+
+ssh cabifyit-prod 'cd /var/www/html/backend.cabifyit.com && php -r '\''
+require "vendor/autoload.php";
+$app = require "bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+foreach (App\Models\Tenant::all() as $tenant) {
+    tenancy()->initialize($tenant);
+    $cols = Schema::connection("tenant")->getColumnListing("drivers");
+    $missing = array_values(array_diff(["email_verified", "email_verified_at"], $cols));
+    if ($missing) {
+        echo $tenant->id . " missing " . implode(",", $missing) . PHP_EOL;
+    }
+    tenancy()->end();
+}
+'\'''
+
+Run tenant migrations only after QA tenant validation passes.
+
+Backend QA
+----------
+- Register a new driver with image-only documents.
+- Confirm registration creates:
+  - driver status = pending
+  - email_verified = false
+  - OTP and 5-minute expiry
+  - pending drivers_documents rows
+  - unchanged image paths.
+- Login with password before OTP verification:
+  - response has requiresOtp: true
+  - no operational ride unlock occurs
+  - email OTP is sent.
+- Verify OTP:
+  - sets email_verified = true
+  - returns token and profile.
+- Pending authenticated driver can call:
+  - GET /api/driver/get-profile
+  - GET /api/driver/document-list
+  - POST /api/driver/document-upload
+  - GET /api/driver/vehicle-information
+  - POST /api/driver/store-token.
+- Pending authenticated driver is blocked from:
+  - GET /api/driver/change-status
+  - GET /api/driver/current-ride
+  - POST /api/driver/accept-ride
+  - POST /api/driver/reject-ride
+  - dispatch/rank/bidding APIs.
+
+Client Admin QA
+---------------
+- Open Drivers Document Request.
+- Confirm pending document rows appear.
+- Click View.
+- Confirm modal shows:
+  - driver name, email, phone
+  - document number when submitted
+  - issue date when submitted
+  - expiry date when submitted
+  - front image when front_photo exists
+  - back image when back_photo exists
+  - profile image when profile_photo exists.
+- Click each image and confirm it opens from the existing backend asset path.
+- Approve and reject actions should continue to update the document row status.
+
+Validation Commands
+-------------------
+Backend:
+
+php artisan test --filter DriverOnboardingRouteGuardTest
+php -l app/Http/Controllers/Driver/AuthController.php
+php -l routes/api.php
+php -l database/migrations/tenant/2026_07_06_120000_add_email_verified_to_drivers_table.php
+
+Client Admin:
+
+npm run build
+
+Driver App:
+
+dart format --set-exit-if-changed lib/app/modules/verify_otp/controller/verify_otp_controller.dart
+flutter analyze
+
+Rollout Order
+-------------
+1. Validate locally.
+2. Validate on QA tenant.
+3. Run tenant migrations for all tenants.
+4. Verify schema for all tenants.
+5. Smoke test alpha31.
+6. Release mobile/admin builds only after QA passes.

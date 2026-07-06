@@ -243,6 +243,27 @@
           }
         },
         {
+          "name": "Driver Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "database", "value": "{{database}}" },
+              { "key": "companyCode", "value": "{{company_code}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyCode\": \"{{company_code}}\",\n  \"email\": \"{{email}}\",\n  \"phone\": \"{{phone}}\",\n  \"country_code\": \"{{country_code}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/driver/resend-otp"
+          }
+        },
+        {
           "name": "Driver Verify Password",
           "request": {
             "method": "POST",

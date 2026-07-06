@@ -17,7 +17,10 @@ class CompanyBooking extends Model
     protected $casts = [
         'is_scheduled' => 'boolean',
         'dispatch_released' => 'boolean',
+        'dispatch_release_at' => 'datetime',
+        'dispatch_release_override' => 'boolean',
         'reminder_minutes' => 'integer',
+        'bidding_fallback' => 'boolean',
     ];
 
     public function getPreBookingAttribute(): bool
