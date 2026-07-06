@@ -26,6 +26,7 @@ use App\Models\MobileAppSetting;
 use App\Models\PackageRideCountSetting;
 use App\Models\CompanyPlot;
 use App\Models\CompanyDispatchSystem;
+use Illuminate\Support\Facades\Schema;
 
 class SettingController extends Controller
 {
@@ -610,19 +611,41 @@ class SettingController extends Controller
             $dispatchContext = $this->driverDispatchContext($setting?->company_booking_system ?? "auto_dispatch");
 
             $plots = CompanyPlot::orderBy("id", "DESC")->get();
-            $driverCounts = CompanyDriver::select("plot_id", DB::raw("COUNT(*) as driver_count"))
+            $driver = $this->syncDriverPlotFromCoordinates($driver);
+
+            $liveDrivers = CompanyDriver::query()
                 ->whereNotNull("plot_id")
                 ->where("online_status", "online")
                 ->where("driving_status", "idle")
-                ->groupBy("plot_id")
-                ->pluck("driver_count", "plot_id");
+                ->where("updated_at", ">=", now()->subMinutes(15))
+                ->orderByRaw("priority_plot IS NULL, CAST(priority_plot AS UNSIGNED) ASC")
+                ->orderBy("id", "ASC")
+                ->get();
 
-            $plotRows = $plots->map(function ($plot) use ($driverCounts, $driver) {
+            $driversByPlot = $liveDrivers->groupBy(fn ($item) => (string) $item->plot_id);
+            $rank = null;
+            $currentPlotDriverCount = 0;
+
+            foreach ($plots as $plot) {
+                $plotDrivers = $driversByPlot->get((string) $plot->id, collect())->values();
+                $this->syncPlotQueue((int) $plot->id, $plotDrivers);
+
+                if ($driver && (string) $driver->plot_id === (string) $plot->id) {
+                    $currentPlotDriverCount = $plotDrivers->count();
+                    $position = $plotDrivers->search(fn ($item) => (string) $item->id === (string) $driver->id);
+                    if ($position !== false) {
+                        $rank = $position + 1;
+                    }
+                }
+            }
+
+            $plotRows = $plots->map(function ($plot) use ($driversByPlot, $driver) {
+                $driverCount = $driversByPlot->get((string) $plot->id, collect())->count();
                 return [
                     "id" => $plot->id,
                     "name" => $plot->name,
                     "plot_name" => $plot->name,
-                    "driver_count" => (int) ($driverCounts[$plot->id] ?? 0),
+                    "driver_count" => $driverCount,
                     "is_current" => $driver && (string) $driver->plot_id === (string) $plot->id,
                 ];
             })->values();
@@ -630,23 +653,18 @@ class SettingController extends Controller
             $currentPlot = $driver?->plot_id
                 ? CompanyPlot::where("id", $driver->plot_id)->first()
                 : null;
-            $rank = null;
-            if ($dispatchContext['show_rank'] && $driver?->plot_id) {
-                $rank = DB::table("plot_driver_queues")
-                    ->where("plot_id", $driver->plot_id)
-                    ->where("driver_id", $driver->id)
-                    ->value("rank");
-                $rank = $rank ?? $driver->priority_plot;
-            }
 
             return response()->json([
                 "success" => 1,
                 "message" => "Driver dispatch context fetched successfully",
                 "data" => [
                     ...$dispatchContext,
+                    "rank_available" => $rank !== null,
+                    "current_plot_driver_count" => $currentPlotDriverCount,
                     "current_plot" => $currentPlot ? [
                         "id" => $currentPlot->id,
                         "name" => $currentPlot->name,
+                        "driver_count" => $currentPlotDriverCount,
                     ] : null,
                     "current_driver" => [
                         "id" => $driver?->id,
@@ -672,12 +690,15 @@ class SettingController extends Controller
 
     private function driverDispatchContext(?string $companyBookingSystem = null): array
     {
-        $enabledSystems = CompanyDispatchSystem::where("status", "enable")
-            ->orderByRaw("priority IS NULL, priority ASC")
-            ->orderBy("id", "ASC")
-            ->pluck("dispatch_system")
-            ->values()
-            ->all();
+        $enabledSystems = [];
+        if (Schema::connection("tenant")->hasTable("dispatch_system")) {
+            $enabledSystems = CompanyDispatchSystem::where("status", "enable")
+                ->orderByRaw("priority IS NULL, priority ASC")
+                ->orderBy("id", "ASC")
+                ->pluck("dispatch_system")
+                ->values()
+                ->all();
+        }
 
         $dispatchSystem = $enabledSystems[0] ?? null;
         if (!$dispatchSystem) {
@@ -698,6 +719,136 @@ class SettingController extends Controller
             "supports_manual_assignment" => true,
             "show_rank" => $dispatchSystem === "auto_dispatch_plot_base",
         ];
+    }
+
+    private function syncDriverPlotFromCoordinates(?CompanyDriver $driver): ?CompanyDriver
+    {
+        if (!$driver || !$this->isValidCoordinate($driver->latitude, $driver->longitude)) {
+            return $driver;
+        }
+
+        $plotId = $this->resolvePlotIdFromCoordinates((float) $driver->latitude, (float) $driver->longitude);
+        if ((string) ($driver->plot_id ?? '') === (string) ($plotId ?? '')) {
+            return $driver;
+        }
+
+        $driver->plot_id = $plotId;
+        if (!$plotId) {
+            $driver->priority_plot = null;
+        } elseif (!$driver->priority_plot) {
+            $driver->priority_plot = CompanyDriver::where("plot_id", $plotId)->max("priority_plot") + 1;
+        }
+        $driver->save();
+
+        return $driver->fresh();
+    }
+
+    private function syncPlotQueue(int $plotId, $drivers): void
+    {
+        if (!Schema::connection("tenant")->hasTable("plot_driver_queues")) {
+            return;
+        }
+
+        DB::table("plot_driver_queues")->where("plot_id", $plotId)->delete();
+
+        $rows = [];
+        foreach ($drivers->values() as $index => $driver) {
+            $rows[] = [
+                "plot_id" => $plotId,
+                "driver_id" => $driver->id,
+                "rank" => $index + 1,
+                "created_at" => now(),
+                "updated_at" => now(),
+            ];
+        }
+
+        if ($rows) {
+            DB::table("plot_driver_queues")->insert($rows);
+        }
+    }
+
+    private function resolvePlotIdFromCoordinates(float $lat, float $lng): ?int
+    {
+        foreach (CompanyPlot::orderBy("id", "DESC")->get() as $plot) {
+            $polygon = $this->plotPolygon($plot->features);
+            if ($polygon && $this->pointInPolygon($lat, $lng, $polygon)) {
+                return (int) $plot->id;
+            }
+        }
+
+        return null;
+    }
+
+    private function plotPolygon($features): ?array
+    {
+        try {
+            $feature = is_string($features) ? json_decode($features, true) : $features;
+            if (isset($feature["features"][0]["geometry"])) {
+                $feature = $feature["features"][0];
+            }
+
+            $geometry = $feature["geometry"] ?? $feature;
+            $coordinates = $geometry["coordinates"] ?? null;
+            $coordinates = is_string($coordinates) ? json_decode($coordinates, true) : $coordinates;
+
+            if (!is_array($coordinates)) {
+                return null;
+            }
+
+            return is_array($coordinates[0][0] ?? null) ? $coordinates[0] : $coordinates;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function pointInPolygon(float $lat, float $lng, array $polygon): bool
+    {
+        if (count($polygon) === 2) {
+            $lng1 = $polygon[0][0];
+            $lat1 = $polygon[0][1];
+            $lng2 = $polygon[1][0];
+            $lat2 = $polygon[1][1];
+
+            return $lat >= min($lat1, $lat2)
+                && $lat <= max($lat1, $lat2)
+                && $lng >= min($lng1, $lng2)
+                && $lng <= max($lng1, $lng2);
+        }
+
+        $inside = false;
+        $x = $lng;
+        $y = $lat;
+        $numPoints = count($polygon);
+
+        for ($i = 0, $j = $numPoints - 1; $i < $numPoints; $j = $i++) {
+            $xi = $polygon[$i][0];
+            $yi = $polygon[$i][1];
+            $xj = $polygon[$j][0];
+            $yj = $polygon[$j][1];
+
+            $intersect = (($yi > $y) !== ($yj > $y))
+                && ($x < ($xj - $xi) * ($y - $yi) / ($yj - $yi) + $xi);
+
+            if ($intersect) {
+                $inside = !$inside;
+            }
+        }
+
+        return $inside;
+    }
+
+    private function isValidCoordinate($lat, $lng): bool
+    {
+        $latitude = is_numeric($lat) ? (float) $lat : null;
+        $longitude = is_numeric($lng) ? (float) $lng : null;
+
+        return $latitude !== null
+            && $longitude !== null
+            && $latitude >= -90
+            && $latitude <= 90
+            && $longitude >= -180
+            && $longitude <= 180
+            && !($latitude == 0.0 && $longitude == 0.0);
     }
 
     public function changeStatus(Request $request){
