@@ -92,6 +92,7 @@ deploy_backend() {
     sudo ln -sfn \"\$release\" /var/www/html/backend.cabifyit.com
     sudo systemctl reload php8.1-fpm || sudo systemctl reload php8.2-fpm || true
     sudo -u dev pm2 reload project-socket --update-env || sudo -u dev pm2 restart project-socket
+    bash \"\$release/scripts/manage-cabify-queue-worker.sh\" \"\$release\"
     (sudo crontab -l 2>/dev/null | grep -v 'php artisan schedule:run' || true; echo \"* * * * * cd /var/www/html/backend.cabifyit.com && su -s /bin/sh www-data -c 'php artisan schedule:run' >> /dev/null 2>&1\") | sudo crontab -
     sudo nginx -t
     sudo systemctl reload nginx
@@ -117,6 +118,7 @@ deploy_static() {
 }
 
 if has_app backend; then
+  CABIFY_STATE_CAPTURE_ID="$release_id" CABIFY_SSH_HOST="$ssh_host" "$script_dir/capture-cabify-scale-state.sh"
   deploy_backend
 fi
 
@@ -135,6 +137,7 @@ remote "set -e
   echo clientadmin=\$(readlink -f /var/www/html/clientadmin.cabifyit.com)
   echo dispatcher=\$(readlink -f /var/www/html/dispatcher.cabifyit.com)
   sudo -u dev pm2 describe project-socket | grep status || true
+  if sudo test -d /var/www/.pm2; then sudo -u www-data env PM2_HOME=/var/www/.pm2 pm2 describe cabify-queue-worker | grep status || true; else echo cabify-queue-worker=not-configured; fi
   sudo -u www-data test -w /var/www/shared/cabify/backend/public/testcompany134/front_photo
   sudo -u www-data test -r /var/www/html/backend.cabifyit.com/storage/app/firebase/firebase.json
 "

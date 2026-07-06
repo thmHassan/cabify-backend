@@ -9,7 +9,8 @@ const http = require("http");
 const { Server } = require("socket.io");
 const PDFDocument = require('pdfkit');
 const axios = require("axios");
-const { getConnection } = require("./db")
+const { getConnection, getPoolStats } = require("./db")
+const { createLatestPerKeyCoalescer } = require("./locationPersistCoalescer")
 const transporter = require("./utils/Emailconfig");
 const { getMailFrom } = require("./utils/Emailconfig");
 const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = require("./utils/FCMService");
@@ -30,8 +31,12 @@ app.use(cors(SOCKET_API_CORS));
 app.options(/.*/, cors(SOCKET_API_CORS));
 
 const server = http.createServer(app);
+const SOCKET_PING_INTERVAL_MS = Number(process.env.SOCKET_PING_INTERVAL_MS || 25000);
+const SOCKET_PING_TIMEOUT_MS = Number(process.env.SOCKET_PING_TIMEOUT_MS || 60000);
 
 const io = new Server(server, {
+    pingInterval: SOCKET_PING_INTERVAL_MS,
+    pingTimeout: SOCKET_PING_TIMEOUT_MS,
     cors: {
         origin: "*"
     }
@@ -148,10 +153,43 @@ const isPreBookingRow = (booking, todayDate = null) => {
 const plotDriverQueues = new Map();
 const driverLastLocationTime = new Map();
 const driverDisconnectTimers = new Map();
+const knownDriverRuntimeKeys = new Set();
 const DISCONNECT_GRACE_MS = 15 * 60 * 1000;
 
 const LOCATION_TIMEOUT_MS = 15 * 60 * 1000;
 const RECONNECTING_THRESHOLD_MS = 10 * 1000;
+const GPS_IDLE_PERSIST_MS = Number(process.env.SOCKET_GPS_IDLE_PERSIST_MS || 30000);
+const GPS_ACTIVE_PERSIST_MS = Number(process.env.SOCKET_GPS_ACTIVE_PERSIST_MS || 5000);
+const GPS_IDLE_MIN_MOVEMENT_METERS = Number(process.env.SOCKET_GPS_IDLE_MIN_MOVEMENT_METERS || 75);
+const GPS_ACTIVE_MIN_MOVEMENT_METERS = Number(process.env.SOCKET_GPS_ACTIVE_MIN_MOVEMENT_METERS || 15);
+const GPS_PERSIST_CONCURRENCY = Number(process.env.SOCKET_GPS_PERSIST_CONCURRENCY || 10);
+const QUEUE_FULL_BROADCAST_COALESCE_MS = Number(process.env.SOCKET_QUEUE_FULL_BROADCAST_COALESCE_MS || 2000);
+const SOCKET_LISTEN_BACKLOG = Number(process.env.SOCKET_LISTEN_BACKLOG || 8192);
+const GPS_LIVE_BROADCAST_FLUSH_MS = Number(process.env.SOCKET_GPS_LIVE_BROADCAST_FLUSH_MS || 250);
+const driverLocationCache = new Map();
+const driverLocationPersistTime = new Map();
+const plotPolygonCache = new Map();
+const gpsStats = {
+    accepted: 0,
+    broadcast: 0,
+    persisted: 0,
+    skippedPersist: 0,
+    coalescedPersist: 0,
+    pendingPersisted: 0,
+    dbErrors: 0,
+};
+const liveGpsBroadcastStats = {
+    scheduled: 0,
+    flushed: 0,
+    coalesced: 0,
+};
+const queueBroadcastStats = {
+    requested: 0,
+    executed: 0,
+    coalesced: 0,
+    errors: 0,
+};
+const PLOT_POLYGON_CACHE_MS = Number(process.env.SOCKET_PLOT_POLYGON_CACHE_MS || 60000);
 
 const AUTO_DISPATCH_TIMEOUT_MS = 30000;
 const DEFAULT_NEAREST_DISPATCH_TIMEOUT_SECONDS = 30;
@@ -232,6 +270,50 @@ const emitTenantRooms = (database, event, payload) => {
     io.to(`client_${dbName}`).emit(event, eventPayload);
 };
 
+const pendingLiveGpsBroadcasts = new Map();
+const liveGpsBroadcastTimers = new Map();
+
+const flushLiveGpsBroadcasts = (database) => {
+    const dbName = toTenantSocketName(database);
+    const pending = pendingLiveGpsBroadcasts.get(dbName);
+    liveGpsBroadcastTimers.delete(dbName);
+
+    if (!pending || pending.size === 0) {
+        pendingLiveGpsBroadcasts.delete(dbName);
+        return;
+    }
+
+    pendingLiveGpsBroadcasts.delete(dbName);
+    for (const payload of pending.values()) {
+        emitTenantRooms(dbName, "driver-location-update", payload);
+        liveGpsBroadcastStats.flushed += 1;
+    }
+};
+
+const scheduleLiveGpsBroadcast = (database, driverId, payload) => {
+    const dbName = toTenantSocketName(database);
+    if (!dbName || !driverId || !payload) return;
+
+    let pending = pendingLiveGpsBroadcasts.get(dbName);
+    if (!pending) {
+        pending = new Map();
+        pendingLiveGpsBroadcasts.set(dbName, pending);
+    }
+
+    const driverKey = String(driverId);
+    if (pending.has(driverKey)) {
+        liveGpsBroadcastStats.coalesced += 1;
+    }
+    pending.set(driverKey, payload);
+    liveGpsBroadcastStats.scheduled += 1;
+
+    if (!liveGpsBroadcastTimers.has(dbName)) {
+        liveGpsBroadcastTimers.set(dbName, setTimeout(() => {
+            flushLiveGpsBroadcasts(dbName);
+        }, GPS_LIVE_BROADCAST_FLUSH_MS));
+    }
+};
+
 const normalizeDriverRealtimePayload = (driver, database, overrides = {}) => {
     if (!driver) return null;
     const dbName = toTenantSocketName(database);
@@ -262,6 +344,252 @@ const normalizeDriverRealtimePayload = (driver, database, overrides = {}) => {
         plot_name: driver.plot_name || (plotId ? `Plot #${plotId}` : 'N/A'),
         database: dbName,
     };
+};
+
+const parseCoordinate = (value) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isValidCoordinatePair = (latitude, longitude) => (
+    latitude !== null
+    && longitude !== null
+    && latitude >= -90
+    && latitude <= 90
+    && longitude >= -180
+    && longitude <= 180
+    && !(latitude === 0 && longitude === 0)
+);
+
+const distanceMeters = (from, to) => {
+    if (!from || !to) return Number.POSITIVE_INFINITY;
+    const toRadians = (degrees) => degrees * Math.PI / 180;
+    const earthRadiusMeters = 6371000;
+    const dLat = toRadians(to.latitude - from.latitude);
+    const dLng = toRadians(to.longitude - from.longitude);
+    const lat1 = toRadians(from.latitude);
+    const lat2 = toRadians(to.latitude);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const isActiveRideStatus = (status) => {
+    const normalized = String(status || '').toLowerCase();
+    return ['busy', 'ongoing', 'arrived', 'started', 'pending_acceptance'].includes(normalized);
+};
+
+const shouldPersistDriverLocation = ({ runtimeKey, current, status, onlineStatus, force = false }) => {
+    if (force) return true;
+
+    const cached = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
+    if (!cached) return true;
+
+    const statusChanged = status
+        && String(status) !== String(cached.driving_status || cached.status || '');
+    const onlineStatusChanged = onlineStatus
+        && String(onlineStatus) !== String(cached.online_status || '');
+    if (statusChanged || onlineStatusChanged) return true;
+
+    const active = isActiveRideStatus(status || cached?.driving_status || cached?.status);
+    const minInterval = active ? GPS_ACTIVE_PERSIST_MS : GPS_IDLE_PERSIST_MS;
+    const minMovement = active ? GPS_ACTIVE_MIN_MOVEMENT_METERS : GPS_IDLE_MIN_MOVEMENT_METERS;
+    const lastPersistAt = runtimeKey ? (driverLocationPersistTime.get(runtimeKey) || 0) : 0;
+    const movedMeters = distanceMeters(cached, current);
+
+    if (!lastPersistAt) return true;
+    if (Date.now() - lastPersistAt >= minInterval) return true;
+    return movedMeters >= minMovement;
+};
+
+const parsePlotPolygonForLocation = (plot) => {
+    if (!plot?.features) return null;
+    try {
+        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
+        const geometry = features.geometry || features;
+        const rawCoords = geometry.coordinates;
+        if (typeof rawCoords === 'string') {
+            const parsed = JSON.parse(rawCoords);
+            return Array.isArray(parsed?.[0]) ? parsed[0] : parsed;
+        }
+        if (Array.isArray(rawCoords)) {
+            return Array.isArray(rawCoords[0]?.[0]) ? rawCoords[0] : rawCoords;
+        }
+    } catch (error) {
+        console.error('[LocationUpdate] Failed to parse plot polygon:', error.message);
+    }
+    return null;
+};
+
+const getCachedPlotPolygons = async (db, database) => {
+    const cacheKey = toTenantSocketName(database);
+    const cached = plotPolygonCache.get(cacheKey);
+    if (cached && Date.now() - cached.loadedAt < PLOT_POLYGON_CACHE_MS) {
+        return cached.plots;
+    }
+
+    const [plotRows] = await db.query('SELECT id, features FROM plots ORDER BY id DESC');
+    const plots = plotRows
+        .map((plot) => ({
+            id: plot.id,
+            polygon: parsePlotPolygonForLocation(plot),
+        }))
+        .filter((plot) => plot.polygon);
+
+    plotPolygonCache.set(cacheKey, { loadedAt: Date.now(), plots });
+    return plots;
+};
+
+const resolvePlotIdForLocation = async (db, database, latitude, longitude) => {
+    const plots = await getCachedPlotPolygons(db, database);
+    for (const plot of plots) {
+        if (pointInPolygon(latitude, longitude, plot.polygon)) {
+            return plot.id;
+        }
+    }
+    return null;
+};
+
+const cacheDriverLocationSnapshot = ({
+    runtimeKey,
+    cachedDriver,
+    driverId,
+    latitude,
+    longitude,
+    status,
+    onlineStatus,
+}) => {
+    if (!runtimeKey) return;
+    driverLocationCache.set(runtimeKey, {
+        ...(cachedDriver || {}),
+        id: driverId,
+        driver_id: driverId,
+        latitude,
+        longitude,
+        driving_status: status || cachedDriver?.driving_status || 'idle',
+        online_status: onlineStatus || cachedDriver?.online_status || 'online',
+    });
+};
+
+const persistDriverLocationSnapshot = async ({
+    dbName,
+    driverId,
+    latitude,
+    longitude,
+    status,
+    onlineStatus,
+    runtimeKey,
+    cachedDriver,
+    socket,
+}) => {
+    try {
+        const db = getConnection(toTenantDbName(dbName));
+        const plotId = await resolvePlotIdForLocation(db, dbName, latitude, longitude);
+        const updates = ['latitude = ?', 'longitude = ?', 'updated_at = NOW()'];
+        const params = [latitude, longitude];
+
+        if (status) {
+            updates.push('driving_status = ?');
+            params.push(status);
+        }
+        if (onlineStatus) {
+            updates.push('online_status = ?');
+            params.push(onlineStatus);
+        }
+        if (plotId) {
+            updates.push('plot_id = ?');
+            params.push(plotId);
+        }
+
+        params.push(driverId);
+        await db.query(
+            `UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`,
+            params
+        );
+
+        if (runtimeKey) {
+            driverLocationPersistTime.set(runtimeKey, Date.now());
+        }
+
+        const [dbDriverRows] = await db.query(
+            `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                    d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
+                    p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
+             FROM drivers d
+             LEFT JOIN plots p ON d.plot_id = p.id
+             LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
+             WHERE d.id = ? LIMIT 1`,
+            [driverId]
+        );
+
+        if (dbDriverRows.length > 0) {
+            const dbDriver = dbDriverRows[0];
+            const previousPlotId = cachedDriver?.plot_id;
+            const plotChanged = previousPlotId
+                && dbDriver.plot_id
+                && String(previousPlotId) !== String(dbDriver.plot_id);
+            if (runtimeKey) {
+                driverLocationCache.set(runtimeKey, {
+                    ...dbDriver,
+                    latitude,
+                    longitude,
+                });
+            }
+
+            emitTenantRooms(dbName, "driver-location-update", normalizeDriverRealtimePayload(dbDriver, dbName, {
+                latitude,
+                longitude,
+                status: dbDriver.driving_status || "idle",
+            }));
+
+            const isIdleAndOnline = dbDriver.driving_status === "idle" && dbDriver.online_status === "online";
+            if (plotChanged && isIdleAndOnline) {
+                await removeFromQueue(dbDriver.id, dbName);
+                const rank = dbDriver.plot_id ? await getOrAssignRankForDriver(dbDriver.plot_id, dbName, dbDriver.id) : "-";
+                const eventData = normalizeDriverRealtimePayload(dbDriver, dbName, {
+                    rank,
+                    status: dbDriver.driving_status,
+                    latitude,
+                    longitude,
+                    online_status: dbDriver.online_status,
+                    is_reconnecting: false,
+                });
+                emitTenantWaitingDriver(dbName, eventData);
+                socket?.emit("waiting-driver-event", eventData);
+            } else if (isActiveRideStatus(dbDriver.driving_status)) {
+                emitTenantOnJobDriver(dbName, normalizeDriverRealtimePayload(dbDriver, dbName, {
+                    rank: null,
+                    status: dbDriver.driving_status,
+                    latitude,
+                    longitude,
+                    online_status: dbDriver.online_status,
+                }));
+            }
+        }
+        gpsStats.persisted += 1;
+    } catch (dbErr) {
+        gpsStats.dbErrors += 1;
+        console.error("Driver location DB persist error:", dbErr.message);
+    }
+};
+
+const driverLocationPersistCoalescer = createLatestPerKeyCoalescer({
+    persist: persistDriverLocationSnapshot,
+    maxConcurrent: GPS_PERSIST_CONCURRENCY,
+    onCoalesced: () => {
+        gpsStats.coalescedPersist += 1;
+    },
+    onPendingPersisted: () => {
+        gpsStats.pendingPersisted += 1;
+    },
+    onError: (error) => {
+        gpsStats.dbErrors += 1;
+        console.error("Driver location persist scheduler error:", error.message);
+    },
+});
+
+const scheduleDriverLocationPersist = (snapshot) => {
+    driverLocationPersistCoalescer.schedule(snapshot.runtimeKey, snapshot);
 };
 
 const clearAutoDispatchSession = (bookingIdInt) => {
@@ -818,8 +1146,76 @@ const notifyPlotQueueChanged = async (database, plotId, bookingId = null) => {
     await waitingQueue.broadcastAllPlotRankUpdates(database, bookingId);
 };
 
+const fullQueueBroadcastInFlight = new Set();
+const fullQueueBroadcastPending = new Map();
+const fullQueueBroadcastTimers = new Map();
+const fullQueueLastBroadcastAt = new Map();
+
+const runFullQueueBroadcast = async (database, bookingId = null) => {
+    const dbName = toTenantSocketName(database);
+    if (!dbName) return null;
+
+    fullQueueBroadcastInFlight.add(dbName);
+    queueBroadcastStats.executed += 1;
+    try {
+        return await waitingQueue.broadcastAllPlotRankUpdates(dbName, bookingId);
+    } catch (error) {
+        queueBroadcastStats.errors += 1;
+        console.error("[WaitingQueue] Full broadcast error:", error.message);
+        return null;
+    } finally {
+        fullQueueBroadcastInFlight.delete(dbName);
+        fullQueueLastBroadcastAt.set(dbName, Date.now());
+
+        const pendingBookingId = fullQueueBroadcastPending.get(dbName);
+        if (fullQueueBroadcastPending.has(dbName)) {
+            fullQueueBroadcastPending.delete(dbName);
+            setTimeout(() => {
+                runFullQueueBroadcast(dbName, pendingBookingId).catch((error) => {
+                    queueBroadcastStats.errors += 1;
+                    console.error("[WaitingQueue] Pending full broadcast error:", error.message);
+                });
+            }, QUEUE_FULL_BROADCAST_COALESCE_MS);
+        }
+    }
+};
+
 const broadcastFullQueueToDrivers = async (database, bookingId = null) => {
-    await waitingQueue.broadcastAllPlotRankUpdates(database, bookingId);
+    const dbName = toTenantSocketName(database);
+    if (!dbName) return null;
+
+    queueBroadcastStats.requested += 1;
+
+    if (fullQueueBroadcastInFlight.has(dbName)) {
+        queueBroadcastStats.coalesced += 1;
+        fullQueueBroadcastPending.set(dbName, bookingId || fullQueueBroadcastPending.get(dbName) || null);
+        return null;
+    }
+
+    if (fullQueueBroadcastTimers.has(dbName)) {
+        queueBroadcastStats.coalesced += 1;
+        fullQueueBroadcastPending.set(dbName, bookingId || fullQueueBroadcastPending.get(dbName) || null);
+        return null;
+    }
+
+    const lastBroadcastAt = fullQueueLastBroadcastAt.get(dbName) || 0;
+    const delayMs = Math.max(0, QUEUE_FULL_BROADCAST_COALESCE_MS - (Date.now() - lastBroadcastAt));
+    if (delayMs > 0) {
+        queueBroadcastStats.coalesced += 1;
+        fullQueueBroadcastPending.set(dbName, bookingId || fullQueueBroadcastPending.get(dbName) || null);
+        fullQueueBroadcastTimers.set(dbName, setTimeout(() => {
+            fullQueueBroadcastTimers.delete(dbName);
+            const pendingBookingId = fullQueueBroadcastPending.get(dbName);
+            fullQueueBroadcastPending.delete(dbName);
+            runFullQueueBroadcast(dbName, pendingBookingId).catch((error) => {
+                queueBroadcastStats.errors += 1;
+                console.error("[WaitingQueue] Delayed full broadcast error:", error.message);
+            });
+        }, delayMs));
+        return null;
+    }
+
+    return runFullQueueBroadcast(dbName, bookingId);
 };
 
 const broadcastUpdatedQueue = (plotId, database, bookingId = null) => {
@@ -1689,7 +2085,7 @@ io.on("connection", (socket) => {
                 const db = getConnection(toTenantDbName(database));
 
                 const [rows] = await db.query(
-                    `SELECT d.name, d.driving_status, d.online_status, d.plot_id, p.name AS plot_name 
+                    `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name
                  FROM drivers d
                  LEFT JOIN plots p ON d.plot_id = p.id
                  WHERE d.id = ? LIMIT 1`,
@@ -1698,6 +2094,14 @@ io.on("connection", (socket) => {
 
                 if (!rows.length) return;
                 const driver = rows[0];
+                if (driverRuntimeKey) {
+                    knownDriverRuntimeKeys.add(driverRuntimeKey);
+                    driverLocationCache.set(driverRuntimeKey, {
+                        ...driver,
+                        id: driver.id || driverId,
+                        driver_id: driver.id || driverId,
+                    });
+                }
 
                 console.log(`[Connect] Driver #${driverId} online_status=${driver.online_status} driving_status=${driver.driving_status}`);
 
@@ -1748,12 +2152,19 @@ io.on("connection", (socket) => {
 
             const dbName = dataArray.database || socket.handshake.query.database;
             const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
+            const latitude = parseCoordinate(dataArray.latitude);
+            const longitude = parseCoordinate(dataArray.longitude);
+            const status = dataArray.driving_status || dataArray.status;
+            const onlineStatus = dataArray.online_status;
+            const runtimeKey = tenantSocketKey(dbName, driverIdFromData);
 
-            // if (driverIdFromData) {
-            //     driverLastLocationTime.set(driverIdFromData.toString(), Date.now());
-            // }
+            if (!dbName || !driverIdFromData || !isValidCoordinatePair(latitude, longitude)) {
+                return;
+            }
+
+            gpsStats.accepted += 1;
+
             if (driverIdFromData) {
-                const runtimeKey = tenantSocketKey(dbName, driverIdFromData);
                 const prevTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
                 const wasReconnecting = prevTime > 0
                     && (Date.now() - prevTime) > RECONNECTING_THRESHOLD_MS
@@ -1770,105 +2181,61 @@ io.on("connection", (socket) => {
                 }
             }
 
-            if (dbName && driverIdFromData) {
-                try {
-                    const db = getConnection(toTenantDbName(dbName));
-                    const status = dataArray.driving_status || dataArray.status;
+            const cachedDriver = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
+            const livePayload = normalizeDriverRealtimePayload(cachedDriver || {
+                id: driverIdFromData,
+                driver_id: driverIdFromData,
+                driving_status: status || cachedDriver?.driving_status || 'idle',
+                online_status: onlineStatus || cachedDriver?.online_status || 'online',
+            }, dbName, {
+                latitude,
+                longitude,
+                status: status || cachedDriver?.driving_status || 'idle',
+                driving_status: status || cachedDriver?.driving_status || 'idle',
+                online_status: onlineStatus || cachedDriver?.online_status || 'online',
+            });
 
-                    const onlineStatus = dataArray.online_status;
-
-                    if (status && onlineStatus) {
-                        await db.query(
-                            `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, online_status = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, status, onlineStatus, driverIdFromData]
-                        );
-                    } else if (status) {
-                        await db.query(
-                            `UPDATE drivers SET latitude = ?, longitude = ?, driving_status = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, status, driverIdFromData]
-                        );
-                    } else {
-                        await db.query(
-                            `UPDATE drivers SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?`,
-                            [dataArray.latitude, dataArray.longitude, driverIdFromData]
-                        );
-                    }
-                } catch (dbErr) {
-                    console.error("DB update error:", dbErr.message);
-                }
+            if (livePayload) {
+                scheduleLiveGpsBroadcast(dbName, driverIdFromData, livePayload);
+                gpsStats.broadcast += 1;
             }
 
-            const response = await axios.post(
-                "https://backend.cabifyit.com/api/driver/location",
-                dataArray,
-                {
-                    headers: {
-                        Authorization: `Bearer ${socket.token}`,
-                        database: `${dbName}`,
-                    }
-                }
-            );
+            const shouldPersist = shouldPersistDriverLocation({
+                runtimeKey,
+                current: { latitude, longitude },
+                status,
+                onlineStatus,
+                force: dataArray.force_persist === true || String(dataArray.force_persist || '').toLowerCase() === 'true',
+            });
 
-            const driver = response.data.driver;
-            if (driver) {
-                // Fetch real state from DB
-                const db = getConnection(toTenantDbName(dbName));
-                const [dbDriverRows] = await db.query(
-                    `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
-                            d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
-                            p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
-                     FROM drivers d
-                     LEFT JOIN plots p ON d.plot_id = p.id
-                     LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
-                     WHERE d.id = ? LIMIT 1`,
-                    [driverIdFromData]
-                );
-
-                if (dbDriverRows.length > 0) {
-                    const dbDriver = dbDriverRows[0];
-                    emitTenantRooms(dbName, "driver-location-update", normalizeDriverRealtimePayload(dbDriver, dbName, {
-                        latitude: driver.latitude ?? dbDriver.latitude,
-                        longitude: driver.longitude ?? dbDriver.longitude,
-                        status: dbDriver.driving_status || "idle",
-                    }));
-                    const isIdleAndOnline = dbDriver.driving_status === "idle" && dbDriver.online_status === "online";
-
-                    if (isIdleAndOnline) {
-                        const plotId = dbDriver.plot_id;
-                        const rank = plotId ? await getOrAssignRankForDriver(plotId, dbName, dbDriver.id) : "-";
-
-                        const eventData = normalizeDriverRealtimePayload(dbDriver, dbName, {
-                            rank: rank,
-                            status: dbDriver.driving_status,
-                            latitude: dbDriver.latitude,
-                            longitude: dbDriver.longitude,
-                            online_status: dbDriver.online_status,
-                        });
-
-                        emitTenantWaitingDriver(dbName, eventData);
-                        socket.emit("waiting-driver-event", eventData);
-
-                    } else {
-                        const plotId = dbDriver.plot_id;
-                        await removeFromQueue(dbDriver.id, dbName);
-                        if (plotId) broadcastUpdatedQueue(plotId, dbName);
-
-                        if (dbDriver.driving_status === "busy") {
-                            const eventData = normalizeDriverRealtimePayload(dbDriver, dbName, {
-                                rank: null,
-                                status: dbDriver.driving_status,
-                                latitude: dbDriver.latitude,
-                                longitude: dbDriver.longitude,
-                                online_status: dbDriver.online_status,
-                            });
-
-                            emitTenantOnJobDriver(dbName, eventData);
-                        }
-                    }
-                }
+            if (!shouldPersist) {
+                cacheDriverLocationSnapshot({
+                    runtimeKey,
+                    cachedDriver,
+                    driverId: driverIdFromData,
+                    latitude,
+                    longitude,
+                    status,
+                    onlineStatus,
+                });
+                gpsStats.skippedPersist += 1;
+                return;
             }
+
+            scheduleDriverLocationPersist({
+                dbName,
+                driverId: driverIdFromData,
+                latitude,
+                longitude,
+                status,
+                onlineStatus,
+                runtimeKey,
+                cachedDriver,
+                socket,
+                force: dataArray.force_persist === true || String(dataArray.force_persist || '').toLowerCase() === 'true',
+            });
         } catch (err) {
-            console.error("Laravel Socket error:", err.message);
+            console.error("Driver location socket error:", err.message);
         }
     });
 
@@ -2028,6 +2395,21 @@ io.on("connection", (socket) => {
         if (driverId) {
             deleteTenantSocket(driverSockets, database, driverId);
             const driverRuntimeKey = tenantSocketKey(database, driverId);
+            if (driverRuntimeKey) {
+                driverLocationCache.delete(driverRuntimeKey);
+                driverLocationPersistTime.delete(driverRuntimeKey);
+                driverLocationPersistCoalescer.clear(driverRuntimeKey);
+            }
+
+            if (driverRuntimeKey && !knownDriverRuntimeKeys.has(driverRuntimeKey)) {
+                driverLastLocationTime.delete(driverRuntimeKey);
+                if (driverDisconnectTimers.has(driverRuntimeKey)) {
+                    clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
+                    driverDisconnectTimers.delete(driverRuntimeKey);
+                }
+                console.log(`[Disconnect] Driver #${driverId} was not loaded from DB — skipping offline grace timer`);
+                return;
+            }
 
             if (driverRuntimeKey && driverDisconnectTimers.has(driverRuntimeKey)) {
                 clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
@@ -2064,6 +2446,7 @@ io.on("connection", (socket) => {
 
             const timer = setTimeout(async () => {
                 if (driverRuntimeKey) driverDisconnectTimers.delete(driverRuntimeKey);
+                if (driverRuntimeKey) knownDriverRuntimeKeys.delete(driverRuntimeKey);
 
                 if (getTenantSocket(driverSockets, database, driverId)) {
                     console.log(`[GraceTimer] Driver #${driverId} already reconnected — skip offline`);
@@ -2113,7 +2496,7 @@ io.on("connection", (socket) => {
 });
 
 app.use((req, res, next) => {
-    const databaseHeader = req.headers['database'];
+    const databaseHeader = req.headers['database'] || req.headers['x-database'];
     if (databaseHeader) {
         req.tenantDb = toTenantDbName(databaseHeader);
         console.log(`Using database: ${req.tenantDb}`);
@@ -2124,13 +2507,28 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 app.use(async (req, res, next) => {
-    if (req.tenantDb || req.method !== 'POST') {
+    if (req.tenantDb) {
+        return next();
+    }
+
+    const explicitTenant = req.body?.tenantDb
+        || req.body?.database
+        || req.body?.clientId
+        || req.query?.database
+        || req.query?.tenantDb;
+
+    if (explicitTenant) {
+        req.tenantDb = toTenantDbName(explicitTenant);
+        return next();
+    }
+
+    if (req.method !== 'POST' || process.env.SOCKET_ENABLE_TENANT_SCAN_RESOLUTION !== 'true') {
         return next();
     }
 
     const bookingId = req.body?.booking?.booking_id || req.body?.booking_id;
     if (bookingId) {
-        console.log(` to auto-resolve database for booking_id: ${bookingId}`);
+        console.warn(`[TenantResolve] Slow tenant scan enabled for booking_id: ${bookingId}`);
         const centralDb = getConnection();
         try {
             const [databases] = await centralDb.query("SHOW DATABASES LIKE 'tenant%'");
@@ -3582,6 +3980,75 @@ app.get("/debug/dispatch-check", async (req, res) => {
     }
 });
 
+const hasValidInternalAuth = (req) => {
+    const expected = process.env.NODE_INTERNAL_SECRET;
+    if (!expected) return true;
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : header;
+    return token === expected;
+};
+
+app.get("/socket-health", (req, res) => {
+    if (!hasValidInternalAuth(req)) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const locationPersistStats = driverLocationPersistCoalescer.stats();
+    return res.json({
+        success: true,
+        sockets: {
+            drivers: driverSockets.size,
+            users: userSockets.size,
+            dispatchers: dispatcherSockets.size,
+            clients: clientSockets.size,
+            admins: adminSockets.size,
+            total: driverSockets.size + userSockets.size + dispatcherSockets.size + clientSockets.size + adminSockets.size,
+        },
+        runtime: {
+            driverLastLocationEntries: driverLastLocationTime.size,
+            driverDisconnectTimers: driverDisconnectTimers.size,
+            knownDriverRuntimeKeys: knownDriverRuntimeKeys.size,
+            driverLocationCacheEntries: driverLocationCache.size,
+            driverLocationPersistInFlight: locationPersistStats.inFlight,
+            driverLocationPendingPersist: locationPersistStats.pending,
+            driverLocationQueuedPersist: locationPersistStats.queued,
+            plotQueueCount: plotDriverQueues.size,
+            plotPolygonCacheEntries: plotPolygonCache.size,
+            memory: process.memoryUsage(),
+            uptimeSeconds: process.uptime(),
+        },
+        gps: {
+            ...gpsStats,
+            idlePersistMs: GPS_IDLE_PERSIST_MS,
+            activePersistMs: GPS_ACTIVE_PERSIST_MS,
+            persistConcurrency: GPS_PERSIST_CONCURRENCY,
+            idleMinMovementMeters: GPS_IDLE_MIN_MOVEMENT_METERS,
+            activeMinMovementMeters: GPS_ACTIVE_MIN_MOVEMENT_METERS,
+            liveBroadcastFlushMs: GPS_LIVE_BROADCAST_FLUSH_MS,
+        },
+        liveGpsBroadcast: {
+            ...liveGpsBroadcastStats,
+            pendingTenants: pendingLiveGpsBroadcasts.size,
+            pendingDrivers: Array.from(pendingLiveGpsBroadcasts.values())
+                .reduce((total, pending) => total + pending.size, 0),
+            timers: liveGpsBroadcastTimers.size,
+        },
+        queueBroadcast: {
+            ...queueBroadcastStats,
+            fullBroadcastInFlight: fullQueueBroadcastInFlight.size,
+            fullBroadcastPending: fullQueueBroadcastPending.size,
+            fullBroadcastTimers: fullQueueBroadcastTimers.size,
+            fullBroadcastCoalesceMs: QUEUE_FULL_BROADCAST_COALESCE_MS,
+        },
+        server: {
+            listenBacklog: SOCKET_LISTEN_BACKLOG,
+            pingIntervalMs: SOCKET_PING_INTERVAL_MS,
+            pingTimeoutMs: SOCKET_PING_TIMEOUT_MS,
+        },
+        db: getPoolStats(),
+    });
+});
+
 app.get("/debug/tokens", async (req, res) => {
     try {
         const { database, limit = 100 } = req.query;
@@ -4913,7 +5380,13 @@ app.post("/driver-force-logout", async (req, res) => {
 
         await removeFromQueue(driverId, dbName);
         const driverRuntimeKey = tenantSocketKey(dbName, driverIdStr);
-        if (driverRuntimeKey) driverLastLocationTime.delete(driverRuntimeKey);
+        if (driverRuntimeKey) {
+            driverLastLocationTime.delete(driverRuntimeKey);
+            knownDriverRuntimeKeys.delete(driverRuntimeKey);
+            driverLocationCache.delete(driverRuntimeKey);
+            driverLocationPersistTime.delete(driverRuntimeKey);
+            driverLocationPersistCoalescer.clear(driverRuntimeKey);
+        }
 
         if (driverRuntimeKey && driverDisconnectTimers.has(driverRuntimeKey)) {
             clearTimeout(driverDisconnectTimers.get(driverRuntimeKey));
@@ -6694,6 +7167,6 @@ setInterval(async () => {
     }
 }, 10 * 1000)
 
-server.listen(3001, "0.0.0.0", () => {
-    console.log("🚀 Socket server running on port 3001");
+server.listen(3001, "0.0.0.0", SOCKET_LISTEN_BACKLOG, () => {
+    console.log(`🚀 Socket server running on port 3001 (backlog ${SOCKET_LISTEN_BACKLOG})`);
 });
