@@ -352,6 +352,10 @@ class AuthController extends Controller
         $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
         $user->save();
 
+        if (!$this->driverEmailVerified($user)) {
+            return $this->sendOtpRequiredResponse($user, $request);
+        }
+
         $token = JWTAuth::fromUser($user);
 
         $profileData = $this->formatDriverProfileData($user);
@@ -912,15 +916,6 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            $status = strtolower((string) ($driver->status ?? 'pending'));
-            $approvedStatuses = ['accepted', 'approved', 'active'];
-            if (!in_array($status, $approvedStatuses, true)) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Driver is not approved by Company Admin',
-                ], 400);
-            }
-
             $newToken = auth('driver')
                 ->claims(['auth_version' => (int) ($driver->auth_version ?? 0)])
                 ->setToken($token)
@@ -991,6 +986,10 @@ class AuthController extends Controller
             $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
             $user->save();
 
+            if (!$this->driverEmailVerified($user)) {
+                return $this->sendOtpRequiredResponse($user, $request);
+            }
+
             $token = JWTAuth::fromUser($user);
 
             $profileData = $this->formatDriverProfileData($user);
@@ -1019,7 +1018,14 @@ class AuthController extends Controller
                 'otp' => 'required'
             ]);   
 
-            $user = CompanyDriver::where('phone_no', $request->phone)->where('country_code', $request->country_code)->first();
+            $userQuery = CompanyDriver::where('phone_no', $request->phone)
+                ->where('country_code', $request->country_code);
+
+            if ($request->filled('email')) {
+                $userQuery->where('email', $request->email);
+            }
+
+            $user = $userQuery->first();
 
             if(!isset($user) || $user == NULL){
                 return response()->json([
@@ -1181,6 +1187,34 @@ class AuthController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function driverEmailVerified(CompanyDriver $user): bool
+    {
+        return (bool) ($user->email_verified ?? false);
+    }
+
+    private function sendOtpRequiredResponse(CompanyDriver $user, Request $request)
+    {
+        if (!filled($user->email)) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Email address is required to send OTP.',
+            ], 400);
+        }
+
+        $this->finalizeDriverRegistration($user, $request);
+        $profileData = $this->formatDriverProfileData($user->fresh());
+
+        return response()->json([
+            'success' => 1,
+            'requiresOtp' => true,
+            'requires_otp' => true,
+            'email_verified' => false,
+            'message' => 'OTP sent to email. Please verify your account.',
+            'data' => $profileData,
+            'user' => $profileData,
+        ]);
     }
 
     public function getProfile(Request $request){

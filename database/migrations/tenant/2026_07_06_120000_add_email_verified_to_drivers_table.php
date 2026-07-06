@@ -12,8 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('drivers', function (Blueprint $table) {
-            $table->boolean('email_verified')->default(false)->after('email');
-            $table->timestamp('email_verified_at')->nullable()->after('email_verified');
+            if (!Schema::hasColumn('drivers', 'email_verified')) {
+                $table->boolean('email_verified')->default(false)->after('email');
+            }
+
+            if (!Schema::hasColumn('drivers', 'email_verified_at')) {
+                $table->timestamp('email_verified_at')->nullable()->after('email_verified');
+            }
         });
     }
 
@@ -23,10 +28,13 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('drivers', function (Blueprint $table) {
-            $table->dropColumn([
-                'email_verified',
-                'email_verified_at',
-            ]);
+            if (Schema::hasColumn('drivers', 'email_verified')) {
+                $table->dropColumn('email_verified');
+            }
+
+            if (Schema::hasColumn('drivers', 'email_verified_at')) {
+                $table->dropColumn('email_verified_at');
+            }
         });
     }
 };
