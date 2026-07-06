@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\CompanyTicket;
 use App\Models\CompanyDriver;
 use App\Models\CompanyUser;
+use App\Models\CompanyRider;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanySetting;
 use App\Models\Setting;
@@ -37,6 +38,8 @@ class TicketController extends Controller
 
                 if ($ticket->user_type === "driver") {
                     $user = CompanyDriver::find($ticket->user_id);
+                } elseif ($ticket->user_type === "rider" || $ticket->user_type === "user") {
+                    $user = CompanyRider::find($ticket->user_id);
                 } else {
                     $user = CompanyUser::find($ticket->user_id);
                 }
@@ -91,7 +94,13 @@ class TicketController extends Controller
                     FCMService::sendToDevice(
                         $token->fcm_token,
                         $title,
-                        $body
+                        $body,
+                        [
+                            'type' => 'ticket_status_changed',
+                            'ticket_id' => $ticket->id,
+                            'ticket_reference' => $ticket->ticket_id,
+                            'notification_target' => 'ticket',
+                        ]
                     );
                 }
             }
@@ -148,7 +157,13 @@ class TicketController extends Controller
                     FCMService::sendToDevice(
                         $token->fcm_token,
                         $title,
-                        $body
+                        $body,
+                        [
+                            'type' => 'ticket_reply',
+                            'ticket_id' => $ticket->id,
+                            'ticket_reference' => $ticket->ticket_id,
+                            'notification_target' => 'ticket',
+                        ]
                     );
                 }
             }

@@ -555,8 +555,34 @@ class DriverController extends Controller
             ]);
 
             $driver = CompanyDriver::where("id", $request->id)->first();
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found'
+                ], 404);
+            }
             $driver->status = $request->status;
             $driver->save();
+
+            $normalizedStatus = strtolower((string) $request->status);
+            $statusLabel = match ($normalizedStatus) {
+                'accepted', 'approved', 'active' => 'approved',
+                'rejected', 'blocked', 'inactive' => $normalizedStatus,
+                default => $normalizedStatus,
+            };
+            $title = 'Driver Account Status Updated';
+            $message = $statusLabel === 'approved'
+                ? 'Your driver account has been approved.'
+                : "Your driver account status has been updated to {$statusLabel}.";
+
+            $this->notifyDriverLifecycle(
+                $request,
+                $driver,
+                $title,
+                $message,
+                'driver_status',
+                ['status' => $normalizedStatus]
+            );
 
             return response()->json([
                 'success' => 1,
@@ -579,8 +605,27 @@ class DriverController extends Controller
             ]);
 
             $driver = CompanyDriver::where("id", $request->id)->first();
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found'
+                ], 404);
+            }
             $driver->wallet_balance += $request->amount;
             $driver->save();
+
+            $amount = number_format((float) $request->amount, 2, '.', '');
+            $this->notifyDriverLifecycle(
+                $request,
+                $driver,
+                'Wallet Updated',
+                "Your wallet has been credited with {$amount}.",
+                'wallet_update',
+                [
+                    'amount' => $amount,
+                    'wallet_balance' => (string) $driver->wallet_balance,
+                ]
+            );
 
             $settingData = CompanySetting::orderBy("id", "DESC")->first();
 
@@ -1178,6 +1223,51 @@ class DriverController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function notifyDriverLifecycle(
+        Request $request,
+        CompanyDriver $driver,
+        string $title,
+        string $message,
+        string $type,
+        array $data = []
+    ): void {
+        $record = new CompanyNotification;
+        $record->user_type = 'driver';
+        $record->user_id = $driver->id;
+        $record->title = $title;
+        $record->message = $message;
+        $record->status = 'unread';
+        $record->save();
+
+        $dataCheck = (new TenantUser)
+            ->setConnection('central')
+            ->where('id', $request->header('database'))
+            ->first();
+
+        $pushEnabled = !isset($dataCheck) || ($dataCheck->data['push_notification'] ?? 'enable') === 'enable';
+        if (!$pushEnabled) {
+            return;
+        }
+
+        $payload = array_merge($data, [
+            'type' => $type,
+            'driver_id' => (string) $driver->id,
+            'notification_id' => (string) $record->id,
+        ]);
+
+        $tokens = CompanyToken::where('user_id', $driver->id)
+            ->where('user_type', 'driver')
+            ->pluck('fcm_token');
+
+        if ($driver->fcm_token) {
+            $tokens->prepend($driver->fcm_token);
+        }
+
+        foreach ($tokens->unique()->filter() as $token) {
+            FCMService::sendToDevice($token, $title, $message, $payload);
         }
     }
 

@@ -240,6 +240,10 @@ class BookingController extends Controller
                 ], 403);
             }
             $vehicle = VehicleType::where("id", auth("driver")->user()->vehicle_type)->first();
+            $vehicleTypeName = $vehicle?->vehicle_type_name
+                ?? auth("driver")->user()->vehicle_name
+                ?? $booking?->vehicle
+                ?? '';
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
@@ -251,7 +255,7 @@ class BookingController extends Controller
                             'driver_name' => auth("driver")->user()->name,
                             'profile_image' => auth("driver")->user()->profile_image,
                             'vehicle_name' => auth("driver")->user()->vehicle_name,
-                            'vehicle_type' => $vehicle->vehicle_type_name,
+                            'vehicle_type' => $vehicleTypeName,
                             'rating' => auth("driver")->user()->rating,
                             'bid_id' => $newBid->id
                         ]

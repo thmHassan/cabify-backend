@@ -638,15 +638,22 @@ class SettingController extends Controller
                     }
                 }
             }
+            if ($driver?->plot_id && $rank !== null && $currentPlotDriverCount < 1) {
+                $currentPlotDriverCount = 1;
+            }
 
-            $plotRows = $plots->map(function ($plot) use ($driversByPlot, $driver) {
+            $plotRows = $plots->map(function ($plot) use ($driversByPlot, $driver, $currentPlotDriverCount) {
                 $driverCount = $driversByPlot->get((string) $plot->id, collect())->count();
+                $isCurrent = $driver && (string) $driver->plot_id === (string) $plot->id;
+                if ($isCurrent && $currentPlotDriverCount > $driverCount) {
+                    $driverCount = $currentPlotDriverCount;
+                }
                 return [
                     "id" => $plot->id,
                     "name" => $plot->name,
                     "plot_name" => $plot->name,
                     "driver_count" => $driverCount,
-                    "is_current" => $driver && (string) $driver->plot_id === (string) $plot->id,
+                    "is_current" => $isCurrent,
                 ];
             })->values();
 
