@@ -28,6 +28,7 @@ use App\Http\Controllers\Company\BookingController;
 use App\Http\Controllers\Company\RatingController;
 use App\Http\Controllers\Company\LostFoundController;
 use App\Http\Controllers\Company\RevenueFinanceController;
+use App\Http\Controllers\Company\FinanceController;
 use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
@@ -287,6 +288,32 @@ Route::group(['middleware' => ['tenant.db', 'auth.tenant.jwt']], function () {
     Route::get('/company/list-account', [AccountController::class, 'listAccount']);
     Route::get('/company/account-ride-history', [AccountController::class, 'accountRideHistory']);
     Route::post('/company/collect-account-amount', [AccountController::class, 'collectAccountAmount']);
+
+    Route::prefix('/company/finance')->group(function () {
+        Route::get('/summary', [FinanceController::class, 'summary']);
+        Route::get('/accounts', [FinanceController::class, 'accounts']);
+        Route::post('/accounts', [FinanceController::class, 'storeAccount']);
+        Route::get('/accounts/{id}', [FinanceController::class, 'account'])->whereNumber('id');
+        Route::post('/accounts/{id}', [FinanceController::class, 'updateAccount'])->whereNumber('id');
+        Route::get('/accounts/{id}/ledger', [FinanceController::class, 'accountLedger'])->whereNumber('id');
+        Route::get('/payments', [FinanceController::class, 'payments']);
+        Route::post('/payments', [FinanceController::class, 'storePayment']);
+        Route::get('/rides', [FinanceController::class, 'rides']);
+        Route::get('/drivers', [FinanceController::class, 'drivers']);
+        Route::get('/drivers/{id}', [FinanceController::class, 'driverDetail'])->whereNumber('id');
+        Route::get('/packages', [FinanceController::class, 'packages']);
+        Route::get('/statements', [FinanceController::class, 'statements']);
+        Route::post('/statements', [FinanceController::class, 'storeStatement']);
+        Route::get('/statements/{id}', [FinanceController::class, 'showStatement'])->whereNumber('id');
+        Route::post('/statements/{id}/send', [FinanceController::class, 'sendStatement'])->whereNumber('id');
+        Route::post('/statements/{id}/collect', [FinanceController::class, 'collectStatement'])->whereNumber('id');
+        Route::post('/statements/{id}/void', [FinanceController::class, 'voidStatement'])->whereNumber('id');
+        Route::get('/settlements', [FinanceController::class, 'settlements']);
+        Route::post('/settlements', [FinanceController::class, 'storeSettlement']);
+        Route::get('/settlements/{id}', [FinanceController::class, 'showSettlement'])->whereNumber('id');
+        Route::post('/settlements/{id}/mark-settled', [FinanceController::class, 'markSettlementSettled'])->whereNumber('id');
+        Route::post('/settlements/{id}/void', [FinanceController::class, 'voidSettlement'])->whereNumber('id');
+    });
 
     Route::get('/company/list-ticket', [TicketController::class, 'listTicket']);
     Route::post('/company/change-ticket-status', [TicketController::class, 'changeTicketStatus']);

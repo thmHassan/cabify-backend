@@ -14,10 +14,13 @@ class DriverPackage extends Model
      protected $fillable = [
         'driver_id',
         'package_type',
+        'pending_rides',
         'start_date',
         'expire_date',
+        'commission_per',
         'post_paid_amount',
         'package_top_up_id',
         'package_top_up_name',
+        'package_top_up_amount',
     ];
 }

@@ -20,6 +20,21 @@ class BookingDateClassificationService
         });
     }
 
+    private function applyUnreleasedScheduledFilter(Builder $query): Builder
+    {
+        return $query
+            ->where(function (Builder $inner) {
+                $inner
+                    ->where('pickup_time_type', 'time')
+                    ->orWhere('is_scheduled', true);
+            })
+            ->where(function (Builder $inner) {
+                $inner
+                    ->whereNull('dispatch_released')
+                    ->orWhere('dispatch_released', false);
+            });
+    }
+
     public function normalizeMultiDays($multiDays): array
     {
         if (is_array($multiDays)) {
@@ -89,13 +104,9 @@ class BookingDateClassificationService
                             ->orWhereNotIn('booking_status', self::TERMINAL_STATUSES);
                     });
             case 'pre_bookings':
-                return $query
-                    ->whereDate('booking_date', '>', Carbon::today())
-                    ->where(function (Builder $inner) {
-                        $inner
-                            ->whereNull('booking_status')
-                            ->orWhereNotIn('booking_status', self::TERMINAL_STATUSES);
-                    });
+                return $this->applyUnreleasedScheduledFilter(
+                    $this->applyNonTerminalFilter($query->whereDate('booking_date', '>', Carbon::today()))
+                );
             case 'completed':
                 return $query->where('booking_status', 'completed');
             case 'no_show':
@@ -119,7 +130,7 @@ class BookingDateClassificationService
                 (clone $query)->whereDate('booking_date', $today)
             )->count(),
             'preBookings' => $this->applyNonTerminalFilter(
-                (clone $query)->whereDate('booking_date', '>', $today)
+                $this->applyUnreleasedScheduledFilter((clone $query)->whereDate('booking_date', '>', $today))
             )->count(),
             'completed' => (clone $query)->where('booking_status', 'completed')->count(),
             'noShow' => (clone $query)->where('booking_status', 'no_show')->count(),

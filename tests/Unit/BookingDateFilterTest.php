@@ -6,6 +6,7 @@ use App\Models\CompanyBooking;
 use App\Services\BookingDateClassificationService;
 use Carbon\Carbon;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -19,6 +20,11 @@ class BookingDateFilterTest extends TestCase
         parent::setUp();
         $this->service = new BookingDateClassificationService();
         Carbon::setTestNow(Carbon::parse('2025-06-11 09:00:00'));
+
+        Config::set('database.default', 'sqlite');
+        Config::set('database.connections.sqlite.database', ':memory:');
+        DB::purge('sqlite');
+        DB::connection('sqlite')->getPdo();
 
         Schema::dropIfExists('bookings');
         Schema::create('bookings', function (Blueprint $table) {
