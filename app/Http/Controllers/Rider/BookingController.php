@@ -735,34 +735,39 @@ class BookingController extends Controller
                 $booking->cancelled_by = 'user';
                 $booking->save();
 
-                $driver = CompanyDriver::where("id", $booking->driver)->first();
-                $driver->driving_status = "idle";
-                $driver->save();
+                $driver = $booking->driver
+                    ? CompanyDriver::where("id", $booking->driver)->first()
+                    : null;
 
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-                    'database' => $request->header('database'),
-                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-driver-ride-status', [
-                    'driverId' => $booking->driver,
-                    'status' => "cancel_confirm_ride",
-                    'booking' => [
-                        'id' => $booking->id,
-                        'booking_id' => $booking->booking_id,
-                        'pickup_point' => $booking->pickup_point,
-                        'destination_point' => $booking->destination_point,
-                        'offered_amount' => $booking->offered_amount,
-                        'distance' => $booking->distance,
-                        'type' => 'auto_dispatch_plot',
-                        'cancelled_by' => 'user'
-                    ]
-                ]);
+                if ($driver) {
+                    $driver->driving_status = "idle";
+                    $driver->save();
+
+                    Http::withHeaders([
+                        'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                        'database' => $request->header('database'),
+                    ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/change-driver-ride-status', [
+                        'driverId' => $booking->driver,
+                        'status' => "cancel_confirm_ride",
+                        'booking' => [
+                            'id' => $booking->id,
+                            'booking_id' => $booking->booking_id,
+                            'pickup_point' => $booking->pickup_point,
+                            'destination_point' => $booking->destination_point,
+                            'offered_amount' => $booking->offered_amount,
+                            'distance' => $booking->distance,
+                            'type' => 'auto_dispatch_plot',
+                            'cancelled_by' => 'user'
+                        ]
+                    ]);
+                }
 
                 $dataCheck = (new TenantUser)
                 ->setConnection('central')
                 ->where("id", $request->header('database'))
                 ->first();
 
-                if(isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
+                if($driver && isset($dataCheck) && $dataCheck->data['push_notification'] == "enable"){
                     $notification = new CompanyNotification;
                     $notification->user_type = "driver";
                     $notification->user_id = $booking->driver;
@@ -787,24 +792,28 @@ class BookingController extends Controller
                 }
             }
 
-            $driver = CompanyDriver::where("id", $booking->driver)->first();
+            $driver = isset($driver)
+                ? $driver
+                : ($booking?->driver ? CompanyDriver::where("id", $booking->driver)->first() : null);
             $companySetting = CompanySetting::orderBy("id", "DESC")->first();
-            if ($companySetting->package_type == "ride_count_price") {
+            if ($driver && $companySetting && $companySetting->package_type == "ride_count_price") {
                 $driver->ride_count_price += 1;
                 $driver->save();
             }
-            if ($companySetting->package_type == "per_ride_commission_topup") {
+            if ($driver && $companySetting && $companySetting->package_type == "per_ride_commission_topup") {
                 $checkAmount = $companySetting->package_amount;
                 $driver->wallet_balance += $checkAmount;
                 $driver->save();
             }
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-                'database' => $request->header('database'),
-            ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
-                'clientId' => $request->header('database'),
-                'driver_id' => $booking->driver,
-            ]);
+            if ($driver) {
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    'database' => $request->header('database'),
+                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/waiting-driver', [
+                    'clientId' => $request->header('database'),
+                    'driver_id' => $booking->driver,
+                ]);
+            }
 
             return response()->json([
                 'success' => 1,
