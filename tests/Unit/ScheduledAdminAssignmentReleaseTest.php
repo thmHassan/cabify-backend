@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Http\Controllers\Driver\BookingController;
 use App\Models\CompanyBooking;
 use App\Services\BookingDispatchService;
 use App\Services\DuePreBookingReleaseService;
@@ -10,6 +11,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use ReflectionClass;
 use Tests\TestCase;
 
 class ScheduledAdminAssignmentReleaseTest extends TestCase
@@ -113,6 +115,49 @@ class ScheduledAdminAssignmentReleaseTest extends TestCase
         $this->assertNull($booking->pending_driver_id);
         $this->assertSame('pending', $booking->booking_status);
         $this->assertSame(15, (int) $booking->driver);
+    }
+
+    public function test_assigned_offer_filter_excludes_accepted_scheduled_upcoming_jobs(): void
+    {
+        $acceptedScheduledId = $this->insertScheduledBooking([
+            'driver' => 15,
+            'pending_driver_id' => null,
+            'dispatch_released' => true,
+            'dispatcher_action' => 'Manual assignment accepted by driver #15',
+        ]);
+        $pendingScheduledOfferId = $this->insertScheduledBooking([
+            'pending_driver_id' => 15,
+            'dispatcher_action' => 'Created by Dispatcher. Driver selected - scheduled for release at 08 Jul 11:30.',
+        ]);
+        $legacyImmediateOfferId = $this->insertScheduledBooking([
+            'driver' => 15,
+            'pickup_time_type' => 'asap',
+            'is_scheduled' => false,
+            'dispatch_released' => false,
+            'dispatcher_action' => 'Created by Dispatcher. Driver selected - dispatching now.',
+        ]);
+
+        $assignedOfferQuery = CompanyBooking::where('booking_status', 'pending');
+        $this->applyUpcomingRideDriverFilter($assignedOfferQuery, 15, true);
+        $assignedOfferIds = $assignedOfferQuery->pluck('id')->all();
+
+        $normalUpcomingQuery = CompanyBooking::where('booking_status', 'pending');
+        $this->applyUpcomingRideDriverFilter($normalUpcomingQuery, 15, false);
+        $normalUpcomingIds = $normalUpcomingQuery->pluck('id')->all();
+
+        $this->assertNotContains($acceptedScheduledId, $assignedOfferIds);
+        $this->assertContains($pendingScheduledOfferId, $assignedOfferIds);
+        $this->assertContains($legacyImmediateOfferId, $assignedOfferIds);
+        $this->assertContains($acceptedScheduledId, $normalUpcomingIds);
+    }
+
+    private function applyUpcomingRideDriverFilter($query, int $driverId, bool $includeAssignedOffers): void
+    {
+        $controller = new BookingController();
+        $method = (new ReflectionClass($controller))->getMethod('applyUpcomingRideDriverFilter');
+        $method->setAccessible(true);
+
+        $method->invoke($controller, $query, $driverId, $includeAssignedOffers);
     }
 
     private function insertScheduledBooking(array $overrides = []): int

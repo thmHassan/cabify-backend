@@ -78,14 +78,8 @@ class BookingController extends Controller
             $driverId = auth('driver')->user()->id;
             $includeAssignedOffers = filter_var($request->query('assigned_offers', false), FILTER_VALIDATE_BOOLEAN);
 
-            $query = CompanyBooking::where("booking_status", "pending")
-                ->where(function ($q) use ($driverId, $includeAssignedOffers) {
-                    $q->where("driver", $driverId);
-
-                    if ($includeAssignedOffers) {
-                        $q->orWhere("pending_driver_id", $driverId);
-                    }
-                });
+            $query = CompanyBooking::where("booking_status", "pending");
+            $this->applyUpcomingRideDriverFilter($query, $driverId, $includeAssignedOffers);
             if (isset($request->date) && $request->date != NULL) {
                 $query->whereDate("booking_date", $request->date);
             }
@@ -102,6 +96,29 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ], 400);
         }
+    }
+
+    private function applyUpcomingRideDriverFilter($query, int $driverId, bool $includeAssignedOffers): void
+    {
+        if (!$includeAssignedOffers) {
+            $query->where("driver", $driverId);
+            return;
+        }
+
+        $query->where(function ($q) use ($driverId) {
+            $q->where("pending_driver_id", $driverId)
+                ->orWhere(function ($legacy) use ($driverId) {
+                    $legacy->where("driver", $driverId)
+                        ->where(function ($decision) {
+                            $decision->whereNull("pickup_time_type")
+                                ->orWhere("pickup_time_type", "!=", "time")
+                                ->orWhereNull("is_scheduled")
+                                ->orWhere("is_scheduled", false)
+                                ->orWhereNull("dispatch_released")
+                                ->orWhere("dispatch_released", false);
+                        });
+                });
+        });
     }
 
     public function rateRide(Request $request)
