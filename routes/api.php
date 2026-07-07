@@ -469,6 +469,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/current-ride', [RiderBookingController::class, 'currentRide']);
         Route::post('/rider/rate-ride', [RiderBookingController::class, 'rateRide']);
         Route::post('/rider/get-plot', [RiderBookingController::class, 'getPlot']);
+        Route::get('/rider/mapify-search', [MapifyMapController::class, 'search']);
+        Route::get('/rider/mapify-geocoding', [MapifyMapController::class, 'geocoding']);
+        Route::get('/rider/mapify-reverse-geocoding', [MapifyMapController::class, 'reverseGeocoding']);
         Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);
         Route::get('/rider/list-bids', [RiderBookingController::class, 'listBids']);
         Route::post('/rider/change-bid-status', [RiderBookingController::class, 'changeBidStatus']);
