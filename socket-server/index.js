@@ -17,6 +17,12 @@ const { sendToDevice, sendNotificationToDriver, sendNotificationToUser } = requi
 const { getBookingConfirmationEmail } = require("./utils/Emailtemplate");
 const { PLOT_DISPATCH_ACTIVE_PREFIX } = require("./plotDispatchService");
 const { createWaitingQueueService, pointInPolygon } = require("./waitingQueueService");
+const {
+    normalizeDistanceUnit,
+    buildDistanceDisplayFieldsFromKm,
+    buildDistanceDisplayFieldsFromMeters,
+    driverRankSupported,
+} = require("./dispatchPayloadHelpers");
 
 const app = express();
 
@@ -656,6 +662,28 @@ const isTruthyDbValue = (value) => (
     || String(value || '').toLowerCase() === 'true'
 );
 
+const getTenantDistanceUnit = async (dbName) => {
+    try {
+        const centralDb = getConnection();
+        const [rows] = await centralDb.query('SELECT data FROM tenants WHERE id = ? LIMIT 1', [dbName]);
+        const rawData = rows?.[0]?.data;
+        const data = typeof rawData === 'string' ? JSON.parse(rawData || '{}') : (rawData || {});
+        return normalizeDistanceUnit(data?.units);
+    } catch (error) {
+        console.warn('[Distance] Unable to resolve tenant unit, using km:', error.message);
+        return 'km';
+    }
+};
+
+const attachBookingDistanceDisplay = async (dbName, booking) => {
+    if (!booking || typeof booking !== 'object') return booking;
+    const unit = await getTenantDistanceUnit(dbName);
+    return {
+        ...booking,
+        ...buildDistanceDisplayFieldsFromMeters(booking.distance, unit),
+    };
+};
+
 const nearestDriverBiddingFallbackEnabled = async (db, booking) => {
     if (isTruthyDbValue(booking?.bidding_fallback)) {
         return true;
@@ -779,10 +807,13 @@ const fetchBiddingFallbackDrivers = async (db, booking) => {
 
 const notifyBiddingFallbackDrivers = async (db, dbName, booking) => {
     const driverIds = await fetchBiddingFallbackDrivers(db, booking);
+    const enrichedBooking = await attachBookingDistanceDisplay(dbName, booking);
     const payload = {
-        ...booking,
+        ...enrichedBooking,
         fixed_fare: true,
         assignment_type: 'fixed_fare_bidding',
+        booking_system: 'bidding',
+        bidding_fallback: 1,
     };
 
     for (const driverId of driverIds) {
@@ -802,8 +833,12 @@ const notifyBiddingFallbackDrivers = async (db, dbName, booking) => {
         if (socketId) {
             io.to(socketId).emit('new-ride-request', {
                 booking_id: booking.id,
+                assignment_type: 'fixed_fare_bidding',
+                fixed_fare: true,
+                bidding_fallback: true,
                 message: 'You have a new ride request',
                 booking: payload,
+                ...buildDistanceDisplayFieldsFromMeters(booking.distance, payload.distance_unit),
             });
         }
 
@@ -967,12 +1002,16 @@ const fallbackNearestDispatchToBidding = async ({ bookingIdInt, tenantDb, db, db
         return;
     }
 
+    updatedBooking = await attachBookingDistanceDisplay(dbName, updatedBooking);
     const driverCount = await notifyBiddingFallbackDrivers(db, dbName, updatedBooking);
     const payload = {
         booking_id: bookingIdInt,
         message,
         booking: updatedBooking,
         fallback: 'bidding',
+        assignment_type: 'fixed_fare_bidding',
+        fixed_fare: true,
+        bidding_fallback: true,
         driver_count: driverCount,
     };
 
@@ -1917,6 +1956,11 @@ const nearestDriverDispatch = async ({
 
         const driver = nearestDrivers[driverIndex];
         const distanceKm = parseFloat(driver.distance || 0).toFixed(2);
+        const distanceUnit = await getTenantDistanceUnit(dbName);
+        const distanceDisplay = buildDistanceDisplayFieldsFromKm(distanceKm, distanceUnit);
+        const distanceLabel = distanceDisplay.distance_value == null
+            ? `${distanceKm}km`
+            : `${distanceDisplay.distance_value}${distanceDisplay.distance_unit === 'miles' ? 'mi' : 'km'}`;
         console.log(
             `[NearestDispatch] Offering to driver #${driver.id} "${driver.name}" (${distanceKm}km away, index=${driverIndex})`
         );
@@ -1940,9 +1984,13 @@ const nearestDriverDispatch = async ({
             io.to(driverSocketId).emit('new-ride-request', {
                 booking_id: updatedBooking.id,
                 assignment_type: 'nearest_dispatch',
-                message: `You have a new ride request (${distanceKm}km from your location)`,
-                booking: updatedBooking,
+                message: `You have a new ride request (${distanceLabel} from your location)`,
+                booking: {
+                    ...updatedBooking,
+                    ...distanceDisplay,
+                },
                 distance_km: distanceKm,
+                ...distanceDisplay,
                 search_radius: searchRadius,
                 expires_in_seconds: dispatchTimeoutSeconds,
             });
@@ -2040,7 +2088,7 @@ const nearestDriverDispatch = async ({
             db,
             driver.id,
             'New Ride Nearby',
-            `You have a new ride request (${distanceKm}km away)`,
+            `You have a new ride request (${distanceLabel} away)`,
             { booking_id: String(updatedBooking.id), type: 'new_ride' }
         ).catch((e) => {
             console.error(`[NearestDispatch] FCM error for driver #${driver.id}:`, e.message);
@@ -2382,6 +2430,20 @@ io.on("connection", (socket) => {
             const db = getConnection(toTenantDbName(dbName));
             const plotId = data?.plot_id || null;
             const bookingId = data?.booking_id || null;
+            const supportsRank = await driverRankSupported(db);
+
+            if (!supportsRank) {
+                socket.emit("my-rank-update", {
+                    success: true,
+                    database: dbName,
+                    supports_rank: false,
+                    show_rank: false,
+                    rank_available: false,
+                    drivers: [],
+                    total_idle_drivers: 0,
+                });
+                return;
+            }
 
             if (plotId) {
                 const queue = await waitingQueue.loadPlotQueueFromDb(db, plotId, dbName);

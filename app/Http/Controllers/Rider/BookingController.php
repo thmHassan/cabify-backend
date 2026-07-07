@@ -290,9 +290,14 @@ class BookingController extends Controller
                 $amount = 2 * $amount;
             }
             
+            $tenantData = json_decode($tenant->data ?? '{}');
+            $distanceUnit = strtolower((string) ($tenantData->units ?? '')) === "miles" ? "miles" : "km";
+
             return response()->json([
                 'success' => 1,
                 'distance' => $distance,
+                'distance_value' => round($distanceUnit === "miles" ? ($distance / 1609.344) : ($distance / 1000), 2),
+                'distance_unit' => $distanceUnit,
                 'calculate_fare' => $amount
             ]);
         }

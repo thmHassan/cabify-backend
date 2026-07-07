@@ -218,6 +218,7 @@ class SettingController extends Controller
             }
             $enable_map = $tenantData->maps_api ?? null;
             $country_of_user = $tenantData->country_of_use ?? null;
+            $units = $tenantData->units ?? null;
             $company_booking_system = $tenantData->uber_plot_hybrid ?? null;
             $tenant_google_api_key = $companyData->google_api_key ?? ($tenantData->google_api_key ?? null);
             $google_api_keys = in_array(strtolower((string) $enable_map), ['google', 'both'], true)
@@ -252,6 +253,8 @@ class SettingController extends Controller
                 'support_emergency_no' => $support_emergency_no,
                 'support_rescue_number' => $support_rescue_number,
                 'country_of_user' => $country_of_user,
+                'units' => $units,
+                'distance_unit' => strtolower((string) $units) === 'miles' ? 'miles' : 'km',
                 'company_booking_system' => $company_booking_system,
                 'customer_capabilities' => [
                     'dispatch_system' => $activeDispatchSystem,
@@ -259,6 +262,7 @@ class SettingController extends Controller
                     'allow_scheduled' => true,
                     'show_fare_now' => true,
                     'show_fare_scheduled' => false,
+                    'distance_unit' => strtolower((string) $units) === 'miles' ? 'miles' : 'km',
                     'release_settings' => CompanySetting::resolveReleaseSettings($setting),
                 ],
             ];

@@ -64,6 +64,7 @@ class UserController extends Controller
             $newUser->address = $request->address;
             $newUser->city = $request->city;
             $newUser->dispatcher_id = $request->dispatcher_id;
+            $newUser->status = 'active';
             if ($request->filled('password')) {
                 $newUser->password = Hash::make($request->password);
             }
