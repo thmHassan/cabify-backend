@@ -125,7 +125,10 @@ class BookingController extends Controller
         try {
             $driver = auth('driver')->user();
             $rideList = CompanyBooking::whereNull("driver")
-                ->where("pickup_time", "asap")
+                ->where(function ($query) {
+                    $query->where("pickup_time", "asap")
+                        ->orWhere("pickup_time_type", "asap");
+                })
                 ->where("booking_status", "pending")
                 ->where(function ($query) use ($driver) {
                     $query->whereNull('vehicle')

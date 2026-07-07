@@ -155,6 +155,45 @@ class BiddingRideVisibilityTest extends TestCase
         $this->assertSame('km', $payload['list'][0]['distance_unit']);
     }
 
+    public function test_immediate_booking_with_real_pickup_time_still_appears_for_fallback_bidding(): void
+    {
+        $driverId = DB::table('drivers')->insertGetId([
+            'name' => 'Driver One',
+            'email' => 'driver@example.test',
+            'assigned_vehicle' => '4',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $driver = CompanyDriver::findOrFail($driverId);
+        Auth::guard('driver')->setUser($driver);
+
+        $userId = DB::table('users')->insertGetId([
+            'name' => 'Customer One',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $bookingId = DB::table('bookings')->insertGetId([
+            'user_id' => $userId,
+            'driver' => null,
+            'vehicle' => '4',
+            'pickup_time' => now()->format('H:i:s'),
+            'pickup_time_type' => 'asap',
+            'booking_status' => 'pending',
+            'booking_date' => now()->toDateString(),
+            'distance' => 2.15,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = (new BookingController())->listRideForBidding(Request::create('/api/driver/list-ride-for-bidding'));
+        $payload = $response->getData(true);
+
+        $this->assertSame(1, $payload['success']);
+        $this->assertCount(1, $payload['list']);
+        $this->assertSame($bookingId, $payload['list'][0]['id']);
+    }
+
     private function createTables(): void
     {
         Schema::create('drivers', function (Blueprint $table) {
