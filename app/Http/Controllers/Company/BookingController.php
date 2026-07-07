@@ -577,18 +577,15 @@ class BookingController extends Controller
                 $tenantRecord = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             }
 
-            $tenantData = json_decode($tenantRecord->data);
+            $tenantData = json_decode($tenantRecord->data ?? '{}');
             $map_api = $tenantData->maps_api ?? null;
-            $map = $tenantData->map ?? null;
 
             $barikoi_key = Setting::barikoiKey();
-
-            if (isset($map) && $map == "enable") {
-                $google_map_key = Setting::googleMapKey();
-            } else {
-                $companySettings = CompanySetting::orderBy("id", "DESC")->first();
-                $google_map_key = $companySettings?->google_api_keys ?: Setting::googleMapKey();
-            }
+            $companySettings = CompanySetting::orderBy("id", "DESC")->first();
+            $tenant_google_api_key = $tenantRecord->google_api_key ?? ($tenantData->google_api_key ?? null);
+            $google_map_key = in_array(strtolower((string) $map_api), ['google', 'both'], true)
+                ? (trim((string) ($companySettings?->google_api_keys ?? '')) ?: $tenant_google_api_key)
+                : null;
 
             if (in_array($map_api, ['google', 'both'], true) && empty($google_map_key)) {
                 throw new \Exception('Google Maps API key is not configured.');
@@ -827,9 +824,13 @@ class BookingController extends Controller
                 $settings->save();
             }
 
+            $distanceUnit = strtolower((string) ($data->units ?? '')) === "miles" ? "miles" : "km";
+
             return response()->json([
                 'success' => 1,
                 'distance' => $distance,
+                'distance_value' => round($distanceUnit === "miles" ? ($distance / 1609.344) : ($distance / 1000), 2),
+                'distance_unit' => $distanceUnit,
                 'calculate_fare' => $amount
             ]);
         } catch (\Exception $e) {

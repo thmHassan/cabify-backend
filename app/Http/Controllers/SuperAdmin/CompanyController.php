@@ -123,7 +123,9 @@ class CompanyController extends Controller
             $tenant->enable_smtp = $request->enable_smtp;
             $tenant->dispatcher = $request->dispatcher;
             $tenant->map = $request->map;
-            $tenant->google_api_key = (isset($request->map) && $request->map == "enable") ? Setting::googleMapKey() : NULL;
+            $tenant->google_api_key = MapsApi::normalize($request->maps_api) === MapsApi::GOOGLE
+                ? ($request->google_api_key ?? null)
+                : NULL;
             $tenant->barikoi_api_key = (isset($request->map) && $request->map == "enable") ? Setting::barikoiKey() : NULL;
             $tenant->push_notification = $request->push_notification;
             $tenant->usage_monitoring = $request->usage_monitoring;

@@ -85,6 +85,29 @@ class BookingDateFilterTest extends TestCase
         $this->assertSame(['2025-06-11'], $results);
     }
 
+    public function test_no_show_booking_is_excluded_from_todays_booking_and_counted_in_no_show(): void
+    {
+        $this->insertBooking('2025-06-11', 'pending');
+        $this->insertBooking('2025-06-11', 'no_show');
+
+        $todaysStatuses = $this->service
+            ->applyFilter(CompanyBooking::query(), 'todays_booking')
+            ->pluck('booking_status')
+            ->all();
+
+        $noShowStatuses = $this->service
+            ->applyFilter(CompanyBooking::query(), 'no_show')
+            ->pluck('booking_status')
+            ->all();
+
+        $counts = $this->service->dashboardCounts();
+
+        $this->assertSame(['pending'], $todaysStatuses);
+        $this->assertSame(['no_show'], $noShowStatuses);
+        $this->assertSame(1, $counts['todaysBooking']);
+        $this->assertSame(1, $counts['noShow']);
+    }
+
     public function test_pre_bookings_filter_includes_future_dates_only(): void
     {
         $this->insertBooking('2025-06-11', 'pending', null, true, false, '08:00:00');

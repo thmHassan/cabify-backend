@@ -109,21 +109,16 @@ class BookingController extends Controller
             ]);
 
             $tenant = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
-            $map_api = json_decode($tenant->data)->maps_api;
-            $map = json_decode($tenant->data)->map;
+            $tenantData = json_decode($tenant->data ?? '{}');
+            $map_api = $tenantData->maps_api ?? null;
 
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();   
             $barikoi_key = $data->barikoi_key;
-
-            if(isset($map) && $map == "enable"){
-                if(isset($map_api) && $map_api != NULL){
-                    $google_map_key = $data->google_map_key;
-                }
-            }
-            else{
-                $data = CompanySetting::orderBy("id", "DESC")->first();
-                $google_map_key = $data->google_api_keys;
-            }
+            $companySettings = CompanySetting::orderBy("id", "DESC")->first();
+            $tenant_google_api_key = $tenant->google_api_key ?? ($tenantData->google_api_key ?? null);
+            $google_map_key = in_array(strtolower((string) $map_api), ['google', 'both'], true)
+                ? (trim((string) ($companySettings?->google_api_keys ?? '')) ?: $tenant_google_api_key)
+                : null;
             
             if (MapsApi::isMapify($map_api)) {  
                 
@@ -295,9 +290,14 @@ class BookingController extends Controller
                 $amount = 2 * $amount;
             }
             
+            $tenantData = json_decode($tenant->data ?? '{}');
+            $distanceUnit = strtolower((string) ($tenantData->units ?? '')) === "miles" ? "miles" : "km";
+
             return response()->json([
                 'success' => 1,
                 'distance' => $distance,
+                'distance_value' => round($distanceUnit === "miles" ? ($distance / 1609.344) : ($distance / 1000), 2),
+                'distance_unit' => $distanceUnit,
                 'calculate_fare' => $amount
             ]);
         }

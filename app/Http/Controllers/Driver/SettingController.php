@@ -234,22 +234,25 @@ class SettingController extends Controller
             $company_booking_system = $setting->company_booking_system;
 
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+            $tenantData = json_decode($companyData->data ?? '{}');
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
-            if(!isset($google_api_keys) || $google_api_keys == NULL){
-                $google_api_keys = $data->google_map_key;
-            }
             if(!isset($barikoi_api_keys) || $barikoi_api_keys == NULL){
                 $barikoi_api_keys = $data->barikoi_key;
             }
             if(!isset($company_timezone) || $company_timezone == NULL){
-                $company_timezone = json_decode($companyData->data)->time_zone;
+                $company_timezone = $tenantData->time_zone ?? null;
             }
             if(!isset($company_currency) || $company_currency == NULL){
-                $company_currency = json_decode($companyData->data)->currency;
+                $company_currency = $tenantData->currency ?? null;
             }
-            $enable_map = json_decode($companyData->data)->maps_api;
-            $country_of_user = json_decode($companyData->data)->country_of_use;
-            $company_booking_system = json_decode($companyData->data)->uber_plot_hybrid;
+            $enable_map = $tenantData->maps_api ?? null;
+            $country_of_user = $tenantData->country_of_use ?? null;
+            $units = $tenantData->units ?? null;
+            $company_booking_system = $tenantData->uber_plot_hybrid ?? null;
+            $tenant_google_api_key = $companyData->google_api_key ?? ($tenantData->google_api_key ?? null);
+            $google_api_keys = in_array(strtolower((string) $enable_map), ['google', 'both'], true)
+                ? (trim((string) ($google_api_keys ?? '')) ?: $tenant_google_api_key)
+                : null;
 
             if($company_booking_system == "auto"){
                 $company_booking_system = "auto_dispatch";
@@ -271,6 +274,8 @@ class SettingController extends Controller
                 'company_timezone' => $company_timezone,
                 'company_currency' => $company_currency,
                 'enable_map' => $enable_map,
+                'units' => $units,
+                'distance_unit' => strtolower((string) $units) === 'miles' ? 'miles' : 'km',
                 'support_contact_no' => $support_contact_no,
                 'support_emergency_no' => $support_emergency_no,
                 'support_rescue_number' => $support_rescue_number,
@@ -609,6 +614,7 @@ class SettingController extends Controller
             $driver = CompanyDriver::where("id", auth("driver")->user()->id)->first();
             $setting = CompanySetting::orderBy("id", "DESC")->first();
             $dispatchContext = $this->driverDispatchContext($setting?->company_booking_system ?? "auto_dispatch");
+            $rankSupported = (bool) ($dispatchContext["supports_rank"] ?? false);
 
             $plots = CompanyPlot::orderBy("id", "DESC")->get();
             $driver = $this->syncDriverPlotFromCoordinates($driver);
@@ -626,19 +632,21 @@ class SettingController extends Controller
             $rank = null;
             $currentPlotDriverCount = 0;
 
-            foreach ($plots as $plot) {
-                $plotDrivers = $driversByPlot->get((string) $plot->id, collect())->values();
-                $this->syncPlotQueue((int) $plot->id, $plotDrivers);
+            if ($rankSupported) {
+                foreach ($plots as $plot) {
+                    $plotDrivers = $driversByPlot->get((string) $plot->id, collect())->values();
+                    $this->syncPlotQueue((int) $plot->id, $plotDrivers);
 
-                if ($driver && (string) $driver->plot_id === (string) $plot->id) {
-                    $currentPlotDriverCount = $plotDrivers->count();
-                    $position = $plotDrivers->search(fn ($item) => (string) $item->id === (string) $driver->id);
-                    if ($position !== false) {
-                        $rank = $position + 1;
+                    if ($driver && (string) $driver->plot_id === (string) $plot->id) {
+                        $currentPlotDriverCount = $plotDrivers->count();
+                        $position = $plotDrivers->search(fn ($item) => (string) $item->id === (string) $driver->id);
+                        if ($position !== false) {
+                            $rank = $position + 1;
+                        }
                     }
                 }
             }
-            if ($driver?->plot_id && $rank !== null && $currentPlotDriverCount < 1) {
+            if ($rankSupported && $driver?->plot_id && $rank !== null && $currentPlotDriverCount < 1) {
                 $currentPlotDriverCount = 1;
             }
 
@@ -666,7 +674,7 @@ class SettingController extends Controller
                 "message" => "Driver dispatch context fetched successfully",
                 "data" => [
                     ...$dispatchContext,
-                    "rank_available" => $rank !== null,
+                    "rank_available" => $rankSupported && $rank !== null,
                     "current_plot_driver_count" => $currentPlotDriverCount,
                     "current_plot" => $currentPlot ? [
                         "id" => $currentPlot->id,
@@ -679,7 +687,7 @@ class SettingController extends Controller
                         "name" => $driver?->name,
                         "profile_image" => $driver?->profile_image,
                         "rating" => $driver?->rating ?? "0",
-                        "rank" => $rank ? (int) $rank : null,
+                        "rank" => $rankSupported && $rank ? (int) $rank : null,
                         "plot_name" => $currentPlot?->name,
                         "is_current_driver" => true,
                     ],
@@ -714,15 +722,32 @@ class SettingController extends Controller
                 : "auto_dispatch_plot_base";
         }
 
+        $supportsBidding = in_array($dispatchSystem, [
+            "bidding",
+            "bidding_fixed_fare_plot_base",
+            "bidding_fixed_fare_nearest_driver",
+        ], true);
+
+        if (!$supportsBidding && Schema::connection("tenant")->hasTable("dispatch_system")) {
+            $supportsBidding = CompanyDispatchSystem::where("status", "enable")
+                ->where(function ($query) {
+                    $query->whereIn("dispatch_system", [
+                        "bidding",
+                        "bidding_fixed_fare_plot_base",
+                        "bidding_fixed_fare_nearest_driver",
+                    ])->orWhere(function ($query) {
+                        $query->where("dispatch_system", "auto_dispatch_nearest_driver")
+                            ->where("steps", "put_in_bidding_panel");
+                    });
+                })
+                ->exists();
+        }
+
         return [
             "dispatch_system" => $dispatchSystem,
             "company_booking_system" => $companyBookingSystem ?: "auto_dispatch",
             "supports_rank" => $dispatchSystem === "auto_dispatch_plot_base",
-            "supports_bidding" => in_array($dispatchSystem, [
-                "bidding",
-                "bidding_fixed_fare_plot_base",
-                "bidding_fixed_fare_nearest_driver",
-            ], true),
+            "supports_bidding" => $supportsBidding,
             "supports_manual_assignment" => true,
             "show_rank" => $dispatchSystem === "auto_dispatch_plot_base",
         ];

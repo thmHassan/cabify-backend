@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Company;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Support\MapsApi;
+use App\Support\TenantDatabaseConfigurator;
 use App\Services\MapSearchPreferenceService;
 use App\Support\TenantRequestContext;
 use App\Models\Tenant as CentralTenant;
@@ -23,6 +24,8 @@ use App\Models\CompanyBooking;
 use App\Models\PackageRideCountSetting;
 use App\Services\SocketApiUrlResolver;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -742,8 +745,8 @@ class SettingController extends Controller
             $usesGoogleMap = false;
             $usesMapify = true;
         } else {
-            $usesGoogleMap = filled($googleApiKey);
-            $usesMapify = !$usesGoogleMap;
+            $usesGoogleMap = false;
+            $usesMapify = true;
         }
 
         return [
@@ -1467,25 +1470,32 @@ class SettingController extends Controller
                 'company_id' => 'required',
             ]);
 
-            $dbName = 'tenant' . $request->company_id;
+            $dbName = TenantDatabaseConfigurator::resolveSchemaName((string) $request->company_id);
 
-            \Config::set('database.connections.tenant_temp', [
+            if (!$dbName) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Company Id is Invalid. Please contact your Company Admin',
+                ], 400);
+            }
+
+            Config::set('database.connections.tenant_temp', [
                 'driver' => 'mysql',
-                'host' => env('DB_HOST', '127.0.0.1'),
-                'port' => env('DB_PORT', '3306'),
+                'host' => config('database.connections.central.host'),
+                'port' => config('database.connections.central.port'),
                 'database' => $dbName,
-                'username' => env('DB_USERNAME', 'root'),
-                'password' => env('DB_PASSWORD', ''),
+                'username' => config('database.connections.central.username'),
+                'password' => config('database.connections.central.password'),
                 'charset' => 'utf8mb4',
                 'collation' => 'utf8mb4_unicode_ci',
                 'prefix' => '',
                 'strict' => false,
             ]);
 
-            \DB::purge('tenant_temp');
-            \DB::reconnect('tenant_temp');
+            DB::purge('tenant_temp');
+            DB::reconnect('tenant_temp');
 
-            $settings = \DB::connection('tenant_temp')
+            $settings = DB::connection('tenant_temp')
                 ->table('settings')
                 ->orderBy('id', 'DESC')
                 ->first();
@@ -1493,7 +1503,7 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'maps_api_count' => $settings->maps_api_count ?? 0,
-                'last_used' => $settings->last_use_map_api
+                'last_used' => $settings?->last_use_map_api
                     ? Carbon::parse($settings->last_use_map_api)->format('d M Y, h:i A')
                     : 'Never',
             ]);

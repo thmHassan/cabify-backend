@@ -80,6 +80,7 @@ class BookingController extends Controller
                 $query->whereDate("booking_date", $request->date);
             }
             $pendingRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
+            $this->attachDisplayDistanceToPaginator($pendingRides, $request);
 
             return response()->json([
                 'success' => 1,
@@ -143,8 +144,9 @@ class BookingController extends Controller
                 ->map(fn ($id) => (string) $id)
                 ->all();
 
-            $rideList->transform(function ($ride) use ($placedBidIds) {
+            $rideList->transform(function ($ride) use ($placedBidIds, $request) {
                 $ride->placed = in_array((string) $ride->id, $placedBidIds, true);
+                $this->attachDisplayDistance($ride, $request);
                 return $ride;
             });
 
@@ -1034,6 +1036,8 @@ class BookingController extends Controller
                     'destination_location' => $booking->destination_location,
                     'offered_amount' => $booking->offered_amount,
                     'distance' => $booking->distance,
+                    'distance_value' => $this->displayDistanceFields($booking->distance, $request)['distance_value'],
+                    'distance_unit' => $this->displayDistanceFields($booking->distance, $request)['distance_unit'],
                     'driver' => $booking->driver,
                     'booking_status' => $booking->booking_status,
                     'booking_date' => $booking->booking_date,
@@ -1328,5 +1332,61 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function attachDisplayDistanceToPaginator($paginator, Request $request): void
+    {
+        $paginator->getCollection()->transform(function ($ride) use ($request) {
+            $this->attachDisplayDistance($ride, $request);
+            return $ride;
+        });
+    }
+
+    private function attachDisplayDistance($ride, Request $request): void
+    {
+        foreach ($this->displayDistanceFields($ride->distance ?? null, $request) as $key => $value) {
+            $ride->{$key} = $value;
+        }
+    }
+
+    private function displayDistanceFields($distanceMeters, Request $request): array
+    {
+        $unit = $this->tenantDistanceUnit($request);
+        $meters = is_numeric($distanceMeters) ? (float) $distanceMeters : null;
+
+        if ($meters === null) {
+            return [
+                'distance_value' => null,
+                'distance_unit' => $unit,
+            ];
+        }
+
+        $value = $unit === 'miles'
+            ? $meters / 1609.344
+            : $meters / 1000;
+
+        return [
+            'distance_value' => round($value, 2),
+            'distance_unit' => $unit,
+        ];
+    }
+
+    private function tenantDistanceUnit(Request $request): string
+    {
+        $tenantId = $request->header('database');
+        if ($tenantId) {
+            $tenant = (new TenantUser)
+                ->setConnection('central')
+                ->where('id', $tenantId)
+                ->first();
+            $rawData = $tenant?->data ?? [];
+            $tenantData = is_array($rawData) ? $rawData : json_decode((string) $rawData, true);
+
+            if (strtolower((string) ($tenantData['units'] ?? '')) === 'miles') {
+                return 'miles';
+            }
+        }
+
+        return 'km';
     }
 }

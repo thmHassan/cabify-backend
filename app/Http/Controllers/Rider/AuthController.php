@@ -97,6 +97,7 @@ class AuthController extends Controller
             $user->name = $request->name;
             $user->country_code = $request->country_code;
             $user->password = Hash::make($request->password);
+            $user->status = 'active';
             $user->save();
 
             $otp = rand(1000, 9999);
