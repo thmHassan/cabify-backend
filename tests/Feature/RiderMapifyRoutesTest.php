@@ -13,6 +13,8 @@ class RiderMapifyRoutesTest extends TestCase
             'api/rider/mapify-search',
             'api/rider/mapify-geocoding',
             'api/rider/mapify-reverse-geocoding',
+            'api/rider/mapify-tiles/{theme}',
+            'api/rider/mapify-tiles/{theme}/{z}/{x}/{y}',
         ] as $uri) {
             $route = collect(Route::getRoutes())->first(
                 fn ($route) => $route->uri() === $uri && in_array('GET', $route->methods(), true)

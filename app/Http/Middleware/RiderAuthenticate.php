@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\TenantRequestContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -16,12 +17,12 @@ class RiderAuthenticate
     public function handle(Request $request, Closure $next): Response
     {
         try {
-            $token = $request->bearerToken();
+            $token = TenantRequestContext::bearerToken($request);
             if (!$token) {
                 return response()->json(['message' => 'Token not provided'], 401);
             }
 
-            $rider = auth('rider')->setToken($request->bearerToken())->userOrFail();
+            $rider = auth('rider')->setToken($token)->userOrFail();
 
             if (!$rider) {
                 return response()->json(['message' => 'Unauthenticated'], 401);

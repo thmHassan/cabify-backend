@@ -37,6 +37,11 @@ class MapifyMapController extends Controller
 
     public function brightTiles(Request $request, ?string $z = null, ?string $x = null, ?string $y = null)
     {
+        return $this->tiles($request, 'bright', $z, $x, $y);
+    }
+
+    public function tiles(Request $request, string $theme = 'bright', ?string $z = null, ?string $x = null, ?string $y = null)
+    {
         try {
             $baseRequest = $this->mapifyBaseRequest();
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
@@ -44,7 +49,12 @@ class MapifyMapController extends Controller
             }
             ['token' => $token, 'baseUrl' => $baseUrl] = $baseRequest;
 
-            $path = '/api/v1/proxy/tiles/bright';
+            $theme = strtolower(trim($theme));
+            if (!in_array($theme, ['bright', 'dark'], true)) {
+                $theme = 'bright';
+            }
+
+            $path = '/api/v1/proxy/tiles/' . $theme;
             if ($z !== null && $x !== null && $y !== null) {
                 $extension = $request->query('ext', 'png');
                 if (preg_match('/^(.+)\.([a-zA-Z0-9]+)$/', (string) $y, $matches)) {

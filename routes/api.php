@@ -162,6 +162,8 @@ Route::group(['middleware' => ['auth:api']], function () {
 Route::group(['middleware' => ['auth.tenant.jwt', 'tenant.db']], function () {
     Route::get('/company/mapify-tiles/bright', [MapifyMapController::class, 'brightTiles']);
     Route::get('/company/mapify-tiles/bright/{z}/{x}/{y}', [MapifyMapController::class, 'brightTiles']);
+    Route::get('/company/mapify-tiles/{theme}', [MapifyMapController::class, 'tiles']);
+    Route::get('/company/mapify-tiles/{theme}/{z}/{x}/{y}', [MapifyMapController::class, 'tiles']);
 });
 
 Route::group(['middleware' => ['tenant.db', 'auth.tenant.jwt']], function () {
@@ -473,6 +475,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/mapify-search', [MapifyMapController::class, 'search']);
         Route::get('/rider/mapify-geocoding', [MapifyMapController::class, 'geocoding']);
         Route::get('/rider/mapify-reverse-geocoding', [MapifyMapController::class, 'reverseGeocoding']);
+        Route::get('/rider/mapify-tiles/{theme}', [MapifyMapController::class, 'tiles']);
+        Route::get('/rider/mapify-tiles/{theme}/{z}/{x}/{y}', [MapifyMapController::class, 'tiles']);
         Route::post('/rider/create-booking', [RiderBookingController::class, 'createBooking']);
         Route::get('/rider/list-bids', [RiderBookingController::class, 'listBids']);
         Route::post('/rider/change-bid-status', [RiderBookingController::class, 'changeBidStatus']);
