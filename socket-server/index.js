@@ -1086,14 +1086,14 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
     const db = getConnection(tenantDb);
 
     const [rows] = await db.query(
-        "SELECT booking_status, driver, dispatcher_action FROM bookings WHERE id = ?",
+        "SELECT booking_status, driver, pending_driver_id, dispatcher_action FROM bookings WHERE id = ?",
         [bookingIdInt]
     );
     if (!rows.length) {
         return { status: 404, body: { success: false, message: "Booking not found" } };
     }
 
-    const { booking_status, driver, dispatcher_action } = rows[0];
+    const { booking_status, driver, pending_driver_id, dispatcher_action } = rows[0];
     const actionText = String(dispatcher_action || '').toLowerCase();
     const isManualAssignmentReject = (
         actionText.includes('assigned') ||
@@ -1101,7 +1101,10 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
         actionText.includes('manual') ||
         actionText.includes('driver selected') ||
         actionText.includes('dispatching now')
-    ) && String(driver) === String(driverId) && ['pending', 'ongoing'].includes(String(booking_status));
+    ) && (
+        String(driver) === String(driverId) ||
+        String(pending_driver_id) === String(driverId)
+    ) && ['pending', 'ongoing'].includes(String(booking_status));
 
     if (plotDispatch.isPlotDispatchActive(dispatcher_action)) {
         return plotDispatch.handlePlotDispatchReject({ bookingIdInt, tenantDb, driverId });

@@ -151,6 +151,21 @@ class ScheduledAdminAssignmentReleaseTest extends TestCase
         $this->assertContains($acceptedScheduledId, $normalUpcomingIds);
     }
 
+    public function test_pending_driver_scheduled_assignment_is_rejectable_by_that_driver(): void
+    {
+        $booking = (new CompanyBooking())->forceFill([
+            'booking_status' => 'pending',
+            'driver' => null,
+            'pending_driver_id' => 15,
+            'pickup_time_type' => 'time',
+            'is_scheduled' => true,
+            'dispatcher_action' => 'Created by Dispatcher. Driver selected - held until manual release.',
+        ]);
+
+        $this->assertTrue($this->isRejectableManualAssignment($booking, 15));
+        $this->assertFalse($this->isRejectableManualAssignment($booking, 16));
+    }
+
     private function applyUpcomingRideDriverFilter($query, int $driverId, bool $includeAssignedOffers): void
     {
         $controller = new BookingController();
@@ -158,6 +173,15 @@ class ScheduledAdminAssignmentReleaseTest extends TestCase
         $method->setAccessible(true);
 
         $method->invoke($controller, $query, $driverId, $includeAssignedOffers);
+    }
+
+    private function isRejectableManualAssignment(CompanyBooking $booking, int $driverId): bool
+    {
+        $controller = new BookingController();
+        $method = (new ReflectionClass($controller))->getMethod('isRejectableManualAssignment');
+        $method->setAccessible(true);
+
+        return $method->invoke($controller, $booking, $driverId);
     }
 
     private function insertScheduledBooking(array $overrides = []): int

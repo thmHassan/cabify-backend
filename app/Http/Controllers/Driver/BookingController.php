@@ -823,7 +823,11 @@ class BookingController extends Controller
                 ]);
             }
 
-            if ((string) $booking->driver !== (string) $driverId && !$wasNotified) {
+            if (
+                (string) $booking->driver !== (string) $driverId
+                && (string) $booking->pending_driver_id !== (string) $driverId
+                && !$wasNotified
+            ) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'You are not assigned to this ride',
