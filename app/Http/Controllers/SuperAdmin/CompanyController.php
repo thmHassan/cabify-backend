@@ -1394,21 +1394,9 @@ class CompanyController extends Controller
             }
             
             $token = Password::broker('tenants')->createToken($tenant);
-
-            $frontendUrl = env('CLIENT_FRONTEND_URL');
-            if (!$frontendUrl) {
-                $frontendUrl = rtrim((string) $request->headers->get('origin'), '/');
-            }
-
-            if (!$frontendUrl) {
-                $frontendUrl = rtrim(config('app.url', 'https://clientadmin.cabifyit.com'), '/');
-            }
-
-            $resetPath = trim(env('CLIENT_RESET_PASSWORD_PATH', '/reset-password'), '/');
-            $resetLink = $frontendUrl . '/' . $resetPath . '?' . http_build_query([
-                'token' => $token,
-                'email' => $tenant->email,
-            ]);
+            
+            $resetLink = env('CLIENT_FRONTEND_URL') .
+                "/reset-password?token={$token}&email={$tenant->email}";
 
             $mailer = \App\Services\MailConfigurationService::resolveMailer();
 
@@ -1435,21 +1423,6 @@ class CompanyController extends Controller
 
     public function resetPassword(Request $request){
         try{
-            $email = strtolower(trim((string) $request->input('email', $request->query('email'))));
-            $token = trim((string) $request->input('token', $request->input('resetToken', $request->input('reset_token', $request->query('token')))));
-            $password = $request->input('password', $request->input('newPassword', $request->input('new_password')));
-            $passwordConfirmation = $request->input(
-                'password_confirmation',
-                $request->input('passwordConfirmation', $request->input('confirmPassword', $request->input('confirm_password')))
-            );
-
-            $request->merge([
-                'email' => $email,
-                'token' => $token,
-                'password' => $password,
-                'password_confirmation' => $passwordConfirmation ?? $password
-            ]);
-
             $request->validate([
                 'email' => 'required|email',
                 'token' => 'required',
@@ -1485,7 +1458,7 @@ class CompanyController extends Controller
             // ], 400);
 
             $tokenRow = DB::table('password_reset_tokens')
-            ->where('email', $email)
+            ->where('email', $request->email)
             ->first();
 
             if (!$tokenRow) {
@@ -1495,14 +1468,14 @@ class CompanyController extends Controller
                 ], 400);
             }
 
-            if (!Hash::check($token, $tokenRow->token)) {
+            if (!Hash::check($request->token, $tokenRow->token)) {
                 return response()->json([
                     'error' => 1,
                     'message' => 'Invalid reset token'
                 ], 400);
             }
 
-            $tenant = TenantUser::where('data->email', $email)->first();
+            $tenant = TenantUser::where('data->email', $request->email)->first();
 
             if (!$tenant) {
                 return response()->json([
