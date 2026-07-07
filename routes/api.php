@@ -74,6 +74,8 @@ Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 Route::post('/company/logout-all-dispatchers', [DispatcherController::class, 'logoutAllDispatchers']);
 Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
+Route::post('/forgot-password', [CompanyController::class, 'forgotPassword']);
+Route::post('/reset-password', [CompanyController::class, 'resetPassword']);
 Route::get('/driver/verify-company-code', [DriverAuthController::class, 'verifyCompanyCode']);
 
 Route::group(['middleware' => ['tenant.db']], function () {
