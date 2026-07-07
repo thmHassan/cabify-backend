@@ -29,6 +29,7 @@ use App\Services\PickupPlotResolver;
 use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
+use App\Support\VehicleDispatchFilter;
 
 class BookingController extends Controller
 {
@@ -389,7 +390,7 @@ class BookingController extends Controller
                 'pickup_location' => 'required',
                 'destination_point' => 'required',
                 'destination_location' => 'required',
-                'vehicle' => 'required',
+                'vehicle' => 'nullable',
                 'offered_amount' => 'required',
                 'recommended_amount' => 'required',
                 'distance' => 'required',
@@ -430,7 +431,7 @@ class BookingController extends Controller
             $newBooking->phone_no = auth("rider")->user()->phone_no;
             $newBooking->tel_no = auth("rider")->user()->tel_no;
             $newBooking->journey_type = "one_way";
-            $newBooking->vehicle = $request->vehicle;
+            $newBooking->vehicle = VehicleDispatchFilter::normalizeRequestedVehicle($request);
             $newBooking->booking_status = 'pending';
             $newBooking->distance = $distance;
             $newBooking->passenger = $request->passenger;

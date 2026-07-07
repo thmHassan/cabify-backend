@@ -35,6 +35,8 @@ class DuePreBookingReleaseService
                 $query->whereNull('dispatch_released')
                     ->orWhere('dispatch_released', false);
             })
+            ->whereNull('driver')
+            ->whereNull('pending_driver_id')
             ->whereNotNull('dispatch_release_at')
             ->where('dispatch_release_at', '<=', Carbon::now('UTC')->format('Y-m-d H:i:s'))
             ->where(function ($query) {

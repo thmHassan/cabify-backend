@@ -75,7 +75,17 @@ class BookingController extends Controller
     public function upcomingRide(Request $request)
     {
         try {
-            $query = CompanyBooking::where("booking_status", "pending")->where("driver", auth('driver')->user()->id);
+            $driverId = auth('driver')->user()->id;
+            $includeAssignedOffers = filter_var($request->query('assigned_offers', false), FILTER_VALIDATE_BOOLEAN);
+
+            $query = CompanyBooking::where("booking_status", "pending")
+                ->where(function ($q) use ($driverId, $includeAssignedOffers) {
+                    $q->where("driver", $driverId);
+
+                    if ($includeAssignedOffers) {
+                        $q->orWhere("pending_driver_id", $driverId);
+                    }
+                });
             if (isset($request->date) && $request->date != NULL) {
                 $query->whereDate("booking_date", $request->date);
             }
@@ -569,7 +579,9 @@ class BookingController extends Controller
                         } elseif ($isPlotBiddingFallback) {
                             $query->whereNull('driver');
                         } else {
-                            $query->whereNull('driver')->orWhere('driver', $driverId);
+                            $query->whereNull('driver')
+                                ->orWhere('driver', $driverId)
+                                ->orWhere('pending_driver_id', $driverId);
                         }
                     })
                     ->update([
@@ -577,13 +589,16 @@ class BookingController extends Controller
                         'pending_driver_id' => null,
                         'booking_amount' => $bookingAmount,
                         'booking_status' => $newStatus,
+                        'dispatch_released' => $this->shouldResolveAcceptedScheduledRelease($booking, $newStatus)
+                            ? true
+                            : $booking->dispatch_released,
                         'dispatcher_action' => $isNearestDispatchOffer
                             ? "Nearest dispatch — accepted by driver #{$driverId}"
                             : ($isPlotDispatchOffer
                                 ? PlotDispatch::acceptedAction($driverId)
                                 : ($isPlotBiddingFallback
                                     ? "Fixed-fare bidding fallback — accepted by driver #{$driverId}"
-                                    : $booking->dispatcher_action)),
+                                    : "Manual assignment accepted by driver #{$driverId}")),
                     ]);
             });
 
@@ -720,15 +735,31 @@ class BookingController extends Controller
                 return 'ongoing';
             }
         } catch (\Exception $e) {
-            return 'ongoing';
+            return ($booking->pickup_time_type ?? null) === 'time' || (bool) $booking->is_scheduled
+                ? 'pending'
+                : 'ongoing';
         }
 
-        return 'started';
+        return ($booking->pickup_time_type ?? null) === 'time' || (bool) $booking->is_scheduled
+            ? 'pending'
+            : 'started';
+    }
+
+    private function shouldResolveAcceptedScheduledRelease(CompanyBooking $booking, string $newStatus): bool
+    {
+        if ($newStatus !== 'pending') {
+            return false;
+        }
+
+        return ($booking->pickup_time_type ?? null) === 'time' || (bool) $booking->is_scheduled;
     }
 
     private function isRejectableManualAssignment(CompanyBooking $booking, $driverId): bool
     {
-        if ((string) $booking->driver !== (string) $driverId) {
+        if (
+            (string) $booking->driver !== (string) $driverId
+            && (string) $booking->pending_driver_id !== (string) $driverId
+        ) {
             return false;
         }
 
@@ -800,6 +831,58 @@ class BookingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Ride rejected successfully',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function expireRideOffer(Request $request)
+    {
+        try {
+            $request->validate([
+                'ride_id' => 'required',
+            ]);
+
+            $driverId = auth('driver')->user()->id;
+            $booking = CompanyBooking::where('id', $request->ride_id)->first();
+
+            if (!isset($booking) || $booking == null) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found',
+                ], 404);
+            }
+
+            if ($booking->booking_status !== 'pending' || !$this->isRejectableManualAssignment($booking, $driverId)) {
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Ride offer is no longer available',
+                    'skipped' => true,
+                ]);
+            }
+
+            $response = Http::withHeaders([
+                'database' => $request->header('database'),
+                'Accept' => 'application/json',
+            ])->post(SocketApiUrlResolver::endpoint(null, 'bookings/' . $booking->id . '/manual-assignment/expire'), [
+                'driver_id' => $driverId,
+            ]);
+
+            if (!$response->successful()) {
+                $message = $response->json('message') ?? 'Failed to process ride offer expiry';
+                return response()->json([
+                    'error' => 1,
+                    'message' => $message,
+                ], $response->status());
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride offer expired successfully',
             ]);
         } catch (\Exception $e) {
             return response()->json([

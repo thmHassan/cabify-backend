@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Builder;
 class BookingDateClassificationService
 {
     private const TERMINAL_STATUSES = ['completed', 'no_show', 'cancelled'];
+    private const TODAY_HIDDEN_STATUSES = ['completed', 'cancelled'];
 
     private function applyNonTerminalFilter(Builder $query): Builder
     {
@@ -102,7 +103,7 @@ class BookingDateClassificationService
                     ->where(function (Builder $inner) {
                         $inner
                             ->whereNull('booking_status')
-                            ->orWhereNotIn('booking_status', self::TERMINAL_STATUSES);
+                            ->orWhereNotIn('booking_status', self::TODAY_HIDDEN_STATUSES);
                     });
             case 'pre_bookings':
                 return $this->applyUnreleasedScheduledFilter(

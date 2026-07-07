@@ -30,6 +30,14 @@ class BookingDispatchService
             return;
         }
 
+        if ($this->isAcceptedScheduledDriverBooking($booking)) {
+            $booking->dispatch_released = true;
+            $booking->pending_driver_id = null;
+            $booking->save();
+
+            return;
+        }
+
         if (!app(PreBookingService::class)->releaseModeAllowsAutomaticRelease($booking->dispatch_release_mode)) {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - held for manual review.');
             $booking->save();
@@ -267,6 +275,20 @@ class BookingDispatchService
         $action = strtolower((string) $booking->dispatcher_action);
 
         return str_contains($action, 'scheduled for auto release');
+    }
+
+    private function isAcceptedScheduledDriverBooking(CompanyBooking $booking): bool
+    {
+        if ($booking->booking_status !== 'pending' || !$booking->driver) {
+            return false;
+        }
+
+        $isScheduled = $booking->is_scheduled || $booking->pickup_time_type === 'time';
+        if (!$isScheduled) {
+            return false;
+        }
+
+        return str_contains(strtolower((string) $booking->dispatcher_action), 'accepted by driver');
     }
 
     private function dispatchReleaseAtIsFuture(CarbonInterface|string $releaseAt): bool

@@ -132,7 +132,7 @@ class PlotDispatch
         return $query->where(function (Builder $visible) {
             $visible
                 ->whereNull('booking_status')
-                ->orWhereNotIn('booking_status', ['completed', 'no_show', 'cancelled']);
+                ->orWhereNotIn('booking_status', ['completed', 'cancelled']);
         });
     }
 

@@ -96,10 +96,10 @@ class BookingDateFilterTest extends TestCase
             ->pluck('booking_status')
             ->all();
 
-        $this->assertSame(['pending'], $results);
+        $this->assertSame(['pending', 'no_show'], $results);
     }
 
-    public function test_no_show_booking_is_excluded_from_todays_booking_and_counted_in_no_show(): void
+    public function test_no_show_booking_is_included_in_todays_booking_and_counted_in_no_show(): void
     {
         $this->insertBooking('2025-06-11', 'pending');
         $this->insertBooking('2025-06-11', 'no_show');
@@ -116,9 +116,9 @@ class BookingDateFilterTest extends TestCase
 
         $counts = $this->service->dashboardCounts();
 
-        $this->assertSame(['pending'], $todaysStatuses);
+        $this->assertSame(['pending', 'no_show'], $todaysStatuses);
         $this->assertSame(['no_show'], $noShowStatuses);
-        $this->assertSame(1, $counts['todaysBooking']);
+        $this->assertSame(2, $counts['todaysBooking']);
         $this->assertSame(1, $counts['noShow']);
     }
 

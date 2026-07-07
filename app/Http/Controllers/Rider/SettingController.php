@@ -197,6 +197,7 @@ class SettingController extends Controller
             $support_emergency_no = $setting->support_emergency_no;
             $support_rescue_number = $setting->support_rescue_number;
             $company_booking_system = $setting->company_booking_system;
+            $stripePayment = $setting->stripe_payment ?? 'disable';
             $activeDispatchSystem = CompanyDispatchSystem::query()
                 ->select('dispatch_system')
                 ->where('status', 'enable')
@@ -255,6 +256,9 @@ class SettingController extends Controller
                 'country_of_user' => $country_of_user,
                 'units' => $units,
                 'distance_unit' => strtolower((string) $units) === 'miles' ? 'miles' : 'km',
+                'stripe_payment' => $stripePayment,
+                'cash_payment' => 'enable',
+                'support_tickets_enabled' => true,
                 'company_booking_system' => $company_booking_system,
                 'customer_capabilities' => [
                     'dispatch_system' => $activeDispatchSystem,
@@ -263,6 +267,9 @@ class SettingController extends Controller
                     'show_fare_now' => true,
                     'show_fare_scheduled' => false,
                     'distance_unit' => strtolower((string) $units) === 'miles' ? 'miles' : 'km',
+                    'stripe_payment' => $stripePayment,
+                    'cash_payment' => 'enable',
+                    'support_tickets_enabled' => true,
                     'release_settings' => CompanySetting::resolveReleaseSettings($setting),
                 ],
             ];

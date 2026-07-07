@@ -3859,6 +3859,96 @@ app.post("/bookings/:id/auto-dispatch/reject", async (req, res) => {
     }
 });
 
+app.post("/bookings/:id/manual-assignment/expire", async (req, res) => {
+    try {
+        const bookingIdInt = parseInt(req.params.id, 10);
+        const driverId = req.body.driver_id ?? req.body.driverId;
+
+        if (!req.tenantDb) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing 'database' header in request",
+            });
+        }
+        if (!driverId) {
+            return res.status(400).json({
+                success: false,
+                message: "driver_id is required",
+            });
+        }
+
+        const db = getConnection(req.tenantDb);
+        const dbName = toTenantSocketName(req.tenantDb);
+        const [rows] = await db.query(
+            "SELECT booking_status, driver, pending_driver_id, dispatcher_action FROM bookings WHERE id = ?",
+            [bookingIdInt]
+        );
+
+        if (!rows.length) {
+            return res.status(404).json({ success: false, message: "Booking not found" });
+        }
+
+        const booking = rows[0];
+        const actionText = String(booking.dispatcher_action || "").toLowerCase();
+        const isManualAssignment = (
+            actionText.includes("assigned") ||
+            actionText.includes("pre-job") ||
+            actionText.includes("manual") ||
+            actionText.includes("driver selected") ||
+            actionText.includes("dispatching now")
+        );
+        const isAssignedDriver = (
+            String(booking.driver || "") === String(driverId) ||
+            String(booking.pending_driver_id || "") === String(driverId)
+        );
+
+        if (!isManualAssignment || !isAssignedDriver || String(booking.booking_status) !== "pending") {
+            return res.status(200).json({
+                success: true,
+                skipped: true,
+                message: "Manual assignment is no longer pending",
+            });
+        }
+
+        const expireAction = `Manual assignment expired for driver #${driverId} — returned to dispatcher panel`;
+        await db.query(
+            `UPDATE bookings
+             SET driver = NULL,
+                 pending_driver_id = NULL,
+                 booking_status = 'pending',
+                 dispatcher_action = ?
+             WHERE id = ?`,
+            [expireAction, bookingIdInt]
+        );
+        await db.query("UPDATE drivers SET driving_status = 'idle' WHERE id = ?", [driverId]);
+
+        const [updatedRows] = await db.query("SELECT * FROM bookings WHERE id = ?", [bookingIdInt]);
+        const updatedBooking = updatedRows[0] || { id: bookingIdInt };
+        const expireEvent = {
+            booking_id: bookingIdInt,
+            id: bookingIdInt,
+            driver_id: driverId,
+            database: dbName,
+            booking: updatedBooking,
+            message: expireAction,
+        };
+
+        emitTenantRooms(dbName, "manual-assignment-expired", expireEvent);
+        emitTenantRooms(dbName, "booking-updated-event", updatedBooking);
+        emitTenantRooms(dbName, "notification-ride", updatedBooking);
+        await broadcastDashboardCardsUpdate(req.tenantDb);
+        await broadcastTodaysBookingsListUpdate(req.tenantDb, db, dbName, bookingIdInt);
+
+        return res.json({
+            success: true,
+            message: "Manual assignment expired — returned to dispatcher panel",
+        });
+    } catch (error) {
+        console.error("[API] /manual-assignment/expire error:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 app.post("/driver/reject-ride", async (req, res) => {
     try {
         const rideId = req.body.ride_id ?? req.body.booking_id;
