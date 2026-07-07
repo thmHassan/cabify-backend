@@ -85,6 +85,20 @@ class BookingDateFilterTest extends TestCase
         $this->assertSame(['2025-06-11'], $results);
     }
 
+    public function test_today_filter_alias_matches_todays_booking(): void
+    {
+        $this->insertBooking('2025-06-11', 'pending');
+        $this->insertBooking('2025-06-11', 'no_show');
+        $this->insertBooking('2025-06-13', 'pending');
+
+        $results = $this->service
+            ->applyFilter(CompanyBooking::query(), 'today')
+            ->pluck('booking_status')
+            ->all();
+
+        $this->assertSame(['pending'], $results);
+    }
+
     public function test_no_show_booking_is_excluded_from_todays_booking_and_counted_in_no_show(): void
     {
         $this->insertBooking('2025-06-11', 'pending');

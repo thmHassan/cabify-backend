@@ -95,6 +95,7 @@ class BookingDateClassificationService
         }
 
         switch ($filter) {
+            case 'today':
             case 'todays_booking':
                 return $query
                     ->whereDate('booking_date', Carbon::today())
