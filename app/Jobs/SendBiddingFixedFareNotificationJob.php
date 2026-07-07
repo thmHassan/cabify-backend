@@ -52,6 +52,12 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                 return;
             }
 
+            if (!$booking->bidding_fallback || $booking->booking_system !== 'bidding_fixed_fare_plot_base') {
+                $booking->bidding_fallback = true;
+                $booking->booking_system = 'bidding_fixed_fare_plot_base';
+                $booking->save();
+            }
+
             $plotId = $this->plotId;
             if(!isset($plotId) || $plotId == NULL){
                 $plotId = (int) $booking->pickup_plot_id;
@@ -69,34 +75,41 @@ class SendBiddingFixedFareNotificationJob implements ShouldQueue
                 $booking_date = $booking->booking_date;
             }
 
+            $fixedFarePayload = [
+                'id' => $booking->id,
+                'booking_id' => $booking->booking_id,
+                'pickup_point' => $booking->pickup_point,
+                'destination_point' => $booking->destination_point,
+                'offered_amount' => $booking->offered_amount,
+                'distance' => $booking->distance,
+                'user_id' => $booking->user_id,
+                'user_name' => $booking->name,
+                'name' => $booking->name,
+                'user_profile' => $booking->userDetail->profile_image,
+                'pickup_location' => $booking->pickup_location,
+                'destination_location' => $booking->destination_location,
+                'note' => $booking->note,
+                'pickup_time' => (isset($pickup_time) && $pickup_time != NULL) ? $pickup_time : NULL,
+                'booking_date' => (isset($booking_date) && $booking_date != NULL) ? $booking_date : NULL,
+                'booking_system' => 'bidding_fixed_fare_plot_base',
+                'bidding_fallback' => true,
+                'fixed_fare' => true,
+                'assignment_type' => 'fixed_fare_bidding',
+            ];
+
             CompanyDriver::where('driving_status', 'idle')->where("plot_id", $plotId)
                 ->when(
                     VehicleDispatchFilter::bookingRequiresSpecificVehicle($booking),
                     fn ($query) => VehicleDispatchFilter::scopeDriversForBooking($query, $booking)
                 )
-                ->chunk(100, function ($drivers) use ($booking) {
+                ->chunk(100, function ($drivers) use ($booking, $fixedFarePayload) {
                     foreach ($drivers as $driver) {
 
                         Http::withHeaders([
                             'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
                         ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-new-ride', [
                             'drivers' => [$driver->id],
-                            'booking' => [
-                                'id' => $booking->id,
-                                'booking_id' => $booking->booking_id,
-                                'pickup_point' => $booking->pickup_point,
-                                'destination_point' => $booking->destination_point,
-                                'offered_amount' => $booking->offered_amount,
-                                'distance' => $booking->distance,
-                                'user_id' => $booking->user_id,
-                                'user_name' => $booking->name,
-                                'user_profile' => $booking->userDetail->profile_image,
-                                'pickup_location' => $booking->pickup_location,
-                                'destination_location' => $booking->destination_location,
-                                'note' => $booking->note,
-                                'pickup_time' => (isset($pickup_time) && $pickup_time != NULL) ? $pickup_time : NULL,
-                                'booking_date' => (isset($booking_date) && $booking_date != NULL) ? $booking_date : NULL,
-                            ]
+                            'booking' => $fixedFarePayload,
                         ]);
 
                         $sendRide = new CompanySendNewRide;
