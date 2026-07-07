@@ -114,6 +114,47 @@ class BiddingRideVisibilityTest extends TestCase
         $this->assertSame('km', $payload['list'][0]['distance_unit']);
     }
 
+    public function test_display_distance_is_not_double_converted_when_booking_stores_display_value(): void
+    {
+        $driverId = DB::table('drivers')->insertGetId([
+            'name' => 'Driver One',
+            'email' => 'driver@example.test',
+            'assigned_vehicle' => '4',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $driver = CompanyDriver::findOrFail($driverId);
+        Auth::guard('driver')->setUser($driver);
+
+        $userId = DB::table('users')->insertGetId([
+            'name' => 'Customer One',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $bookingId = DB::table('bookings')->insertGetId([
+            'user_id' => $userId,
+            'driver' => null,
+            'vehicle' => '4',
+            'pickup_time' => 'asap',
+            'pickup_time_type' => 'asap',
+            'booking_status' => 'pending',
+            'booking_date' => now()->toDateString(),
+            'distance' => 2.97,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = (new BookingController())->listRideForBidding(Request::create('/api/driver/list-ride-for-bidding'));
+        $payload = $response->getData(true);
+
+        $this->assertSame(1, $payload['success']);
+        $this->assertCount(1, $payload['list']);
+        $this->assertSame($bookingId, $payload['list'][0]['id']);
+        $this->assertSame(2.97, $payload['list'][0]['distance_value']);
+        $this->assertSame('km', $payload['list'][0]['distance_unit']);
+    }
+
     private function createTables(): void
     {
         Schema::create('drivers', function (Blueprint $table) {

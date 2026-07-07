@@ -1349,21 +1349,21 @@ class BookingController extends Controller
         }
     }
 
-    private function displayDistanceFields($distanceMeters, Request $request): array
+    private function displayDistanceFields($storedDistance, Request $request): array
     {
         $unit = $this->tenantDistanceUnit($request);
-        $meters = is_numeric($distanceMeters) ? (float) $distanceMeters : null;
+        $distance = is_numeric($storedDistance) ? (float) $storedDistance : null;
 
-        if ($meters === null) {
+        if ($distance === null) {
             return [
                 'distance_value' => null,
                 'distance_unit' => $unit,
             ];
         }
 
-        $value = $unit === 'miles'
-            ? $meters / 1609.344
-            : $meters / 1000;
+        $value = $distance >= 1000
+            ? ($unit === 'miles' ? $distance / 1609.344 : $distance / 1000)
+            : $distance;
 
         return [
             'distance_value' => round($value, 2),
