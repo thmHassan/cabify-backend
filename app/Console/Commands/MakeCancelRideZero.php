@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\CompanyDriver;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 
 class MakeCancelRideZero extends Command
@@ -47,7 +48,7 @@ class MakeCancelRideZero extends Command
 
             } catch (\Throwable $e) {
                 \Log::error('Tenant cron failed', [
-                    'tenant' => $tenant->database,
+                    'tenant' => $tenant->id ?? null,
                     'error'  => $e->getMessage()
                 ]);
             }
@@ -61,5 +62,6 @@ class MakeCancelRideZero extends Command
 
         DB::purge('tenant');
         DB::reconnect('tenant');
+        Config::set('database.default', 'tenant');
     }
 }

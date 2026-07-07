@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\CompanyBooking;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 
 class CheckUpcomingRide extends Command
@@ -63,7 +64,7 @@ class CheckUpcomingRide extends Command
 
                 } catch (\Throwable $e) {
                         \Log::error('Tenant cron failed', [
-                            'tenant' => $tenant->database,
+                            'tenant' => $tenant->id ?? null,
                             'error'  => $e->getMessage()
                         ]);
                 }
@@ -77,5 +78,6 @@ class CheckUpcomingRide extends Command
 
         DB::purge('tenant');
         DB::reconnect('tenant');
+        Config::set('database.default', 'tenant');
     }
 }
