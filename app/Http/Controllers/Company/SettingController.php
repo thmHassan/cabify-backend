@@ -742,8 +742,8 @@ class SettingController extends Controller
             $usesGoogleMap = false;
             $usesMapify = true;
         } else {
-            $usesGoogleMap = filled($googleApiKey);
-            $usesMapify = !$usesGoogleMap;
+            $usesGoogleMap = false;
+            $usesMapify = true;
         }
 
         return [

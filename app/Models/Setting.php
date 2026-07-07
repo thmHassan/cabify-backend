@@ -14,7 +14,7 @@ class Setting extends Model
     {
         $setting = static::orderBy('id', 'DESC')->first();
 
-        return $setting?->google_map_key ?: config('services.google_maps.api_key');
+        return $setting?->google_map_key;
     }
 
     public static function barikoiKey(): ?string

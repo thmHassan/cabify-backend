@@ -205,22 +205,24 @@ class SettingController extends Controller
                 ->value('dispatch_system');
 
             $companyData = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
+            $tenantData = json_decode($companyData->data ?? '{}');
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();
-            if(!isset($google_api_keys) || $google_api_keys == NULL){
-                $google_api_keys = $data->google_map_key;
-            }
             if(!isset($barikoi_api_keys) || $barikoi_api_keys == NULL){
                 $barikoi_api_keys = $data->barikoi_key;
             }
             if(!isset($company_timezone) || $company_timezone == NULL){
-                $company_timezone = json_decode($companyData->data)->time_zone;
+                $company_timezone = $tenantData->time_zone ?? null;
             }
             if(!isset($company_currency) || $company_currency == NULL){
-                $company_currency = json_decode($companyData->data)->currency;
+                $company_currency = $tenantData->currency ?? null;
             }
-            $enable_map = json_decode($companyData->data)->maps_api;
-            $country_of_user = json_decode($companyData->data)->country_of_use;
-            $company_booking_system = json_decode($companyData->data)->uber_plot_hybrid;
+            $enable_map = $tenantData->maps_api ?? null;
+            $country_of_user = $tenantData->country_of_use ?? null;
+            $company_booking_system = $tenantData->uber_plot_hybrid ?? null;
+            $tenant_google_api_key = $companyData->google_api_key ?? ($tenantData->google_api_key ?? null);
+            $google_api_keys = in_array(strtolower((string) $enable_map), ['google', 'both'], true)
+                ? (trim((string) ($google_api_keys ?? '')) ?: $tenant_google_api_key)
+                : null;
 
             if($company_booking_system == "auto"){
                 $company_booking_system = "auto_dispatch";
