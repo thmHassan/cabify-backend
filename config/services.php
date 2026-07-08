@@ -57,6 +57,8 @@ return [
 
     'node_socket' => [
         'url' => env('NODE_SOCKET_URL', 'http://127.0.0.1:8000/socket-api'),
+        'client_url' => env('SOCKET_URL'),
+        'client_port' => env('SOCKET_CLIENT_PORT'),
         'internal_secret' => env('NODE_INTERNAL_SECRET'),
     ],
 

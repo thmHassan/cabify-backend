@@ -33,6 +33,7 @@ app.options(/.*/, cors(SOCKET_API_CORS));
 const server = http.createServer(app);
 const SOCKET_PING_INTERVAL_MS = Number(process.env.SOCKET_PING_INTERVAL_MS || 25000);
 const SOCKET_PING_TIMEOUT_MS = Number(process.env.SOCKET_PING_TIMEOUT_MS || 60000);
+const SOCKET_SERVER_PORT = Number(process.env.SOCKET_SERVER_PORT || process.env.PORT || 3001);
 
 const io = new Server(server, {
     pingInterval: SOCKET_PING_INTERVAL_MS,
@@ -2380,38 +2381,72 @@ io.on("connection", (socket) => {
             }
 
             const db = getConnection(toTenantDbName(dbName));
-            const plotId = data?.plot_id || null;
+            let plotId = data?.plot_id || null;
             const bookingId = data?.booking_id || null;
+            const driverId = data?.driver_id || socket.driverId || socket.handshake.query.driver_id || null;
+            const buildPlotSummary = async (currentPlotId = null) => {
+                const [plotRows] = await db.query(
+                    `SELECT p.id AS plot_id,
+                            p.name AS plot_name,
+                            COUNT(DISTINCT q.driver_id) AS total_drivers
+                     FROM plots p
+                     LEFT JOIN plot_driver_queues q ON q.plot_id = p.id
+                     GROUP BY p.id, p.name
+                     ORDER BY p.name ASC, p.id ASC`
+                );
+
+                const plots = plotRows.map((plot) => ({
+                    plot_id: plot.plot_id,
+                    plot_name: plot.plot_name || `Plot #${plot.plot_id}`,
+                    total_drivers: Number(plot.total_drivers || 0),
+                    is_current_plot: currentPlotId
+                        ? String(plot.plot_id) === String(currentPlotId)
+                        : false,
+                }));
+
+                const currentPlot = currentPlotId
+                    ? plots.find((plot) => String(plot.plot_id) === String(currentPlotId)) || null
+                    : null;
+
+                return { plots, currentPlot };
+            };
+
+            if (!plotId && driverId) {
+                const [driverRows] = await db.query(
+                    "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
+                    [driverId]
+                );
+                plotId = driverRows[0]?.plot_id || null;
+            }
 
             if (plotId) {
                 const queue = await waitingQueue.loadPlotQueueFromDb(db, plotId, dbName);
-                const payload = await waitingQueue.buildDriverPayload(db, dbName, plotId, queue, bookingId);
+                const { plots, currentPlot } = await buildPlotSummary(plotId);
 
                 socket.emit("my-rank-update", {
                     success: true,
                     database: dbName,
-                    plot_id: payload.plot_id,
-                    booking_id: payload.booking_id,
-                    drivers: payload.drivers,
-                    total_idle_drivers: payload.drivers.length,
+                    plot_id: plotId,
+                    booking_id: bookingId,
+                    plots,
+                    current_plot: currentPlot,
+                    total_drivers: currentPlot?.total_drivers ?? queue.length,
                 });
                 return;
             }
 
-            const [plotRows] = await db.query('SELECT DISTINCT plot_id FROM plot_driver_queues ORDER BY plot_id ASC');
-            for (const row of plotRows) {
-                const queue = await waitingQueue.loadPlotQueueFromDb(db, row.plot_id, dbName);
-                const payload = await waitingQueue.buildDriverPayload(db, dbName, row.plot_id, queue, bookingId);
+            const { plots } = await buildPlotSummary(null);
 
-                socket.emit("my-rank-update", {
-                    success: true,
-                    database: dbName,
-                    plot_id: payload.plot_id,
-                    booking_id: payload.booking_id,
-                    drivers: payload.drivers,
-                    total_idle_drivers: payload.drivers.length,
-                });
-            }
+            socket.emit("my-rank-update", {
+                success: true,
+                database: dbName,
+                plot_id: null,
+                booking_id: bookingId,
+                plots,
+                current_plot: null,
+                total_drivers: 0,
+                message: plots.length ? "No current plot found" : "No plots found",
+            });
 
         } catch (err) {
             console.error("[get-my-rank] Error:", err.message);
@@ -7212,6 +7247,6 @@ setInterval(async () => {
     }
 }, 10 * 1000)
 
-server.listen(3001, "0.0.0.0", SOCKET_LISTEN_BACKLOG, () => {
-    console.log(`🚀 Socket server running on port 3001 (backlog ${SOCKET_LISTEN_BACKLOG})`);
+server.listen(SOCKET_SERVER_PORT, "0.0.0.0", SOCKET_LISTEN_BACKLOG, () => {
+    console.log(`🚀 Socket server running on port ${SOCKET_SERVER_PORT} (backlog ${SOCKET_LISTEN_BACKLOG})`);
 });
