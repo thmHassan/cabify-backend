@@ -16,6 +16,10 @@ class Kernel extends ConsoleKernel
         $schedule->command('app:release-due-pre-bookings')
                  ->everyMinute()
                  ->withoutOverlapping();
+
+        $schedule->command('app:send-due-booking-reminders')
+                 ->everyMinute()
+                 ->withoutOverlapping();
         
         $schedule->command('app:make-cancel-ride-zero')
                  ->daily()

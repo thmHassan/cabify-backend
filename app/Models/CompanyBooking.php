@@ -20,6 +20,7 @@ class CompanyBooking extends Model
         'dispatch_release_at' => 'datetime',
         'dispatch_release_override' => 'boolean',
         'reminder_minutes' => 'integer',
+        'reminder_sent_at' => 'datetime',
         'bidding_fallback' => 'boolean',
     ];
 

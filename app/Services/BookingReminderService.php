@@ -6,6 +6,7 @@ use App\Jobs\SendBookingReminderJob;
 use App\Models\CompanyBooking;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Validation\ValidationException;
 
 class BookingReminderService
@@ -69,6 +70,10 @@ class BookingReminderService
 
         $remindAt = $this->resolveReminderDateTime($booking);
         if (!$remindAt || !$remindAt->isFuture()) {
+            return;
+        }
+
+        if (Config::get('queue.default') === 'sync') {
             return;
         }
 

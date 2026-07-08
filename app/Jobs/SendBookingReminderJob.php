@@ -38,7 +38,11 @@ class SendBookingReminderJob implements ShouldQueue
             return;
         }
 
-        if (in_array($booking->booking_status, ['cancelled', 'completed'], true)) {
+        if (in_array($booking->booking_status, ['cancelled', 'completed', 'no_show'], true)) {
+            return;
+        }
+
+        if ($booking->reminder_sent_at) {
             return;
         }
 
@@ -60,7 +64,7 @@ class SendBookingReminderJob implements ShouldQueue
         );
 
         try {
-            Http::withHeaders([
+            $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
             ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
                 'clientId' => $this->tenantDatabase,
@@ -76,6 +80,12 @@ class SendBookingReminderJob implements ShouldQueue
                 'reminder_minutes' => $booking->reminder_minutes,
                 'driver_id' => $booking->driver,
             ]);
+
+            if ($response->successful()) {
+                $booking->forceFill([
+                    'reminder_sent_at' => Carbon::now('UTC'),
+                ])->save();
+            }
         } catch (\Exception $e) {
             \Log::warning('Booking reminder socket call failed', [
                 'booking_id' => $booking->id,
