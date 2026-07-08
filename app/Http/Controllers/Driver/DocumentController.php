@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyDocumentType;
 use App\Models\DriverDocument;
+use Illuminate\Support\Facades\File;
 
 class DocumentController extends Controller
 {
@@ -29,11 +30,21 @@ class DocumentController extends Controller
 
     public function documentUpload(Request $request){
         try{
-            $folderName = $request->header('database');
+            $folderName = $request->header('database', $request->header('companyCode', $request->input('companyCode', $request->input('company_code'))));
 
             $request->validate([
-                'document_id' => 'required'
+                'document_id' => 'required',
+                'front_photo' => 'nullable|file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+                'back_photo' => 'nullable|file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+                'profile_photo' => 'nullable|file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             ]);
+
+            if (!filled($folderName)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Company code is required'
+                ], 422);
+            }
 
             $documentType = CompanyDocumentType::where('id', $request->document_id)->first();
             if (!$documentType) {
@@ -93,6 +104,7 @@ class DocumentController extends Controller
             if(isset($request->front_photo) && $request->front_photo != NULL){
                 $file = $request->file('front_photo');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                File::ensureDirectoryExists(public_path($folderName.'/front_photo'));
                 $file->move(public_path($folderName.'/front_photo'), $filename);
                 $newDocument->front_photo = $folderName.'/front_photo/'.$filename;
             }
@@ -100,6 +112,7 @@ class DocumentController extends Controller
             if(isset($request->back_photo) && $request->back_photo != NULL){
                 $file = $request->file('back_photo');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                File::ensureDirectoryExists(public_path($folderName.'/back_photo'));
                 $file->move(public_path($folderName.'/back_photo'), $filename);
                 $newDocument->back_photo = $folderName.'/back_photo/'.$filename;
             }
@@ -107,6 +120,7 @@ class DocumentController extends Controller
             if(isset($request->profile_photo) && $request->profile_photo != NULL){
                 $file = $request->file('profile_photo');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                File::ensureDirectoryExists(public_path($folderName.'/profile_photo'));
                 $file->move(public_path($folderName.'/profile_photo'), $filename);
                 $newDocument->profile_photo = $folderName.'/profile_photo/'.$filename;
             }
