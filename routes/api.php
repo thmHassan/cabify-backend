@@ -374,6 +374,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);
         Route::get('/driver/get-mobile-setting', [DriverSettingController::class, 'getMobileSetting']);
+        Route::get('/driver/mapify-tiles/{theme}', [MapifyMapController::class, 'tiles']);
+        Route::get('/driver/mapify-tiles/{theme}/{z}/{x}/{y}', [MapifyMapController::class, 'tiles']);
 
         Route::get('/driver/document-list', [DriverDocumentController::class, 'documentList']);
         Route::post('/driver/document-upload', [DriverDocumentController::class, 'documentUpload']);
