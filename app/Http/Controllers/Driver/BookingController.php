@@ -792,6 +792,40 @@ class BookingController extends Controller
             || str_contains($action, 'dispatching now');
     }
 
+    private function driverWasOfferedRide(CompanyBooking $booking, $driverId): bool
+    {
+        if (
+            (string) $booking->driver === (string) $driverId
+            || (string) $booking->pending_driver_id === (string) $driverId
+        ) {
+            return true;
+        }
+
+        return CompanySendNewRide::where('booking_id', $booking->id)
+            ->where('driver_id', $driverId)
+            ->exists();
+    }
+
+    private function postDriverOfferDecisionToSocket(Request $request, CompanyBooking $booking, $driverId, string $endpoint)
+    {
+        $response = Http::withHeaders([
+            'database' => $request->header('database'),
+            'Accept' => 'application/json',
+        ])->post(SocketApiUrlResolver::endpoint(null, 'bookings/' . $booking->id . '/' . $endpoint), [
+            'driver_id' => $driverId,
+        ]);
+
+        if (!$response->successful()) {
+            $message = $response->json('message') ?? 'Failed to process ride offer decision';
+            return response()->json([
+                'error' => 1,
+                'message' => $message,
+            ], $response->status());
+        }
+
+        return null;
+    }
+
     public function rejectRide(Request $request)
     {
         try {
@@ -809,16 +843,12 @@ class BookingController extends Controller
                 ], 404);
             }
 
-            $wasNotified = CompanySendNewRide::where('booking_id', $booking->id)
-                ->where('driver_id', $driverId)
-                ->exists();
+            $wasOffered = $this->driverWasOfferedRide($booking, $driverId);
 
             if ($booking->booking_status !== 'pending' && !$this->isRejectableManualAssignment($booking, $driverId)) {
                 return response()->json([
                     'success' => 1,
-                    'message' => $wasNotified
-                        ? 'Ride is no longer available'
-                        : 'Ride is no longer available',
+                    'message' => 'Ride is no longer available',
                     'skipped' => true,
                 ]);
             }
@@ -826,7 +856,7 @@ class BookingController extends Controller
             if (
                 (string) $booking->driver !== (string) $driverId
                 && (string) $booking->pending_driver_id !== (string) $driverId
-                && !$wasNotified
+                && !$wasOffered
             ) {
                 return response()->json([
                     'error' => 1,
@@ -834,19 +864,9 @@ class BookingController extends Controller
                 ], 400);
             }
 
-            $response = Http::withHeaders([
-                'database' => $request->header('database'),
-                'Accept' => 'application/json',
-            ])->post(SocketApiUrlResolver::endpoint(null, 'bookings/' . $booking->id . '/auto-dispatch/reject'), [
-                'driver_id' => $driverId,
-            ]);
-
-            if (!$response->successful()) {
-                $message = $response->json('message') ?? 'Failed to process ride rejection';
-                return response()->json([
-                    'error' => 1,
-                    'message' => $message,
-                ], $response->status());
+            $socketError = $this->postDriverOfferDecisionToSocket($request, $booking, $driverId, 'auto-dispatch/reject');
+            if ($socketError) {
+                return $socketError;
             }
 
             return response()->json([
@@ -878,7 +898,7 @@ class BookingController extends Controller
                 ], 404);
             }
 
-            if ($booking->booking_status !== 'pending' || !$this->isRejectableManualAssignment($booking, $driverId)) {
+            if ($booking->booking_status !== 'pending' || !$this->driverWasOfferedRide($booking, $driverId)) {
                 return response()->json([
                     'success' => 1,
                     'message' => 'Ride offer is no longer available',
@@ -886,19 +906,13 @@ class BookingController extends Controller
                 ]);
             }
 
-            $response = Http::withHeaders([
-                'database' => $request->header('database'),
-                'Accept' => 'application/json',
-            ])->post(SocketApiUrlResolver::endpoint(null, 'bookings/' . $booking->id . '/manual-assignment/expire'), [
-                'driver_id' => $driverId,
-            ]);
+            $endpoint = $this->isRejectableManualAssignment($booking, $driverId)
+                ? 'manual-assignment/expire'
+                : 'auto-dispatch/reject';
 
-            if (!$response->successful()) {
-                $message = $response->json('message') ?? 'Failed to process ride offer expiry';
-                return response()->json([
-                    'error' => 1,
-                    'message' => $message,
-                ], $response->status());
+            $socketError = $this->postDriverOfferDecisionToSocket($request, $booking, $driverId, $endpoint);
+            if ($socketError) {
+                return $socketError;
             }
 
             return response()->json([

@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -24,6 +25,7 @@ class BiddingRideVisibilityTest extends TestCase
         DB::connection('sqlite')->getPdo();
 
         $this->createTables();
+        Config::set('services.node_socket.url', 'http://socket.test');
     }
 
     protected function tearDown(): void
@@ -194,6 +196,124 @@ class BiddingRideVisibilityTest extends TestCase
         $this->assertSame($bookingId, $payload['list'][0]['id']);
     }
 
+    public function test_manual_assignment_expiry_uses_manual_assignment_socket_endpoint(): void
+    {
+        $driverId = $this->createAuthenticatedDriver();
+        $userId = $this->createUser();
+        $bookingId = DB::table('bookings')->insertGetId([
+            'user_id' => $userId,
+            'driver' => $driverId,
+            'pending_driver_id' => null,
+            'vehicle' => '4',
+            'pickup_time' => 'asap',
+            'pickup_time_type' => 'asap',
+            'booking_status' => 'pending',
+            'booking_date' => now()->toDateString(),
+            'dispatcher_action' => 'Created by Dispatcher. Driver selected - dispatching now.',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'http://socket.test/bookings/*/manual-assignment/expire' => Http::response(['success' => true], 200),
+        ]);
+
+        $response = (new BookingController())->expireRideOffer($this->driverOfferRequest($bookingId));
+        $payload = $response->getData(true);
+
+        $this->assertSame(1, $payload['success']);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), "/bookings/{$bookingId}/manual-assignment/expire")
+            && (string) $request['driver_id'] === (string) $driverId);
+    }
+
+    public function test_auto_dispatch_expiry_uses_auto_dispatch_reject_socket_endpoint(): void
+    {
+        $driverId = $this->createAuthenticatedDriver();
+        $userId = $this->createUser();
+        $bookingId = DB::table('bookings')->insertGetId([
+            'user_id' => $userId,
+            'driver' => $driverId,
+            'pending_driver_id' => null,
+            'vehicle' => '4',
+            'pickup_time' => 'asap',
+            'pickup_time_type' => 'asap',
+            'booking_status' => 'pending',
+            'booking_date' => now()->toDateString(),
+            'dispatcher_action' => 'Nearest driver dispatch active - offered to driver',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'http://socket.test/bookings/*/auto-dispatch/reject' => Http::response(['success' => true], 200),
+        ]);
+
+        $response = (new BookingController())->expireRideOffer($this->driverOfferRequest($bookingId));
+        $payload = $response->getData(true);
+
+        $this->assertSame(1, $payload['success']);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), "/bookings/{$bookingId}/auto-dispatch/reject")
+            && (string) $request['driver_id'] === (string) $driverId);
+    }
+
+    public function test_expiry_for_unoffered_ride_skips_without_socket_call(): void
+    {
+        $this->createAuthenticatedDriver();
+        $userId = $this->createUser();
+        $bookingId = DB::table('bookings')->insertGetId([
+            'user_id' => $userId,
+            'driver' => null,
+            'pending_driver_id' => null,
+            'vehicle' => '4',
+            'pickup_time' => 'asap',
+            'pickup_time_type' => 'asap',
+            'booking_status' => 'pending',
+            'booking_date' => now()->toDateString(),
+            'dispatcher_action' => 'Waiting for dispatch',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake();
+
+        $response = (new BookingController())->expireRideOffer($this->driverOfferRequest($bookingId));
+        $payload = $response->getData(true);
+
+        $this->assertSame(1, $payload['success']);
+        $this->assertTrue($payload['skipped']);
+        Http::assertNothingSent();
+    }
+
+    private function createAuthenticatedDriver(): int
+    {
+        $driverId = DB::table('drivers')->insertGetId([
+            'name' => 'Driver One',
+            'email' => 'driver' . uniqid() . '@example.test',
+            'assigned_vehicle' => '4',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        Auth::guard('driver')->setUser(CompanyDriver::findOrFail($driverId));
+
+        return $driverId;
+    }
+
+    private function createUser(): int
+    {
+        return DB::table('users')->insertGetId([
+            'name' => 'Customer One',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function driverOfferRequest(int $bookingId): Request
+    {
+        return Request::create('/api/driver/expire-ride-offer', 'POST', ['ride_id' => $bookingId], [], [], [
+            'HTTP_database' => 'tenant_test',
+        ]);
+    }
+
     private function createTables(): void
     {
         Schema::create('drivers', function (Blueprint $table) {
@@ -236,6 +356,7 @@ class BiddingRideVisibilityTest extends TestCase
             $table->id();
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('driver')->nullable();
+            $table->unsignedBigInteger('pending_driver_id')->nullable();
             $table->string('vehicle')->nullable();
             $table->string('pickup_time')->nullable();
             $table->string('pickup_time_type')->nullable();
@@ -244,6 +365,7 @@ class BiddingRideVisibilityTest extends TestCase
             $table->date('booking_date')->nullable();
             $table->string('booking_status')->default('pending');
             $table->decimal('distance', 10, 2)->nullable();
+            $table->text('dispatcher_action')->nullable();
             $table->timestamps();
         });
 
