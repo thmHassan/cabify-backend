@@ -282,6 +282,8 @@ class SettingController extends Controller
                     'support_tickets_enabled' => true,
                     'release_settings' => CompanySetting::resolveReleaseSettings($setting),
                 ],
+                'socket_url' => $this->clientSocketUrl(),
+                'socket_port' => $this->clientSocketPort(),
             ];
 
             return response()->json([
@@ -328,6 +330,21 @@ class SettingController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function clientSocketUrl(): ?string
+    {
+        $url = config('services.node_socket.client_url') ?: config('services.node_socket.url');
+        $url = preg_replace('#/socket-api/?$#', '', rtrim((string) $url, '/'));
+
+        return $url !== '' ? $url : null;
+    }
+
+    private function clientSocketPort(): ?int
+    {
+        $port = config('services.node_socket.client_port');
+
+        return is_numeric($port) && (int) $port > 0 ? (int) $port : null;
     }
 
      public function sendMessage(Request $request){

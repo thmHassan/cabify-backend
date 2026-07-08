@@ -289,8 +289,11 @@ class SettingController extends Controller
                 'dispatch_system' => $dispatchContext['dispatch_system'],
                 'supports_rank' => $dispatchContext['supports_rank'],
                 'supports_bidding' => $dispatchContext['supports_bidding'],
+                'fallback_to_bidding' => $dispatchContext['fallback_to_bidding'],
                 'supports_manual_assignment' => $dispatchContext['supports_manual_assignment'],
                 'show_rank' => $dispatchContext['show_rank'],
+                'socket_url' => $this->clientSocketUrl(),
+                'socket_port' => $this->clientSocketPort(),
             ];
 
             return response()->json([
@@ -306,7 +309,22 @@ class SettingController extends Controller
         }
     }
 
-    public function sendMessage(Request $request){
+    private function clientSocketUrl(): ?string
+    {
+        $url = config('services.node_socket.client_url') ?: config('services.node_socket.url');
+        $url = preg_replace('#/socket-api/?$#', '', rtrim((string) $url, '/'));
+
+        return $url !== '' ? $url : null;
+    }
+
+    private function clientSocketPort(): ?int
+    {
+        $port = config('services.node_socket.client_port');
+
+        return is_numeric($port) && (int) $port > 0 ? (int) $port : null;
+    }
+
+     public function sendMessage(Request $request){
         try{
             $chat = new CompanyChat;
             $chat->send_by = "driver";
@@ -711,6 +729,7 @@ class SettingController extends Controller
     private function driverDispatchContext(?string $companyBookingSystem = null): array
     {
         $enabledSystems = [];
+        $fallbackToBidding = false;
         if (Schema::connection("tenant")->hasTable("dispatch_system")) {
             $enabledSystems = CompanyDispatchSystem::where("status", "enable")
                 ->orderByRaw("priority IS NULL, priority ASC")
@@ -718,6 +737,13 @@ class SettingController extends Controller
                 ->pluck("dispatch_system")
                 ->values()
                 ->all();
+
+            $fallbackToBidding = CompanyDispatchSystem::where("status", "enable")
+                ->where("steps", "put_in_bidding_panel")
+                ->when($enabledSystems[0] ?? null, function ($query, $dispatchSystem) {
+                    $query->where("dispatch_system", $dispatchSystem);
+                })
+                ->exists();
         }
 
         $dispatchSystem = $enabledSystems[0] ?? null;
@@ -753,6 +779,7 @@ class SettingController extends Controller
             "company_booking_system" => $companyBookingSystem ?: "auto_dispatch",
             "supports_rank" => $dispatchSystem === "auto_dispatch_plot_base",
             "supports_bidding" => $supportsBidding,
+            "fallback_to_bidding" => $fallbackToBidding,
             "supports_manual_assignment" => true,
             "show_rank" => $dispatchSystem === "auto_dispatch_plot_base",
         ];

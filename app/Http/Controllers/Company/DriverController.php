@@ -11,6 +11,7 @@ use App\Models\CompanyBooking;
 use App\Models\CompanyNotification;
 use App\Models\CompanySetting;
 use App\Models\Setting;
+use App\Models\CompanyDocumentType;
 use App\Services\FCMService;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Http;
@@ -18,6 +19,9 @@ use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Models\CompanyVehicleType;
 use App\Services\DriverSessionService;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use Hash;
 
 class DriverController extends Controller
@@ -43,7 +47,43 @@ class DriverController extends Controller
                 ],
                 'address' => 'required|max:255',
                 'driver_license' => 'required|max:255',
-                'joined_date' => 'nullable|date'
+                'joined_date' => 'nullable|date',
+                'profile_image' => 'nullable|image|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'gender' => 'nullable|string|max:50',
+                'date_of_birth' => 'nullable|date',
+                'dob' => 'nullable|date',
+                'city' => 'nullable|string|max:255',
+                'country' => 'nullable|string|max:255',
+                'seats' => 'nullable|string|max:50',
+                'color' => 'nullable|string|max:100',
+                'plate_no' => 'nullable|string|max:100',
+                'vehicle_registration_date' => 'nullable|date',
+                'documentKeys' => 'nullable',
+                'documentKeys.*' => 'nullable',
+                'documentExpiryDates' => 'nullable',
+                'document_expiry_dates' => 'nullable',
+                'documentIssueDates' => 'nullable',
+                'document_issue_dates' => 'nullable',
+                'documentNumbers' => 'nullable',
+                'document_numbers' => 'nullable',
+                'documents' => 'nullable',
+                'documents.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'documentFrontPhotos' => 'nullable',
+                'documentFrontPhotos.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'document_front_photos' => 'nullable',
+                'document_front_photos.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'documentBackPhotos' => 'nullable',
+                'documentBackPhotos.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'document_back_photos' => 'nullable',
+                'document_back_photos.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'documentProfilePhotos' => 'nullable',
+                'documentProfilePhotos.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'document_profile_photos' => 'nullable',
+                'document_profile_photos.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'documentFiles' => 'nullable',
+                'documentFiles.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
+                'document_files' => 'nullable',
+                'document_files.*' => 'file|mimes:jpg,jpeg,png,gif,webp,heic,heif|max:8192',
             ]);
 
             $dataCheck = (new TenantUser)
@@ -68,6 +108,38 @@ class DriverController extends Controller
                 ]);
             }
 
+            $documentKeys = $this->parseDocumentKeys($request->input('documentKeys'));
+            $documentExpiryDates = $this->parseDocumentValues(
+                $request->input('documentExpiryDates', $request->input('document_expiry_dates')),
+                'documentExpiryDates'
+            );
+            if ($documentExpiryDates instanceof \Illuminate\Http\JsonResponse) {
+                return $documentExpiryDates;
+            }
+
+            $documentIssueDates = $this->parseDocumentValues(
+                $request->input('documentIssueDates', $request->input('document_issue_dates')),
+                'documentIssueDates'
+            );
+            if ($documentIssueDates instanceof \Illuminate\Http\JsonResponse) {
+                return $documentIssueDates;
+            }
+
+            $documentNumbers = $this->parseDocumentValues(
+                $request->input('documentNumbers', $request->input('document_numbers')),
+                'documentNumbers'
+            );
+            if ($documentNumbers instanceof \Illuminate\Http\JsonResponse) {
+                return $documentNumbers;
+            }
+
+            $requirements = CompanyDocumentType::orderBy('id', 'ASC')->get();
+            $requirementsByKey = $requirements->keyBy(fn ($document) => $this->driverDocumentKey($document->document_name, $document->id));
+            $documentsValidation = $this->validateCreateDriverDocuments($request, $documentKeys, $requirementsByKey, $documentIssueDates, $documentExpiryDates, $documentNumbers);
+            if ($documentsValidation instanceof \Illuminate\Http\JsonResponse) {
+                return $documentsValidation;
+            }
+
             $vehicleDetail = CompanyVehicleType::where("id", $request->assigned_vehicle)->first();
 
             $driver = new CompanyDriver;
@@ -77,17 +149,40 @@ class DriverController extends Controller
             $driver->country_code = $request->country_code;
             $driver->phone_no = $request->phone_no;
             $driver->address = $request->address;
+            $driver->gender = $request->input('gender');
+            $driver->date_of_birth = $request->input('date_of_birth', $request->input('dob'));
+            $driver->city = $request->input('city');
+            $driver->country = $request->input('country');
             $driver->driver_license = $request->driver_license;
             $driver->assigned_vehicle = $request->assigned_vehicle;
             $driver->vehicle_name = isset($vehicleDetail->vehicle_type_name) ? $vehicleDetail->vehicle_type_name : NULL;
             $driver->vehicle_type = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
             $driver->vehicle_service = isset($vehicleDetail->vehicle_type_service) ? $vehicleDetail->vehicle_type_service : NULL;
+            $driver->seats = $request->input('seats');
+            $driver->color = $request->input('color');
+            $driver->plate_no = $request->input('plate_no');
+            $driver->vehicle_registration_date = $request->input('vehicle_registration_date');
             $driver->status = "accepted";
             $driver->joined_date = $request->filled('joined_date') ? $request->joined_date : now()->toDateString();
             $driver->sub_company = $request->sub_company;
             $driver->package_id = $request->package_id;
             $driver->dispatcher_id = $request->dispatcher_id;
+            if ($request->hasFile('profile_image')) {
+                $driver->profile_image = $this->storeDriverProfileImage($request->file('profile_image'));
+            }
             $driver->save();
+
+            if ($documentKeys !== []) {
+                $this->storeCreateDriverDocuments(
+                    $request,
+                    $driver,
+                    $documentKeys,
+                    $requirementsByKey,
+                    $documentIssueDates,
+                    $documentExpiryDates,
+                    $documentNumbers
+                );
+            }
 
             return response()->json([
                 'success' => 1,
@@ -348,6 +443,201 @@ class DriverController extends Controller
         $file->move($destination, $filename);
 
         return 'profile_image/' . $filename;
+    }
+
+    private function parseDocumentKeys($value): array
+    {
+        if (!filled($value)) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            return array_values(array_filter($value, fn ($key) => filled($key)));
+        }
+
+        $decoded = json_decode((string) $value, true);
+
+        return is_array($decoded) ? array_values(array_filter($decoded, fn ($key) => filled($key))) : [];
+    }
+
+    private function parseDocumentValues($value, string $fieldName)
+    {
+        if (!filled($value)) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        $decoded = json_decode((string) $value, true);
+        if (!is_array($decoded)) {
+            return response()->json([
+                'error' => 1,
+                'message' => "{$fieldName} must be a valid JSON object or array.",
+            ], 422);
+        }
+
+        return $decoded;
+    }
+
+    private function driverDocumentKey(?string $name, int $id): string
+    {
+        $key = Str::slug((string) $name, '_');
+
+        return $key !== '' ? $key : 'document_' . $id;
+    }
+
+    private function documentValueForKey(array $values, string $documentKey, int $index)
+    {
+        if (array_key_exists($documentKey, $values)) {
+            return $values[$documentKey];
+        }
+
+        return $values[$index] ?? null;
+    }
+
+    private function documentFileForKey(Request $request, array|string $fieldNames, string $documentKey, int $index)
+    {
+        foreach (Arr::wrap($fieldNames) as $fieldName) {
+            $files = $request->file($fieldName, []);
+
+            if (!is_array($files)) {
+                continue;
+            }
+
+            $file = $files[$documentKey] ?? $files[$index] ?? null;
+            if ($file) {
+                return $file;
+            }
+        }
+
+        return null;
+    }
+
+    private function validateCreateDriverDocuments(Request $request, array $documentKeys, $requirementsByKey, array $issueDates, array $expiryDates, array $numbers)
+    {
+        foreach ($documentKeys as $index => $documentKey) {
+            $documentKey = (string) $documentKey;
+            $documentType = $requirementsByKey->get($documentKey);
+
+            if (!$documentType) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => "Document requirement not found for {$documentKey}.",
+                ], 422);
+            }
+
+            $issueDate = $this->documentValueForKey($issueDates, $documentKey, $index);
+            $expiryDate = $this->documentValueForKey($expiryDates, $documentKey, $index);
+            $documentNumber = $this->documentValueForKey($numbers, $documentKey, $index);
+            $frontPhoto = $this->documentFileForKey($request, ['documentFrontPhotos', 'document_front_photos'], $documentKey, $index);
+            $backPhoto = $this->documentFileForKey($request, ['documentBackPhotos', 'document_back_photos'], $documentKey, $index);
+            $profilePhoto = $this->documentFileForKey($request, ['documentProfilePhotos', 'document_profile_photos'], $documentKey, $index);
+            $genericFile = $this->documentFileForKey($request, ['documentFiles', 'document_files', 'documents'], $documentKey, $index);
+
+            if ($documentType->has_number_field === 'yes' && !filled($documentNumber)) {
+                return response()->json(['error' => 1, 'message' => "Document number is required for {$documentKey}."], 422);
+            }
+
+            if ($documentType->has_issue_date === 'yes' && !filled($issueDate)) {
+                return response()->json(['error' => 1, 'message' => "Issue date is required for {$documentKey}."], 422);
+            }
+
+            if ($documentType->has_expiry_date === 'yes' && !filled($expiryDate)) {
+                return response()->json(['error' => 1, 'message' => "Expiry date is required for {$documentKey}."], 422);
+            }
+
+            if ($documentType->front_photo === 'yes' && !$frontPhoto && !($genericFile && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes')) {
+                return response()->json(['error' => 1, 'message' => "Front photo is required for {$documentKey}."], 422);
+            }
+
+            if ($documentType->back_photo === 'yes' && !$backPhoto) {
+                return response()->json(['error' => 1, 'message' => "Back photo is required for {$documentKey}."], 422);
+            }
+
+            if ($documentType->profile_photo === 'yes' && !$profilePhoto) {
+                return response()->json(['error' => 1, 'message' => "Profile photo is required for {$documentKey}."], 422);
+            }
+
+            if ($documentType->front_photo !== 'yes' && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes' && !$genericFile) {
+                return response()->json(['error' => 1, 'message' => "Document image is required for {$documentKey}."], 422);
+            }
+        }
+
+        return null;
+    }
+
+    private function storeCreateDriverDocuments(Request $request, CompanyDriver $driver, array $documentKeys, $requirementsByKey, array $issueDates, array $expiryDates, array $numbers): void
+    {
+        $companyCode = (string) $request->header('database', $request->input('companyCode', $request->input('company_code', '')));
+
+        foreach ($documentKeys as $index => $documentKey) {
+            $documentKey = (string) $documentKey;
+            $documentType = $requirementsByKey->get($documentKey);
+            if (!$documentType) {
+                continue;
+            }
+
+            $driverDocument = new DriverDocument;
+            $driverDocument->driver_id = $driver->id;
+            $driverDocument->document_id = $documentType->id;
+            $driverDocument->document_name = $documentKey;
+
+            $documentNumber = $this->documentValueForKey($numbers, $documentKey, $index);
+            if (filled($documentNumber)) {
+                $driverDocument->has_number_field = $documentNumber;
+            }
+
+            $issueDate = $this->documentValueForKey($issueDates, $documentKey, $index);
+            if (filled($issueDate)) {
+                $driverDocument->has_issue_date = date('Y-m-d', strtotime((string) $issueDate));
+            }
+
+            $expiryDate = $this->documentValueForKey($expiryDates, $documentKey, $index);
+            if (filled($expiryDate)) {
+                $driverDocument->has_expiry_date = date('Y-m-d', strtotime((string) $expiryDate));
+            }
+
+            $frontPhoto = $this->documentFileForKey($request, ['documentFrontPhotos', 'document_front_photos'], $documentKey, $index);
+            $backPhoto = $this->documentFileForKey($request, ['documentBackPhotos', 'document_back_photos'], $documentKey, $index);
+            $profilePhoto = $this->documentFileForKey($request, ['documentProfilePhotos', 'document_profile_photos'], $documentKey, $index);
+            $genericFile = $this->documentFileForKey($request, ['documentFiles', 'document_files', 'documents'], $documentKey, $index);
+
+            if ($documentType->front_photo === 'yes') {
+                if (!$frontPhoto && $genericFile && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes') {
+                    $frontPhoto = $genericFile;
+                }
+                $driverDocument->front_photo = $this->storeDriverDocumentFile($frontPhoto, $companyCode);
+            }
+
+            if ($documentType->back_photo === 'yes') {
+                $driverDocument->back_photo = $this->storeDriverDocumentFile($backPhoto, $companyCode);
+            }
+
+            if ($documentType->profile_photo === 'yes') {
+                $driverDocument->profile_photo = $this->storeDriverDocumentFile($profilePhoto, $companyCode);
+            }
+
+            if ($documentType->front_photo !== 'yes' && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes') {
+                $driverDocument->front_photo = $this->storeDriverDocumentFile($genericFile, $companyCode);
+            }
+
+            $driverDocument->status = 'verified';
+            $driverDocument->save();
+        }
+    }
+
+    private function storeDriverDocumentFile($file, string $companyCode): string
+    {
+        $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+        $targetFolder = trim($companyCode) !== ''
+            ? trim($companyCode) . '/driver_documents'
+            : 'driver_documents';
+        File::ensureDirectoryExists(public_path($targetFolder));
+        $file->move(public_path($targetFolder), $filename);
+
+        return $targetFolder . '/' . $filename;
     }
 
     public function driverProfileImageApprovalList(Request $request)

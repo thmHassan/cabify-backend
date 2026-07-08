@@ -21,6 +21,7 @@ use App\Services\DriverSessionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\File;
 use Illuminate\Validation\Rule;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenBlacklistedException;
@@ -445,15 +446,18 @@ class AuthController extends Controller
             'address' => 'required|string|max:255',
             'city' => 'required|string|max:255',
             'country' => 'required|string|max:255',
-            'countryCode' => 'required|string|max:10',
+            'countryCode' => 'required_without:country_code|nullable|string|max:10',
+            'country_code' => 'required_without:countryCode|nullable|string|max:10',
             'vehicleType' => 'required_without:vehicle_type_id|nullable|exists:vehicle_types,id',
             'vehicle_type_id' => 'required_without:vehicleType|nullable|exists:vehicle_types,id',
             'color' => 'nullable|string|max:100',
             'seats' => 'nullable|string|max:50',
             'plate_no' => 'nullable|string|max:100',
             'vehicle_registration_date' => 'nullable|date',
-            'companyCode' => 'required',
+            'companyCode' => 'required_without:company_code',
+            'company_code' => 'required_without:companyCode',
             'documentKeys' => 'required',
+            'documentKeys.*' => 'nullable',
             'documentExpiryDates' => 'nullable',
             'document_expiry_dates' => 'nullable',
             'documentIssueDates' => 'nullable',
@@ -464,15 +468,25 @@ class AuthController extends Controller
             'documents.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentFrontPhotos' => 'nullable',
             'documentFrontPhotos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+            'document_front_photos' => 'nullable',
+            'document_front_photos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentBackPhotos' => 'nullable',
             'documentBackPhotos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+            'document_back_photos' => 'nullable',
+            'document_back_photos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentProfilePhotos' => 'nullable',
             'documentProfilePhotos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+            'document_profile_photos' => 'nullable',
+            'document_profile_photos.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'documentFiles' => 'nullable',
             'documentFiles.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
+            'document_files' => 'nullable',
+            'document_files.*' => 'file|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'photo' => 'required|image|mimes:jpg,jpeg,png,webp,heic,heif|max:8192',
             'fcmToken' => 'nullable',
+            'fcm_token' => 'nullable',
             'deviceToken' => 'nullable',
+            'device_token' => 'nullable',
         ]);
 
         $limitResponse = $this->ensureDriverLimitNotReached($request);
@@ -480,8 +494,11 @@ class AuthController extends Controller
             return $limitResponse;
         }
 
+        $companyCode = $this->requestInputAny($request, ['companyCode', 'company_code']);
+        $countryCode = $this->requestInputAny($request, ['countryCode', 'country_code']);
+
         $phoneExists = CompanyDriver::where('phone_no', $request->phone)
-            ->where('country_code', $request->countryCode)
+            ->where('country_code', $countryCode)
             ->exists();
 
         if ($phoneExists) {
@@ -491,11 +508,11 @@ class AuthController extends Controller
             ], 400);
         }
 
-        $documentKeys = json_decode((string) $request->documentKeys, true);
+        $documentKeys = $this->parseDocumentKeys($request->input('documentKeys'));
         if (!is_array($documentKeys) || $documentKeys === []) {
             return response()->json([
                 'error' => 1,
-                'message' => 'documentKeys must be a valid JSON array.',
+                'message' => 'documentKeys must be a valid JSON array or multipart array.',
             ], 422);
         }
 
@@ -526,8 +543,6 @@ class AuthController extends Controller
             return $documentNumbers;
         }
 
-        $uploadedDocuments = $request->file('documents', []);
-
         $requirements = CompanyDocumentType::orderBy('id', 'ASC')->get();
         if ($requirements->isEmpty()) {
             return response()->json([
@@ -543,7 +558,7 @@ class AuthController extends Controller
         $driver->name = trim($request->firstName . ' ' . $request->lastName);
         $driver->email = $request->email;
         $driver->phone_no = $request->phone;
-        $driver->country_code = $request->countryCode;
+        $driver->country_code = $countryCode;
         $driver->email_verified = false;
         $driver->password = Hash::make($request->password);
         $driver->address = $request->address;
@@ -561,11 +576,11 @@ class AuthController extends Controller
         $driver->seats = $request->input('seats');
         $driver->plate_no = $request->input('plate_no');
         $driver->vehicle_registration_date = $request->input('vehicle_registration_date');
-        $driver->fcm_token = $request->input('fcmToken');
-        $driver->device_token = $request->input('deviceToken');
+        $driver->fcm_token = $this->requestInputAny($request, ['fcmToken', 'fcm_token']);
+        $driver->device_token = $this->requestInputAny($request, ['deviceToken', 'device_token']);
         $driver->profile_image = $this->storeDriverFile(
             $request->file('photo'),
-            (string) $request->input('companyCode'),
+            (string) $companyCode,
             'profile_image'
         );
         $driver->save();
@@ -640,11 +655,10 @@ class AuthController extends Controller
                 $driverDocument->has_expiry_date = date('Y-m-d', $timestamp);
             }
 
-            $frontPhoto = $this->documentFileForKey($request, 'documentFrontPhotos', $documentKey, $index);
-            $backPhoto = $this->documentFileForKey($request, 'documentBackPhotos', $documentKey, $index);
-            $profilePhoto = $this->documentFileForKey($request, 'documentProfilePhotos', $documentKey, $index);
-            $genericFile = $this->documentFileForKey($request, 'documentFiles', $documentKey, $index)
-                ?? ($uploadedDocuments[$index] ?? null);
+            $frontPhoto = $this->documentFileForKey($request, ['documentFrontPhotos', 'document_front_photos'], $documentKey, $index);
+            $backPhoto = $this->documentFileForKey($request, ['documentBackPhotos', 'document_back_photos'], $documentKey, $index);
+            $profilePhoto = $this->documentFileForKey($request, ['documentProfilePhotos', 'document_profile_photos'], $documentKey, $index);
+            $genericFile = $this->documentFileForKey($request, ['documentFiles', 'document_files', 'documents'], $documentKey, $index);
 
             if ($documentType->front_photo === 'yes') {
                 if (!$frontPhoto && $genericFile && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes') {
@@ -658,7 +672,7 @@ class AuthController extends Controller
                     ], 422);
                 }
 
-                $driverDocument->front_photo = $this->storeDriverFile($frontPhoto, (string) $request->input('companyCode'), 'driver_documents');
+                $driverDocument->front_photo = $this->storeDriverFile($frontPhoto, (string) $companyCode, 'driver_documents');
             }
 
             if ($documentType->back_photo === 'yes') {
@@ -669,7 +683,7 @@ class AuthController extends Controller
                     ], 422);
                 }
 
-                $driverDocument->back_photo = $this->storeDriverFile($backPhoto, (string) $request->input('companyCode'), 'driver_documents');
+                $driverDocument->back_photo = $this->storeDriverFile($backPhoto, (string) $companyCode, 'driver_documents');
             }
 
             if ($documentType->profile_photo === 'yes') {
@@ -680,7 +694,7 @@ class AuthController extends Controller
                     ], 422);
                 }
 
-                $driverDocument->profile_photo = $this->storeDriverFile($profilePhoto, (string) $request->input('companyCode'), 'driver_documents');
+                $driverDocument->profile_photo = $this->storeDriverFile($profilePhoto, (string) $companyCode, 'driver_documents');
             }
 
             if (
@@ -697,14 +711,12 @@ class AuthController extends Controller
                     ], 422);
                 }
 
-                $driverDocument->front_photo = $this->storeDriverFile($imageOnlyDocument, (string) $request->input('companyCode'), 'driver_documents');
+                $driverDocument->front_photo = $this->storeDriverFile($imageOnlyDocument, (string) $companyCode, 'driver_documents');
             }
 
             $driverDocument->status = 'pending';
             $driverDocument->save();
         }
-
-        $this->finalizeDriverRegistration($driver, $request);
 
         $this->finalizeDriverRegistration($driver, $request);
 
@@ -808,9 +820,32 @@ class AuthController extends Controller
     {
         $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
         $targetFolder = trim($companyCode) . '/' . trim($folder, '/');
+        File::ensureDirectoryExists(public_path($targetFolder));
         $file->move(public_path($targetFolder), $filename);
 
         return $targetFolder . '/' . $filename;
+    }
+
+    private function requestInputAny(Request $request, array $fieldNames, $default = null)
+    {
+        foreach ($fieldNames as $fieldName) {
+            if ($request->filled($fieldName)) {
+                return $request->input($fieldName);
+            }
+        }
+
+        return $default;
+    }
+
+    private function parseDocumentKeys($value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter($value, fn ($key) => filled($key)));
+        }
+
+        $decoded = json_decode((string) $value, true);
+
+        return is_array($decoded) ? array_values(array_filter($decoded, fn ($key) => filled($key))) : [];
     }
 
     private function driverDocumentKey(?string $name, int $id): string
@@ -850,15 +885,22 @@ class AuthController extends Controller
         return $values[$index] ?? null;
     }
 
-    private function documentFileForKey(Request $request, string $fieldName, string $documentKey, int $index)
+    private function documentFileForKey(Request $request, array|string $fieldNames, string $documentKey, int $index)
     {
-        $files = $request->file($fieldName, []);
+        foreach (Arr::wrap($fieldNames) as $fieldName) {
+            $files = $request->file($fieldName, []);
 
-        if (!is_array($files)) {
-            return null;
+            if (!is_array($files)) {
+                continue;
+            }
+
+            $file = $files[$documentKey] ?? $files[$index] ?? null;
+            if ($file) {
+                return $file;
+            }
         }
 
-        return $files[$documentKey] ?? $files[$index] ?? null;
+        return null;
     }
 
     private function resolveDriverRequirementType(CompanyDocumentType $document): string
