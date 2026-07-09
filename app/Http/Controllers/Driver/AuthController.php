@@ -1394,16 +1394,39 @@ class AuthController extends Controller
 
     public function setLocation(Request $request){
         try{
-            \Log::info("enter");
+            $driverId = $request->input("driver_id") ?? auth("driver")->id();
+            if (!$driverId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found'
+                ]);
+            }
 
-            $driver = CompanyDriver::where("id", $request->driver_id)->first();
-            $driver->latitude = isset($request->latitude) ? $request->latitude : $driver->latitude;
-            $driver->longitude = isset($request->longitude) ? $request->longitude : $driver->longitude;
+            $driver = CompanyDriver::where("id", $driverId)->first();
+            if (!$driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Driver not found'
+                ]);
+            }
+
+            $latitude = $request->input("latitude", $request->input("lat"));
+            $longitude = $request->input("longitude", $request->input("lng"));
+
+            if ($latitude !== null) {
+                $driver->latitude = $latitude;
+            }
+            if ($longitude !== null) {
+                $driver->longitude = $longitude;
+            }
             $driver->save();
 
-            $plot_id = $this->getPlot($driver->latitude, $driver->longitude);
+            $plot_id = null;
+            if (is_numeric($driver->latitude) && is_numeric($driver->longitude)) {
+                $plot_id = $this->getPlot((float) $driver->latitude, (float) $driver->longitude);
+            }
             if(isset($plot_id) && $plot_id != NULL){
-                $drivers = CompanyDriver::where("plot_id", $plot_id)->orderBy("priority_plot")->where("id", "!=", $request->driver_id)->get();
+                $drivers = CompanyDriver::where("plot_id", $plot_id)->orderBy("priority_plot")->where("id", "!=", $driverId)->get();
                 $key = -1;
 
                 foreach($drivers as $key => $driver){
@@ -1411,7 +1434,7 @@ class AuthController extends Controller
                     $driver->save();
                 }
 
-                $driver = CompanyDriver::where("id", $request->driver_id)->first();
+                $driver = CompanyDriver::where("id", $driverId)->first();
                 $driver->plot_id = $plot_id;
                 $driver->priority_plot = $key + 2;
                 $driver->save();
@@ -1436,8 +1459,33 @@ class AuthController extends Controller
             $records = CompanyPlot::orderBy("id", "DESC")->get();
             $matched = null;
             foreach ($records as $rec) {
-                $polygon = json_decode($rec->features, true);
-                $array = json_decode($polygon['geometry']['coordinates'], true)[0];
+                $featurePayload = is_string($rec->features) ? json_decode($rec->features, true) : $rec->features;
+                if (isset($featurePayload["features"][0]["geometry"])) {
+                    $featurePayload = $featurePayload["features"][0];
+                }
+
+                $geometry = $featurePayload["geometry"] ?? null;
+                if (!$geometry) {
+                    continue;
+                }
+
+                $coordinates = $geometry["coordinates"] ?? null;
+                if (is_string($coordinates)) {
+                    $coordinates = json_decode($coordinates, true);
+                }
+
+                if (!is_array($coordinates)) {
+                    continue;
+                }
+
+                if (is_array($coordinates[0] ?? null) && is_array($coordinates[0][0] ?? null) && is_array($coordinates[0][0][0] ?? null)) {
+                    $array = $coordinates[0][0];
+                } else if (is_array($coordinates[0] ?? null) && is_array($coordinates[0][0] ?? null)) {
+                    $array = $coordinates[0];
+                } else {
+                    continue;
+                }
+
                 if ($this->pointInPolygon($lat, $lng, $array)) {
                     $matched = $rec;
                     break;

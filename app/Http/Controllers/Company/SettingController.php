@@ -279,6 +279,10 @@ class SettingController extends Controller
     public function saveMainCommission(Request $request)
     {
         try {
+            $request->validate([
+                'cancellation_per_day' => 'nullable|integer|min:0',
+            ]);
+
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
             if (!isset($settings) || $settings == NULL) {
@@ -289,7 +293,9 @@ class SettingController extends Controller
             $settings->package_days = isset($request->package_days) ? $request->package_days : NULL;
             $settings->package_amount = isset($request->package_amount) ? $request->package_amount : NULL;
             $settings->package_percentage = isset($request->package_percentage) ? $request->package_percentage : NULL;
-            $settings->cancellation_per_day = isset($request->cancellation_per_day) ? $request->cancellation_per_day : NULL;
+            $settings->cancellation_per_day = $request->filled('cancellation_per_day')
+                ? (int) $request->cancellation_per_day
+                : null;
             $settings->waiting_time_charge = isset($request->waiting_time_charge) ? $request->waiting_time_charge : NULL;
             $settings->save();
 

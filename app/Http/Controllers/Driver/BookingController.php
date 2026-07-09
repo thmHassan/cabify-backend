@@ -343,8 +343,9 @@ class BookingController extends Controller
             ]);
 
             $setting = CompanySetting::orderBy("id", "DESC")->first();
+            $cancellationLimit = (int) ($setting->cancellation_per_day ?? 0);
 
-            if ($setting->cancellation_per_day <= auth("driver")->user()->cancel_rides_per_day) {
+            if ($cancellationLimit > 0 && (int) auth("driver")->user()->cancel_rides_per_day >= $cancellationLimit) {
                 return response()->json([
                     'error' => 1,
                     'message' => "You have reached cancellation limit per day"

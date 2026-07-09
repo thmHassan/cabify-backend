@@ -221,12 +221,317 @@ const tenantSocketKey = (database, id) => {
 
 const toTenantSocketName = (database) => {
     const value = String(database || '').trim();
-    return value.replace(/^tenant/i, '');
+    return value.replace(/^tenant[_-]?/i, '');
 };
 
 const toTenantDbName = (database) => {
     const value = toTenantSocketName(database);
     return value ? `tenant${value}` : null;
+};
+
+const resolveTenantDbForRequest = async (req) => {
+    const headerDatabase = req.headers['database']
+        || req.headers['x-database']
+        || req.body?.database
+        || req.body?.tenantDb
+        || req.query?.database
+        || req.query?.tenantDb;
+
+    const candidates = new Set();
+
+    if (headerDatabase) {
+        const databaseValue = String(headerDatabase).trim();
+        if (databaseValue) {
+            const socketName = toTenantSocketName(databaseValue);
+            candidates.add(databaseValue);
+            candidates.add(socketName);
+            candidates.add(`tenant_${socketName}`);
+            candidates.add(`tenant${socketName}`);
+            candidates.add(req.tenantDb);
+            candidates.add(toTenantDbName(socketName));
+        }
+    }
+
+    if (req.tenantDb) {
+        candidates.add(req.tenantDb);
+        candidates.add(toTenantDbName(req.tenantDb));
+    }
+
+    for (const candidate of candidates) {
+        if (!candidate) {
+            continue;
+        }
+        const resolved = await resolveTenantDb(candidate);
+        if (resolved) {
+            return resolved;
+        }
+    }
+
+    if (req.tenantDb) {
+        const normalized = toTenantSocketName(req.tenantDb);
+        if (normalized && normalized !== req.tenantDb) {
+            const resolved = await resolveTenantDb(normalized);
+            if (resolved) {
+                return resolved;
+            }
+        }
+    }
+
+    return null;
+};
+
+const tenantDbCache = new Map();
+
+const tenantDbCandidates = (database) => {
+    const value = String(database || '').trim();
+    if (!value) return [];
+
+    const withoutPrefix = value.replace(/^tenant[_-]?/i, '');
+    const candidates = new Set([value]);
+
+    candidates.add(`${withoutPrefix}`);
+    if (withoutPrefix) {
+        candidates.add(`tenant_${withoutPrefix}`);
+        candidates.add(`tenant${withoutPrefix}`);
+    }
+
+    const withPrefix = toTenantDbName(withoutPrefix);
+    if (withPrefix) {
+        candidates.add(withPrefix);
+    }
+
+    const normalizedWithoutPrefix = toTenantSocketName(withoutPrefix);
+    if (normalizedWithoutPrefix && normalizedWithoutPrefix !== withoutPrefix) {
+        candidates.add(`tenant_${normalizedWithoutPrefix}`);
+        candidates.add(`tenant${normalizedWithoutPrefix}`);
+    }
+
+    return [...candidates]
+        .map((item) => String(item || '').trim())
+        .filter((item) => item);
+};
+
+const schemaExists = async (database) => {
+    const db = getConnection();
+    const [rows] = await db.query(
+        'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+        [database]
+    );
+
+    return !!rows && rows.length > 0;
+};
+
+const levenshteinDistance = (left, right) => {
+    const source = String(left || "");
+    const target = String(right || "");
+    const sourceLength = source.length;
+    const targetLength = target.length;
+
+    if (sourceLength === 0) return targetLength;
+    if (targetLength === 0) return sourceLength;
+
+    const matrix = Array.from({ length: sourceLength + 1 }, (_, row) => {
+        const rowArray = new Array(targetLength + 1).fill(0);
+        rowArray[0] = row;
+        return rowArray;
+    });
+
+    for (let col = 0; col <= targetLength; col += 1) {
+        matrix[0][col] = col;
+    }
+
+    for (let i = 1; i <= sourceLength; i += 1) {
+        for (let j = 1; j <= targetLength; j += 1) {
+            const cost = source[i - 1] === target[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j - 1] + cost
+            );
+        }
+    }
+
+    return matrix[sourceLength][targetLength];
+};
+
+const resolveTenantDbByHeuristic = async (database) => {
+    const rawRequested = String(database || "").trim().toLowerCase();
+    const requested = rawRequested.replace(/[^a-z0-9_]/g, "");
+    const requestedWithoutTenant = toTenantSocketName(requested);
+    if (!requested) return null;
+
+    const centralDb = getConnection();
+    const [schemaRows] = await centralDb.query(
+        "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME LIKE 'tenant%'"
+    );
+
+    const requestedParts = requested.split("_");
+    const requestedSuffix = requestedParts.length > 1 ? requestedParts[requestedParts.length - 1] : "";
+    const requestedStem = requestedParts.length > 1 ? requestedParts.slice(0, -1).join("_") : requested;
+
+    let bestMatch = null;
+    let bestScore = Infinity;
+
+    const threshold = Math.max(1, Math.ceil(Math.min(requested.length, 16) * 0.35));
+
+    for (const row of schemaRows) {
+        const schemaName = row?.SCHEMA_NAME;
+        if (!schemaName) continue;
+
+        const normalizedSchema = String(schemaName).trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+        const normalizedSchemaWithoutTenant = toTenantSocketName(normalizedSchema);
+        const schemaParts = normalizedSchemaWithoutTenant.split("_");
+        const schemaSuffix = schemaParts.length > 1 ? schemaParts[schemaParts.length - 1] : "";
+        const schemaStem = schemaParts.length > 1 ? schemaParts.slice(0, -1).join("_") : normalizedSchemaWithoutTenant;
+
+        const scoreCandidates = [
+            levenshteinDistance(requested, normalizedSchema),
+            levenshteinDistance(requested, normalizedSchemaWithoutTenant),
+            levenshteinDistance(requestedWithoutTenant, normalizedSchema),
+            levenshteinDistance(requestedWithoutTenant, normalizedSchemaWithoutTenant),
+        ];
+        let score = Math.min(...scoreCandidates);
+
+        if (requestedSuffix && schemaSuffix && requestedSuffix === schemaSuffix) {
+            score -= 1;
+        }
+
+        if (schemaStem.startsWith(requestedStem) || requestedStem.startsWith(schemaStem)) {
+            score -= 1;
+        }
+
+        if (score < 0) score = 0;
+
+        if (score < bestScore) {
+            bestMatch = schemaName;
+            bestScore = score;
+        }
+    }
+
+    if (bestMatch && bestScore <= threshold) {
+        console.log(`[resolveTenantDb] Heuristic fallback matched ${database} -> ${bestMatch} (score=${bestScore})`);
+        return bestMatch;
+    }
+
+    return null;
+};
+
+const resolveTenantDb = async (database) => {
+    if (!database) return null;
+
+    const key = `tenantDb:${String(database).trim()}`;
+    const cached = tenantDbCache.get(key);
+    if (cached) return cached;
+
+    const candidates = tenantDbCandidates(database);
+    const tenantId = toTenantSocketName(database);
+
+    if (tenantId) {
+        try {
+            const centralDb = getConnection();
+            const [tenantRows] = await centralDb.query(
+                'SELECT data FROM tenants WHERE id = ? LIMIT 1',
+                [tenantId]
+            );
+            if (tenantRows && tenantRows.length > 0) {
+                const tenantRow = tenantRows[0];
+                if (tenantRow?.data) {
+                    try {
+                        const parsed = typeof tenantRow.data === 'string'
+                            ? JSON.parse(tenantRow.data)
+                            : tenantRow.data;
+                        const dataDb = parsed?.database;
+                        if (dataDb) {
+                            candidates.push(dataDb);
+                        }
+                        const tenancyDbName = parsed?.tenancy_db_name;
+                        if (tenancyDbName) {
+                            candidates.push(tenancyDbName);
+                        }
+                    } catch (error) {
+                        // ignore malformed tenant data payload
+                    }
+                }
+            }
+        } catch (error) {
+            // If tenant metadata check fails, continue with local candidates
+        }
+    }
+
+    const uniqueCandidates = [...new Set(candidates.map((item) => String(item || '').trim()).filter(Boolean))];
+
+    for (const candidate of uniqueCandidates) {
+        if (await schemaExists(candidate)) {
+            tenantDbCache.set(key, candidate);
+            return candidate;
+        }
+    }
+
+    const heuristicDb = await resolveTenantDbByHeuristic(database);
+    if (heuristicDb) {
+        tenantDbCache.set(key, heuristicDb);
+        return heuristicDb;
+    }
+
+    tenantDbCache.set(key, null);
+    return null;
+};
+
+const resolveSocketAndTenantDb = async (database) => {
+    if (!database) {
+        return {
+            requestedDb: null,
+            socketDbName: null,
+            tenantDbName: null,
+            resolved: false,
+        };
+    }
+
+    const requestedDb = String(database).trim();
+    let socketDbName = toTenantSocketName(requestedDb);
+    if (socketDbName === requestedDb && /^tenant/i.test(requestedDb)) {
+        socketDbName = requestedDb.replace(/^tenant/i, '');
+    }
+    const tenantDbName = await resolveTenantDb(requestedDb);
+
+    return {
+        requestedDb,
+        socketDbName,
+        tenantDbName: tenantDbName || null,
+        resolved: Boolean(tenantDbName),
+    };
+};
+
+const requestTenantIdentifier = (req) => (
+    req.headers?.database
+    || req.headers?.['x-database']
+    || req.body?.tenantDb
+    || req.body?.database
+    || req.body?.clientId
+    || req.query?.database
+    || req.query?.tenantDb
+    || req.tenantDb
+);
+
+const ensureTenantDbForRequest = async (req, res) => {
+    const tenantIdentifier = requestTenantIdentifier(req);
+    if (!tenantIdentifier) {
+        res.status(400).json({ success: false, message: "Missing database header" });
+        return false;
+    }
+
+    const resolved = await resolveTenantDb(tenantIdentifier);
+    if (!resolved) {
+        res.status(400).json({
+            success: false,
+            message: `Unknown tenant database '${tenantIdentifier}'`,
+        });
+        return false;
+    }
+
+    req.tenantDb = resolved;
+    req.tenantDbResolved = true;
+    return true;
 };
 
 const setTenantSocket = (map, database, id, socketId) => {
@@ -358,6 +663,55 @@ const parseCoordinate = (value) => {
     return Number.isFinite(parsed) ? parsed : null;
 };
 
+const normalizeGeoCoordinatePoint = (point) => {
+    if (!Array.isArray(point) || point.length < 2) return null;
+
+    const lng = parseCoordinate(point[0]);
+    const lat = parseCoordinate(point[1]);
+    const isValidLngLat = (valueLng, valueLat) => (
+        Number.isFinite(valueLng)
+        && Number.isFinite(valueLat)
+        && Math.abs(valueLng) <= 180
+        && Math.abs(valueLat) <= 90
+    );
+
+    if (isValidLngLat(lng, lat)) {
+        return [lng, lat];
+    }
+
+    if (isValidLngLat(lat, lng)) {
+        return [lat, lng];
+    }
+
+    return null;
+};
+
+const parsePossibleJsonString = (value) => {
+    let parsed = value;
+    let rounds = 0;
+    while (typeof parsed === 'string' && rounds < 3) {
+        try {
+            const nextValue = JSON.parse(parsed.trim());
+            if (nextValue === parsed) {
+                return parsed;
+            }
+            parsed = nextValue;
+            rounds += 1;
+        } catch (error) {
+            return parsed;
+        }
+    }
+
+    return parsed;
+};
+
+const extractCoordinatePair = (payload = {}) => {
+    const latitude = parseCoordinate(payload?.latitude ?? payload?.lat ?? payload?.latitudeRaw ?? payload?.y);
+    const longitude = parseCoordinate(payload?.longitude ?? payload?.lng ?? payload?.lon ?? payload?.x);
+
+    return { latitude, longitude };
+};
+
 const isValidCoordinatePair = (latitude, longitude) => (
     latitude !== null
     && longitude !== null
@@ -412,16 +766,48 @@ const shouldPersistDriverLocation = ({ runtimeKey, current, status, onlineStatus
 const parsePlotPolygonForLocation = (plot) => {
     if (!plot?.features) return null;
     try {
-        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
-        const geometry = features.geometry || features;
-        const rawCoords = geometry.coordinates;
+        const featurePayload = parsePossibleJsonString(plot.features);
+        const geometryPayload = featurePayload?.features?.[0]?.geometry
+            ? featurePayload.features[0]
+            : featurePayload;
+        const geometry = geometryPayload?.geometry ?? geometryPayload;
+
+        if (!geometry) {
+            return null;
+        }
+
+        let rawCoords = geometry.coordinates;
         if (typeof rawCoords === 'string') {
-            const parsed = JSON.parse(rawCoords);
-            return Array.isArray(parsed?.[0]) ? parsed[0] : parsed;
+            rawCoords = JSON.parse(rawCoords);
         }
-        if (Array.isArray(rawCoords)) {
-            return Array.isArray(rawCoords[0]?.[0]) ? rawCoords[0] : rawCoords;
+
+        if (!Array.isArray(rawCoords)) {
+            return null;
         }
+
+        let polygon = rawCoords;
+        if (Array.isArray(rawCoords?.[0]) && Array.isArray(rawCoords[0]?.[0])) {
+            polygon = Array.isArray(rawCoords[0][0]?.[0]) ? rawCoords[0][0] : rawCoords[0];
+        }
+        if (!Array.isArray(polygon) || polygon.length < 3) return null;
+
+        const normalizedPolygon = polygon
+            .map((point) => normalizeGeoCoordinatePoint(point))
+            .filter(Boolean);
+
+        if (!normalizedPolygon.length || normalizedPolygon.length < 3) {
+            return null;
+        }
+
+        if (normalizedPolygon.length !== polygon.length) {
+            console.warn('[LocationUpdate] Plot polygon had invalid coordinate(s); ignored invalid points', {
+                plotId: plot.id,
+                providedPoints: polygon.length,
+                normalizedPoints: normalizedPolygon.length,
+            });
+        }
+
+        return normalizedPolygon;
     } catch (error) {
         console.error('[LocationUpdate] Failed to parse plot polygon:', error.message);
     }
@@ -480,6 +866,7 @@ const cacheDriverLocationSnapshot = ({
 
 const persistDriverLocationSnapshot = async ({
     dbName,
+    socketDbName,
     driverId,
     latitude,
     longitude,
@@ -490,8 +877,19 @@ const persistDriverLocationSnapshot = async ({
     socket,
 }) => {
     try {
-        const db = getConnection(toTenantDbName(dbName));
-        const plotId = await resolvePlotIdForLocation(db, dbName, latitude, longitude);
+        const db = getConnection(dbName);
+        const effectiveSocketDb = socketDbName || toTenantSocketName(dbName);
+        const plotId = await resolvePlotIdForLocation(db, effectiveSocketDb, latitude, longitude);
+        if (plotId) {
+            console.log(`[LocationUpdate] plot resolved`, {
+                db: dbName,
+                socketDb: effectiveSocketDb,
+                driverId,
+                latitude,
+                longitude,
+                plotId,
+            });
+        }
         const updates = ['latitude = ?', 'longitude = ?', 'updated_at = NOW()'];
         const params = [latitude, longitude];
 
@@ -532,9 +930,7 @@ const persistDriverLocationSnapshot = async ({
         if (dbDriverRows.length > 0) {
             const dbDriver = dbDriverRows[0];
             const previousPlotId = cachedDriver?.plot_id;
-            const plotChanged = previousPlotId
-                && dbDriver.plot_id
-                && String(previousPlotId) !== String(dbDriver.plot_id);
+            const plotChanged = cachedDriver && String(previousPlotId ?? '') !== String(dbDriver.plot_id ?? '');
             if (runtimeKey) {
                 driverLocationCache.set(runtimeKey, {
                     ...dbDriver,
@@ -543,7 +939,7 @@ const persistDriverLocationSnapshot = async ({
                 });
             }
 
-            emitTenantRooms(dbName, "driver-location-update", normalizeDriverRealtimePayload(dbDriver, dbName, {
+            emitTenantRooms(effectiveSocketDb, "driver-location-update", normalizeDriverRealtimePayload(dbDriver, effectiveSocketDb, {
                 latitude,
                 longitude,
                 status: dbDriver.driving_status || "idle",
@@ -2104,6 +2500,11 @@ const nearestDriverDispatch = async ({
 };
 
 io.use(async (socket, next) => {
+    const databaseQuery = socket.handshake?.query?.database;
+    const handshakeRole = socket.handshake?.query?.role;
+    const socketId = socket.id || "unknown";
+    console.log(`[Socket HANDSHAKE] in progress socket=${socketId} role=${handshakeRole || "unknown"} db=${databaseQuery || "missing_db"} remote=${socket.handshake?.address || "unknown"}`);
+
     const authHeader = (() => {
         const fromHeader = socket.handshake.headers.authorization;
         if (fromHeader) return fromHeader;
@@ -2135,9 +2536,10 @@ io.use(async (socket, next) => {
     const dispatcherId = socket.handshake.query.dispatcher_id;
     const clientId = socket.handshake.query.client_id;
 
-    if (!authHeader || (role === 'driver' && !driverId) || (role === 'admin' && !adminId) ||
-        (role === 'client' && !clientId) || (role === 'dispatcher' && !dispatcherId) ||
-        (role === 'user' && !userId)) {
+    if (!authHeader || (handshakeRole === 'driver' && !driverId) || (handshakeRole === 'admin' && !adminId) ||
+        (handshakeRole === 'client' && !clientId) || (handshakeRole === 'dispatcher' && !dispatcherId) ||
+        (handshakeRole === 'user' && !userId)) {
+        console.log(`[Socket HANDSHAKE] unauthorized socket=${socketId} role=${handshakeRole || "unknown"} db=${databaseQuery || "missing_db"} reason=auth_or_role_missing`);
         return next(new Error("Unauthorized"));
     }
 
@@ -2151,6 +2553,12 @@ io.use(async (socket, next) => {
     next();
 });
 
+io.engine.on("connection_error", (err) => {
+    const req = err.req || {};
+    const sid = err.context?.sid || "n/a";
+    console.log(`[Socket CONNECT_ERROR] sid=${sid} code=${err.code || "unknown"} message=${err.message || "n/a"} ip=${req.socket?.remoteAddress || "unknown"}`);
+});
+
 io.on("connection", (socket) => {
     const role = socket.handshake.query.role;
     const driverId = socket.handshake.query.driver_id;
@@ -2158,7 +2566,54 @@ io.on("connection", (socket) => {
     const userId = socket.handshake.query.user_id || socket.handshake.query.customer_id;
     const clientId = socket.handshake.query.client_id;
     const adminId = socket.handshake.query.admin_id;
-    const database = toTenantSocketName(socket.handshake.query.database);
+    let database = toTenantSocketName(socket.handshake.query.database);
+    if (database === socket.handshake.query.database && /^tenant/i.test(socket.handshake.query.database || '')) {
+        database = String(socket.handshake.query.database).replace(/^tenant/i, '');
+    }
+    const rawDatabase = socket.handshake.query.database;
+
+    const resolveEventDb = async (databaseFromEvent) => {
+        const context = await resolveSocketAndTenantDb(databaseFromEvent || rawDatabase);
+        if (!context.requestedDb && !rawDatabase && !databaseFromEvent) {
+            return {
+                requestedDb: null,
+                socketDbName: null,
+                tenantDbName: null,
+                resolved: false,
+            };
+        }
+
+        return {
+            ...context,
+            tenantDbName: context.tenantDbName,
+            resolved: Boolean(context.tenantDbName),
+        };
+    };
+
+    const safeSocketLog = (value) => {
+        if (value === undefined) return "undefined";
+        try {
+            return JSON.stringify(value);
+        } catch (error) {
+            try {
+                return String(value);
+            } catch {
+                return "[unserializable]";
+            }
+        }
+    };
+
+    socket.onAny((eventName, ...args) => {
+        const db = socket.handshake.query?.database || "unknown_db";
+        const payload = args.map((arg) => safeSocketLog(arg)).join(" | ");
+        console.log(`[Socket IN] event=${eventName} socket=${socket.id} db=${db} payload=${payload}`);
+    });
+
+    socket.onAnyOutgoing((eventName, ...args) => {
+        const db = socket.handshake.query?.database || "unknown_db";
+        const payload = args.map((arg) => safeSocketLog(arg)).join(" | ");
+        console.log(`[Socket OUT] event=${eventName} socket=${socket.id} db=${db} response=${payload}`);
+    });
 
     if (database) {
         socket.join(database);
@@ -2179,7 +2634,14 @@ io.on("connection", (socket) => {
 
         (async () => {
             try {
-                const db = getConnection(toTenantDbName(database));
+                const dbContext = await resolveEventDb(rawDatabase);
+                const tenantDb = dbContext.tenantDbName;
+                if (!tenantDb) {
+                    console.warn(`[DriverConnect] unknown tenant database for socket db=${database}`);
+                    return;
+                }
+
+                const db = getConnection(tenantDb);
 
                 const [rows] = await db.query(
                     `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name
@@ -2247,15 +2709,20 @@ io.on("connection", (socket) => {
         try {
             let dataArray = typeof data === "string" ? JSON.parse(data) : data;
 
-            const dbName = dataArray.database || socket.handshake.query.database;
+            const requestedDb = dataArray.database || socket.handshake.query.database;
             const driverIdFromData = dataArray.id || dataArray.driver_id || socket.driverId;
-            const latitude = parseCoordinate(dataArray.latitude);
-            const longitude = parseCoordinate(dataArray.longitude);
+            const { latitude, longitude } = extractCoordinatePair(dataArray);
             const status = dataArray.driving_status || dataArray.status;
             const onlineStatus = dataArray.online_status;
+            const dbContext = await resolveEventDb(requestedDb);
+            const dbName = dbContext.socketDbName || requestedDb || socket.database;
+            const tenantDbName = dbContext.tenantDbName;
             const runtimeKey = tenantSocketKey(dbName, driverIdFromData);
 
-            if (!dbName || !driverIdFromData || !isValidCoordinatePair(latitude, longitude)) {
+            if (!dbName || !tenantDbName || !driverIdFromData || !isValidCoordinatePair(latitude, longitude)) {
+                if (!tenantDbName) {
+                    console.error(`[driver-location] failed to resolve tenant db for ${requestedDb}`);
+                }
                 return;
             }
 
@@ -2302,7 +2769,8 @@ io.on("connection", (socket) => {
                 current: { latitude, longitude },
                 status,
                 onlineStatus,
-                force: dataArray.force_persist === true || String(dataArray.force_persist || '').toLowerCase() === 'true',
+                force: dataArray.force_persist === true || String(dataArray.force_persist || '').toLowerCase() === 'true'
+                    || (!cachedDriver?.plot_id && cachedDriver?.plot_id !== 0),
             });
 
             if (!shouldPersist) {
@@ -2320,7 +2788,8 @@ io.on("connection", (socket) => {
             }
 
             scheduleDriverLocationPersist({
-                dbName,
+                dbName: tenantDbName,
+                socketDbName: dbName,
                 driverId: driverIdFromData,
                 latitude,
                 longitude,
@@ -2339,14 +2808,18 @@ io.on("connection", (socket) => {
     socket.on("driver-status-change", async (data) => {
         try {
             const payload = typeof data === "string" ? JSON.parse(data) : (data || {});
-            const dbName = payload.database || socket.handshake.query.database;
+            const requestedDb = payload.database || socket.handshake.query.database;
             const driverIdFromData = payload.driver_id || payload.driverId || payload.id || socket.driverId;
             const onlineStatus = payload.online_status || payload.status;
             const drivingStatus = payload.driving_status;
+            const { latitude, longitude } = extractCoordinatePair(payload);
 
-            if (!dbName || !driverIdFromData || !onlineStatus) return;
+            const dbContext = await resolveEventDb(requestedDb);
+            const dbName = dbContext.socketDbName || requestedDb;
+            const tenantDbName = dbContext.tenantDbName;
+            if (!dbName || !tenantDbName || !driverIdFromData || !onlineStatus) return;
 
-            const db = getConnection(toTenantDbName(dbName));
+            const db = getConnection(tenantDbName);
             const updates = ['online_status = ?', 'updated_at = NOW()'];
             const params = [onlineStatus];
 
@@ -2354,11 +2827,11 @@ io.on("connection", (socket) => {
                 updates.unshift('driving_status = ?');
                 params.unshift(drivingStatus);
             }
-            if (payload.latitude !== undefined && payload.longitude !== undefined) {
+            if (latitude !== null && longitude !== null) {
                 updates.unshift('longitude = ?');
                 updates.unshift('latitude = ?');
-                params.unshift(payload.longitude);
-                params.unshift(payload.latitude);
+                params.unshift(longitude);
+                params.unshift(latitude);
             }
 
             params.push(driverIdFromData);
@@ -2370,7 +2843,7 @@ io.on("connection", (socket) => {
                 driverId: driverIdFromData,
                 reason: 'explicit_status_socket',
             });
-            await broadcastDashboardCardsUpdate(toTenantDbName(dbName));
+            await broadcastDashboardCardsUpdate(tenantDbName);
         } catch (err) {
             console.error("[driver-status-change] Error:", err.message);
         }
@@ -2424,23 +2897,46 @@ io.on("connection", (socket) => {
 
     socket.on("get-my-rank", async (data) => {
         try {
-            const dbName = data?.database || socket.handshake.query.database;
+            const payload = typeof data === "string"
+                ? (() => {
+                    try {
+                        return JSON.parse(data);
+                    } catch {
+                        return {};
+                    }
+                })()
+                : (data || {});
+
+            const dbName = payload?.database || socket.handshake.query.database;
 
             if (!dbName) {
                 socket.emit("my-rank-update", { success: false, message: "Missing database" });
                 return;
             }
 
-            const db = getConnection(toTenantDbName(dbName));
-            let plotId = data?.plot_id || null;
-            const bookingId = data?.booking_id || null;
-            const driverId = data?.driver_id || socket.driverId || socket.handshake.query.driver_id || null;
+            const tenantDb = await resolveTenantDb(dbName);
+            const socketDbName = toTenantSocketName(dbName);
+
+            if (!tenantDb) {
+                socket.emit("my-rank-update", {
+                    success: false,
+                    database: socketDbName,
+                    message: `Unknown tenant database '${dbName}'`,
+                    attempted_databases: tenantDbCandidates(dbName),
+                });
+                return;
+            }
+
+            const db = getConnection(tenantDb);
+            let plotId = payload?.plot_id || null;
+            const bookingId = payload?.booking_id || null;
+            const driverId = payload?.driver_id || socket.driverId || socket.handshake.query.driver_id || null;
             const supportsRank = await driverRankSupported(db);
 
             if (!supportsRank) {
                 socket.emit("my-rank-update", {
                     success: true,
-                    database: dbName,
+                    database: socketDbName,
                     supports_rank: false,
                     show_rank: false,
                     rank_available: false,
@@ -2454,6 +2950,7 @@ io.on("connection", (socket) => {
                 const [plotRows] = await db.query(
                     `SELECT p.id AS plot_id,
                             p.name AS plot_name,
+                            p.features,
                             COUNT(DISTINCT q.driver_id) AS total_drivers
                      FROM plots p
                      LEFT JOIN plot_driver_queues q ON q.plot_id = p.id
@@ -2464,6 +2961,8 @@ io.on("connection", (socket) => {
                 const plots = plotRows.map((plot) => ({
                     plot_id: plot.plot_id,
                     plot_name: plot.plot_name || `Plot #${plot.plot_id}`,
+                    features: plot.features,
+                    polygon: parsePlotPolygonForLocation(plot),
                     total_drivers: Number(plot.total_drivers || 0),
                     is_current_plot: currentPlotId
                         ? String(plot.plot_id) === String(currentPlotId)
@@ -2479,21 +2978,70 @@ io.on("connection", (socket) => {
 
             if (!plotId && driverId) {
                 const [driverRows] = await db.query(
-                    "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
+                    "SELECT plot_id, latitude, longitude FROM drivers WHERE id = ? LIMIT 1",
                     [driverId]
                 );
                 plotId = driverRows[0]?.plot_id || null;
+                const driverLatitude = parseCoordinate(driverRows[0]?.latitude);
+                const driverLongitude = parseCoordinate(driverRows[0]?.longitude);
+
+                if (!plotId) {
+                    const runtimeKey = tenantSocketKey(socketDbName, driverId);
+                    const cachedDriver = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
+                    plotId = cachedDriver?.plot_id || cachedDriver?.plot;
+
+                    if (!plotId && cachedDriver?.latitude !== null && cachedDriver?.longitude !== null) {
+                        const lat = parseCoordinate(cachedDriver.latitude);
+                        const lng = parseCoordinate(cachedDriver.longitude);
+                        const resolvedPlotId = await resolvePlotIdForLocation(db, socketDbName, lat, lng);
+                        if (resolvedPlotId) {
+                            plotId = resolvedPlotId;
+                            if (runtimeKey) {
+                                driverLocationCache.set(runtimeKey, {
+                                    ...cachedDriver,
+                                    plot_id: plotId,
+                                });
+                            }
+                            try {
+                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ?", [plotId, driverId]);
+                            } catch (error) {
+                                console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
+                            }
+                        }
+                    }
+
+                    if (!plotId && driverLatitude !== null && driverLongitude !== null) {
+                        const resolvedPlotId = await resolvePlotIdForLocation(db, socketDbName, driverLatitude, driverLongitude);
+                        if (resolvedPlotId) {
+                            plotId = resolvedPlotId;
+                            if (runtimeKey) {
+                                driverLocationCache.set(runtimeKey, {
+                                    ...cachedDriver,
+                                    plot_id: plotId,
+                                });
+                            }
+                            try {
+                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ?", [plotId, driverId]);
+                            } catch (error) {
+                                console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
+                            }
+                        }
+                    }
+                }
             }
 
             if (plotId) {
-                const queue = await waitingQueue.loadPlotQueueFromDb(db, plotId, dbName);
+                const queue = await waitingQueue.loadPlotQueueFromDb(db, plotId, socketDbName);
+                const rank = driverId ? await getOrAssignRankForDriver(plotId, socketDbName, driverId) : null;
                 const { plots, currentPlot } = await buildPlotSummary(plotId);
 
                 socket.emit("my-rank-update", {
                     success: true,
-                    database: dbName,
+                    database: socketDbName,
                     plot_id: plotId,
                     booking_id: bookingId,
+                    rank,
+                    rank_available: rank != null,
                     plots,
                     current_plot: currentPlot,
                     total_drivers: currentPlot?.total_drivers ?? queue.length,
@@ -2505,9 +3053,11 @@ io.on("connection", (socket) => {
 
             socket.emit("my-rank-update", {
                 success: true,
-                database: dbName,
+                database: socketDbName,
                 plot_id: null,
                 booking_id: bookingId,
+                rank: null,
+                rank_available: false,
                 plots,
                 current_plot: null,
                 total_drivers: 0,
@@ -2642,10 +3192,26 @@ io.on("connection", (socket) => {
 });
 
 app.use((req, res, next) => {
+    if (req.url?.startsWith('/socket.io')) {
+        console.log(`[HTTP SOCKET.IO] ${req.method} ${req.url} ip=${req.socket?.remoteAddress || "unknown"}`);
+    }
+
     const databaseHeader = req.headers['database'] || req.headers['x-database'];
     if (databaseHeader) {
-        req.tenantDb = toTenantDbName(databaseHeader);
-        console.log(`Using database: ${req.tenantDb}`);
+        return resolveTenantDb(databaseHeader)
+            .then((resolved) => {
+                req.tenantDb = resolved || toTenantDbName(databaseHeader);
+                req.tenantDbFromHeader = true;
+                req.tenantDbResolved = !!resolved;
+                console.log(`Using database: ${req.tenantDb}`);
+                next();
+            })
+            .catch(() => {
+                req.tenantDb = toTenantDbName(databaseHeader);
+                req.tenantDbFromHeader = true;
+                req.tenantDbResolved = false;
+                next();
+            });
     }
     next();
 });
@@ -2653,6 +3219,13 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 app.use(async (req, res, next) => {
+    if (req.tenantDbFromHeader && req.tenantDb && !req.tenantDbResolved) {
+        return res.status(400).json({
+            success: false,
+            message: `Unknown tenant database '${req.headers['database'] || req.headers['x-database']}'`,
+        });
+    }
+
     if (req.tenantDb) {
         return next();
     }
@@ -2664,7 +3237,12 @@ app.use(async (req, res, next) => {
         || req.query?.tenantDb;
 
     if (explicitTenant) {
-        req.tenantDb = toTenantDbName(explicitTenant);
+        const resolved = await resolveTenantDb(explicitTenant);
+        if (!resolved) {
+            return res.status(400).json({ success: false, message: `Unknown tenant database '${explicitTenant}'` });
+        }
+        req.tenantDb = resolved;
+        req.tenantDbResolved = true;
         return next();
     }
 
@@ -2841,8 +3419,7 @@ app.post("/driver-status-change", async (req, res) => {
         const driverId = req.body?.driver_id || req.body?.driverId || req.body?.id;
         const onlineStatus = req.body?.online_status || req.body?.status;
         const drivingStatus = req.body?.driving_status;
-        const latitude = req.body?.latitude;
-        const longitude = req.body?.longitude;
+        const { latitude, longitude } = extractCoordinatePair(req.body || {});
 
         if (!driverId || !onlineStatus) {
             return res.status(400).json({ success: false, message: "Missing driver_id or online_status" });
@@ -2856,7 +3433,7 @@ app.post("/driver-status-change", async (req, res) => {
             updates.unshift('driving_status = ?');
             params.unshift(drivingStatus);
         }
-        if (latitude !== undefined && longitude !== undefined) {
+        if (latitude !== null && longitude !== null) {
             updates.unshift('longitude = ?');
             updates.unshift('latitude = ?');
             params.unshift(longitude);
@@ -3439,6 +4016,10 @@ app.post("/driver/collect-commission", async (req, res) => {
 
 app.get("/bookings/dashboard-cards", async (req, res) => {
     try {
+        if (!(await ensureTenantDbForRequest(req, res))) {
+            return;
+        }
+
         const db = getConnection(req.tenantDb);
         const todayDate = await getTenantTodayDate(db);
         const todaySql = sqlDateLiteral(todayDate);
@@ -3507,6 +4088,10 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
 
 app.get("/bookings", async (req, res) => {
     try {
+        if (!(await ensureTenantDbForRequest(req, res))) {
+            return;
+        }
+
         let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, scope, page = 1, limit = 10 } = req.query;
 console.log("Fetching bookings with query:", req.query);
         const pageNum = Math.max(parseInt(page) || 1, 1);
@@ -3862,6 +4447,7 @@ app.post("/bookings/:id/auto-dispatch/reject", async (req, res) => {
     try {
         const bookingIdInt = parseInt(req.params.id, 10);
         const driverId = req.body.driver_id ?? req.body.driverId;
+        const tenantDb = await resolveTenantDbForRequest(req) || req.tenantDb;
 
         if (!req.tenantDb) {
             return res.status(400).json({
@@ -3869,6 +4455,13 @@ app.post("/bookings/:id/auto-dispatch/reject", async (req, res) => {
                 message: "Missing 'database' header in request",
             });
         }
+        if (!tenantDb) {
+            return res.status(400).json({
+                success: false,
+                message: "Unable to resolve tenant database from request",
+            });
+        }
+        req.tenantDb = tenantDb;
         if (!driverId) {
             return res.status(400).json({
                 success: false,
@@ -3878,18 +4471,18 @@ app.post("/bookings/:id/auto-dispatch/reject", async (req, res) => {
 
         const nearestResult = await handleNearestDispatchReject({
             bookingIdInt,
-            tenantDb: req.tenantDb,
-            driverId,
-        });
+                tenantDb,
+                driverId,
+            });
         if (nearestResult.handled) {
             return res.status(nearestResult.status).json(nearestResult.body);
         }
 
         const result = await handleAutoDispatchReject({
-            bookingIdInt,
-            tenantDb: req.tenantDb,
-            driverId,
-        });
+                bookingIdInt,
+                tenantDb: req.tenantDb,
+                driverId,
+            });
 
         return res.status(result.status).json(result.body);
     } catch (error) {
@@ -3992,10 +4585,18 @@ app.post("/driver/reject-ride", async (req, res) => {
     try {
         const rideId = req.body.ride_id ?? req.body.booking_id;
         const driverId = req.body.driver_id ?? req.body.driverId;
+        const tenantDb = await resolveTenantDbForRequest(req) || req.tenantDb;
 
         if (!req.tenantDb) {
             return res.status(400).json({ success: false, message: "Missing 'database' header in request" });
         }
+        if (!tenantDb) {
+            return res.status(400).json({
+                success: false,
+                message: "Unable to resolve tenant database from request",
+            });
+        }
+        req.tenantDb = tenantDb;
         if (!rideId) {
             return res.status(400).json({ success: false, message: "ride_id is required" });
         }
@@ -4005,7 +4606,7 @@ app.post("/driver/reject-ride", async (req, res) => {
 
         const nearestResult = await handleNearestDispatchReject({
             bookingIdInt: parseInt(rideId, 10),
-            tenantDb: req.tenantDb,
+            tenantDb,
             driverId,
         });
         if (nearestResult.handled) {
@@ -4014,7 +4615,7 @@ app.post("/driver/reject-ride", async (req, res) => {
 
         const result = await handleAutoDispatchReject({
             bookingIdInt: parseInt(rideId, 10),
-            tenantDb: req.tenantDb,
+            tenantDb,
             driverId,
         });
 

@@ -618,7 +618,14 @@ class SettingController extends Controller
                         ->orWhere("features", "LIKE", "%" . $request->search . "%");
                 });
             }
-            $data = $plots->get();
+            $data = $plots->get()->map(function ($plot) {
+                return [
+                    "id" => $plot->id,
+                    "name" => $plot->name,
+                    "features" => $plot->features,
+                    "polygon" => $this->extractPlotPolygon($plot->features),
+                ];
+            })->values();
             return response()->json([
                 'success' => 1,
                 'list' => $data
@@ -682,6 +689,8 @@ class SettingController extends Controller
                 return [
                     "id" => $plot->id,
                     "name" => $plot->name,
+                    "features" => $plot->features,
+                    "polygon" => $this->extractPlotPolygon($plot->features),
                     "plot_name" => $plot->name,
                     "driver_count" => $driverCount,
                     "is_current" => $isCurrent,
@@ -702,6 +711,8 @@ class SettingController extends Controller
                     "current_plot" => $currentPlot ? [
                         "id" => $currentPlot->id,
                         "name" => $currentPlot->name,
+                        "features" => $currentPlot->features,
+                        "polygon" => $this->extractPlotPolygon($currentPlot->features),
                         "driver_count" => $currentPlotDriverCount,
                     ] : null,
                     "current_driver" => [
@@ -723,6 +734,44 @@ class SettingController extends Controller
                 "error" => 1,
                 "message" => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function extractPlotPolygon($features): ?array
+    {
+        try {
+            $featurePayload = is_string($features) ? json_decode($features, true) : $features;
+            if (!$featurePayload) {
+                return null;
+            }
+
+            if (isset($featurePayload["features"][0]["geometry"])) {
+                $featurePayload = $featurePayload["features"][0];
+            }
+
+            $geometry = $featurePayload["geometry"] ?? $featurePayload;
+            if (!$geometry || !isset($geometry["coordinates"])) {
+                return null;
+            }
+
+            $coordinates = $geometry["coordinates"];
+            if (is_string($coordinates)) {
+                $coordinates = json_decode($coordinates, true);
+            }
+            if (!is_array($coordinates)) {
+                return null;
+            }
+
+            if (is_array($coordinates[0] ?? null) && is_array($coordinates[0][0] ?? null) && is_array($coordinates[0][0][0] ?? null)) {
+                return $coordinates[0][0];
+            }
+
+            if (is_array($coordinates[0] ?? null) && is_array($coordinates[0][0] ?? null)) {
+                return $coordinates[0];
+            }
+            return $coordinates;
+        } catch (\Throwable $e) {
+            return null;
         }
     }
 

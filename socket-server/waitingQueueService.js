@@ -1,6 +1,45 @@
 const DEFAULT_SEARCH_RADIUS_KM = 1;
 
-const toTenantSocketName = (database) => String(database || '').trim().replace(/^tenant/i, '');
+const normalizeGeoCoordinatePoint = (point) => {
+    if (!Array.isArray(point) || point.length < 2) return null;
+
+    const lng = Number(point[0]);
+    const lat = Number(point[1]);
+    const parsedLng = Number.isFinite(lng) ? lng : null;
+    const parsedLat = Number.isFinite(lat) ? lat : null;
+    const isValidLngLat = (valueLng, valueLat) => (
+        Number.isFinite(valueLng)
+        && Number.isFinite(valueLat)
+        && Math.abs(valueLng) <= 180
+        && Math.abs(valueLat) <= 90
+    );
+
+    if (isValidLngLat(parsedLng, parsedLat)) return [parsedLng, parsedLat];
+    if (isValidLngLat(parsedLat, parsedLng)) return [parsedLat, parsedLng];
+
+    return null;
+};
+
+const parsePossibleJsonString = (value) => {
+    let parsed = value;
+    let rounds = 0;
+    while (typeof parsed === 'string' && rounds < 3) {
+        try {
+            const nextValue = JSON.parse(parsed.trim());
+            if (nextValue === parsed) {
+                return parsed;
+            }
+            parsed = nextValue;
+            rounds += 1;
+        } catch (error) {
+            return parsed;
+        }
+    }
+
+    return parsed;
+};
+
+const toTenantSocketName = (database) => String(database || '').trim().replace(/^tenant[_-]?/i, '');
 
 const toTenantDbName = (database) => {
     const value = toTenantSocketName(database);
@@ -86,17 +125,47 @@ const parsePlotPolygon = (plot) => {
     }
 
     try {
-        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
-        const geometry = features.geometry || features;
-        const rawCoords = geometry.coordinates;
+        const featurePayload = parsePossibleJsonString(plot.features);
+        const geometryPayload = featurePayload?.features?.[0]?.geometry
+            ? featurePayload.features[0]
+            : featurePayload;
+        const geometry = geometryPayload?.geometry ?? geometryPayload;
 
+        if (!geometry) {
+            return null;
+        }
+
+        let rawCoords = geometry.coordinates;
         if (typeof rawCoords === 'string') {
-            return JSON.parse(rawCoords)[0];
+            rawCoords = JSON.parse(rawCoords);
         }
 
-        if (Array.isArray(rawCoords)) {
-            return Array.isArray(rawCoords[0]?.[0]) ? rawCoords[0] : rawCoords;
+        if (!Array.isArray(rawCoords)) {
+            return null;
         }
+
+        let polygon = rawCoords;
+        if (Array.isArray(rawCoords[0]?.[0]) && Array.isArray(rawCoords[0][0]?.[0])) {
+            polygon = rawCoords[0][0];
+        }
+
+        if (Array.isArray(polygon[0]?.[0])) {
+            polygon = polygon[0];
+        }
+
+        const normalizedPolygon = polygon
+            .map((point) => normalizeGeoCoordinatePoint(point))
+            .filter(Boolean);
+
+        if (!normalizedPolygon.length || normalizedPolygon.length < 3) {
+            return null;
+        }
+
+        if (normalizedPolygon.length !== polygon.length) {
+            return normalizedPolygon;
+        }
+
+        return normalizedPolygon;
     } catch (error) {
         console.error('[WaitingQueue] Failed to parse plot polygon:', error.message);
     }
@@ -328,7 +397,9 @@ const createWaitingQueueService = ({
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
-             WHERE d.id IN (?)`,
+             WHERE d.id IN (?)
+               AND d.driving_status = 'idle'
+               AND d.online_status = 'online'`,
             [driverIds]
         );
 
@@ -377,7 +448,14 @@ const createWaitingQueueService = ({
         const queue = await loadPlotQueueFromDb(db, plotId, dbName);
         const payload = await buildDriverPayload(db, dbName, plotId, queue, bookingId);
 
-        const response = {
+        const driverQueueResponse = {
+            success: true,
+            database: dbName,
+            plot_id: payload.plot_id,
+            booking_id: payload.booking_id,
+        };
+
+        const dashboardResponse = {
             success: true,
             database: dbName,
             plot_id: payload.plot_id,
@@ -386,10 +464,10 @@ const createWaitingQueueService = ({
             total_idle_drivers: payload.drivers.length,
         };
 
-        io.to(`driver_${dbName}`).emit('my-rank-update', response);
-        io.to(`dispatcher_${dbName}`).emit('my-rank-update', response);
-        io.to(`admin_${dbName}`).emit('my-rank-update', response);
-        io.to(`client_${dbName}`).emit('my-rank-update', response);
+        io.to(`driver_${dbName}`).emit('my-rank-queue-update', driverQueueResponse);
+        io.to(`dispatcher_${dbName}`).emit('my-rank-update', dashboardResponse);
+        io.to(`admin_${dbName}`).emit('my-rank-update', dashboardResponse);
+        io.to(`client_${dbName}`).emit('my-rank-update', dashboardResponse);
 
         payload.drivers.forEach((driver) => {
             const legacyEvent = {
@@ -404,7 +482,7 @@ const createWaitingQueueService = ({
             io.to(`client_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);
         });
 
-        return response;
+        return dashboardResponse;
     };
 
     const broadcastAllPlotRankUpdates = async (database, bookingId = null) => {
