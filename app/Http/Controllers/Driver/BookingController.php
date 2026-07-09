@@ -25,10 +25,12 @@ use App\Models\WalletTransaction;
 use App\Models\CompanySendNewRide;
 use App\Models\BookingDispatchCycle;
 use App\Services\SocketApiUrlResolver;
+use App\Support\TenantDatabaseConfigurator;
 use App\Support\NearestDispatch;
 use App\Support\PlotDispatch;
 use App\Support\VehicleDispatchFilter;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class BookingController extends Controller
 {
@@ -80,15 +82,45 @@ class BookingController extends Controller
 
             $query = CompanyBooking::where("booking_status", "pending");
             $this->applyUpcomingRideDriverFilter($query, $driverId, $includeAssignedOffers);
+            $this->excludeUnacceptedAdminAssignedOffersFromUpcoming($query, $driverId);
             if (isset($request->date) && $request->date != NULL) {
                 $query->whereDate("booking_date", $request->date);
             }
             $pendingRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
-            $this->attachDisplayDistanceToPaginator($pendingRides, $request);
+            $this->attachDisplayDistanceToPaginator($pendingRides, $request, $driverId, $includeAssignedOffers);
 
             return response()->json([
                 'success' => 1,
                 'list' => $pendingRides
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function assignedRideOffers(Request $request)
+    {
+        try {
+            $driverId = auth('driver')->user()->id;
+
+            $query = CompanyBooking::where("booking_status", "pending");
+            $this->applyUnacceptedAdminAssignedOfferFilter($query, $driverId);
+
+            if (isset($request->date) && $request->date != NULL) {
+                $query->whereDate("booking_date", $request->date);
+            }
+
+            $offers = $query->with(['userDetail', 'driverDetail', 'ratingDetail'])
+                ->orderBy("booking_date", "DESC")
+                ->paginate(10);
+            $this->attachDisplayDistanceToPaginator($offers, $request, $driverId, true);
+
+            return response()->json([
+                'success' => 1,
+                'list' => $offers
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -119,6 +151,70 @@ class BookingController extends Controller
                         });
                 });
         });
+    }
+
+    private function excludeUnacceptedAdminAssignedOffersFromUpcoming($query, int $driverId): void
+    {
+        $query->where(function ($q) use ($driverId) {
+            $q->where(function ($notAssignedToDriver) use ($driverId) {
+                $notAssignedToDriver->where(function ($driverColumn) use ($driverId) {
+                    $driverColumn->whereNull("driver")
+                        ->orWhere("driver", "!=", $driverId);
+                })->where(function ($pendingColumn) use ($driverId) {
+                    $pendingColumn->whereNull("pending_driver_id")
+                        ->orWhere("pending_driver_id", "!=", $driverId);
+                });
+            })->orWhere(function ($acceptedAssignment) {
+                $acceptedAssignment->where("dispatcher_action", "LIKE", "%accepted%");
+            })->orWhere(function ($notAdminAssignedOffer) {
+                $notAdminAssignedOffer->whereNull("dispatcher_action")
+                    ->orWhere(function ($action) {
+                        $action->where("dispatcher_action", "NOT LIKE", "%assigned%")
+                            ->where("dispatcher_action", "NOT LIKE", "%pre-job%")
+                            ->where("dispatcher_action", "NOT LIKE", "%manual%")
+                            ->where("dispatcher_action", "NOT LIKE", "%driver selected%")
+                            ->where("dispatcher_action", "NOT LIKE", "%dispatching now%");
+                    });
+            });
+        });
+    }
+
+    private function applyUnacceptedAdminAssignedOfferFilter($query, int $driverId): void
+    {
+        $query->where(function ($assigned) use ($driverId) {
+            $assigned->where("pending_driver_id", $driverId)
+                ->orWhere("driver", $driverId);
+        })->where(function ($adminAction) {
+            $adminAction->where("dispatcher_action", "LIKE", "%assigned%")
+                ->orWhere("dispatcher_action", "LIKE", "%pre-job%")
+                ->orWhere("dispatcher_action", "LIKE", "%manual%")
+                ->orWhere("dispatcher_action", "LIKE", "%driver selected%")
+                ->orWhere("dispatcher_action", "LIKE", "%dispatching now%");
+        })->where(function ($notAccepted) {
+            $notAccepted->whereNull("dispatcher_action")
+                ->orWhere("dispatcher_action", "NOT LIKE", "%accepted%");
+        });
+    }
+
+    private function adminAssignmentType($ride): ?string
+    {
+        $action = strtolower((string) ($ride->dispatcher_action ?? ''));
+        if (!(
+            str_contains($action, 'assigned')
+            || str_contains($action, 'pre-job')
+            || str_contains($action, 'manual')
+            || str_contains($action, 'driver selected')
+            || str_contains($action, 'dispatching now')
+        )) {
+            return null;
+        }
+
+        return str_contains($action, 'pre-job') ? 'pre_job' : 'manual_assignment';
+    }
+
+    private function isAcceptedAssignment($ride): bool
+    {
+        return str_contains(strtolower((string) ($ride->dispatcher_action ?? '')), 'accepted');
     }
 
     public function rateRide(Request $request)
@@ -809,15 +905,43 @@ class BookingController extends Controller
 
     private function postDriverOfferDecisionToSocket(Request $request, CompanyBooking $booking, $driverId, string $endpoint)
     {
-        $response = Http::withHeaders([
-            'database' => $request->header('database'),
+        $database = $request->header('database') ?: $request->header('x-database');
+        $tenantDb = is_string($database) ? TenantDatabaseConfigurator::resolveSchemaName($database) : null;
+        $socketEndpoint = SocketApiUrlResolver::endpoint($request, 'bookings/' . $booking->id . '/' . $endpoint);
+
+        $headers = [
+            'database' => $database,
+            'x-database' => $database,
             'Accept' => 'application/json',
-        ])->post(SocketApiUrlResolver::endpoint(null, 'bookings/' . $booking->id . '/' . $endpoint), [
+        ];
+
+        $internalSecret = config('services.node_socket.internal_secret');
+        if (!empty($internalSecret)) {
+            $headers['Authorization'] = 'Bearer ' . $internalSecret;
+        }
+
+        $response = Http::timeout(10)->withHeaders($headers)->post($socketEndpoint, [
             'driver_id' => $driverId,
+            'database' => $database,
+            'tenantDb' => $tenantDb,
         ]);
 
         if (!$response->successful()) {
-            $message = $response->json('message') ?? 'Failed to process ride offer decision';
+            $message = $response->json('message')
+                ?? $response->json('error')
+                ?? trim($response->body())
+                ?: 'Failed to process ride offer decision';
+
+            Log::warning('Driver ride offer decision socket call failed', [
+                'booking_id' => $booking->id,
+                'driver_id' => $driverId,
+                'endpoint' => $socketEndpoint,
+                'database_header' => $database,
+                'tenant_db' => $tenantDb,
+                'status' => $response->status(),
+                'response' => $response->body(),
+            ]);
+
             return response()->json([
                 'error' => 1,
                 'message' => $message,
@@ -1456,12 +1580,33 @@ class BookingController extends Controller
         }
     }
 
-    private function attachDisplayDistanceToPaginator($paginator, Request $request): void
+    private function attachDisplayDistanceToPaginator($paginator, Request $request, ?int $driverId = null, bool $includeAssignedOffers = false): void
     {
-        $paginator->getCollection()->transform(function ($ride) use ($request) {
+        $paginator->getCollection()->transform(function ($ride) use ($request, $driverId, $includeAssignedOffers) {
             $this->attachDisplayDistance($ride, $request);
+            if ($includeAssignedOffers && $driverId) {
+                $this->attachDriverAssignmentMetadata($ride, $driverId);
+            }
             return $ride;
         });
+    }
+
+    private function attachDriverAssignmentMetadata($ride, int $driverId): void
+    {
+        $isAssignedToDriver = (string) ($ride->pending_driver_id ?? '') === (string) $driverId
+            || (string) ($ride->driver ?? '') === (string) $driverId;
+        $assignmentType = $this->adminAssignmentType($ride);
+        $isUnacceptedAdminAssignment = $isAssignedToDriver
+            && $assignmentType !== null
+            && !$this->isAcceptedAssignment($ride);
+
+        $ride->assigned_offer = $isAssignedToDriver;
+        $ride->assigned_by_admin = $isUnacceptedAdminAssignment;
+        $ride->assignment_source = $isUnacceptedAdminAssignment ? 'admin' : null;
+        $ride->assignment_type = $isUnacceptedAdminAssignment ? $assignmentType : null;
+        $ride->assignment_message = $isUnacceptedAdminAssignment
+            ? 'This ride was assigned to you by admin/dispatcher.'
+            : null;
     }
 
     private function attachDisplayDistance($ride, Request $request): void

@@ -36,6 +36,13 @@ const SOCKET_API_CORS = {
 app.use(cors(SOCKET_API_CORS));
 app.options(/.*/, cors(SOCKET_API_CORS));
 
+app.use((req, _res, next) => {
+    if (typeof req.url === "string" && req.url.startsWith("/socket-api")) {
+        req.url = req.url.replace(/^\/socket-api/, '') || "/";
+    }
+    next();
+});
+
 const server = http.createServer(app);
 const SOCKET_PING_INTERVAL_MS = Number(process.env.SOCKET_PING_INTERVAL_MS || 25000);
 const SOCKET_PING_TIMEOUT_MS = Number(process.env.SOCKET_PING_TIMEOUT_MS || 60000);
@@ -164,7 +171,6 @@ const knownDriverRuntimeKeys = new Set();
 const DISCONNECT_GRACE_MS = 15 * 60 * 1000;
 
 const LOCATION_TIMEOUT_MS = 15 * 60 * 1000;
-const RECONNECTING_THRESHOLD_MS = 10 * 1000;
 const GPS_IDLE_PERSIST_MS = Number(process.env.SOCKET_GPS_IDLE_PERSIST_MS || 30000);
 const GPS_ACTIVE_PERSIST_MS = Number(process.env.SOCKET_GPS_ACTIVE_PERSIST_MS || 5000);
 const GPS_IDLE_MIN_MOVEMENT_METERS = Number(process.env.SOCKET_GPS_IDLE_MIN_MOVEMENT_METERS || 75);
@@ -209,7 +215,6 @@ const activeDispatchHideSql = (alias = '') => {
         .join(' AND ');
 };
 const DEFAULT_NEAREST_SEARCH_RADIUS_KM = 1;
-const RECONNECTING_ELIGIBILITY_MINUTES = 15;
 const autoDispatchSessions = new Map();
 const nearestDispatchSessions = new Map();
 let autoDispatchOfferToken = 0;
@@ -636,6 +641,9 @@ const normalizeDriverRealtimePayload = (driver, database, overrides = {}) => {
     return {
         ...driver,
         ...overrides,
+        is_reconnecting: Object.prototype.hasOwnProperty.call(overrides, "is_reconnecting")
+            ? overrides.is_reconnecting
+            : false,
         id: driverId,
         driver_id: driverId,
         driverName,
@@ -1152,10 +1160,7 @@ const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverI
             )) AS distance
         FROM drivers d
         WHERE d.driving_status = 'idle'
-        AND (
-            d.online_status = 'online'
-            OR (d.online_status = 'reconnecting' AND d.updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
-        )
+        AND d.online_status = 'online'
         AND d.latitude IS NOT NULL
         AND d.longitude IS NOT NULL
         ${activeRideExclusion.sql}
@@ -1167,7 +1172,6 @@ const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverI
         lat,
         lng,
         lat,
-        RECONNECTING_ELIGIBILITY_MINUTES,
         ...activeRideExclusion.params,
         ...vehicleFilter.params,
         ...excludeParams,
@@ -1186,15 +1190,11 @@ const fetchBiddingFallbackDrivers = async (db, booking) => {
         FROM drivers d
         WHERE d.status = 'accepted'
         AND d.driving_status = 'idle'
-        AND (
-            d.online_status = 'online'
-            OR (d.online_status = 'reconnecting' AND d.updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
-        )
+        AND d.online_status = 'online'
         ${activeRideExclusion.sql}
         ${vehicleFilter.sql}
         ORDER BY d.id ASC
     `, [
-        RECONNECTING_ELIGIBILITY_MINUTES,
         ...activeRideExclusion.params,
         ...vehicleFilter.params,
     ]);
@@ -1509,7 +1509,7 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
 
     if (isManualAssignmentReject) {
         const dbName = toTenantSocketName(tenantDb);
-        const rejectAction = `Driver #${driverId} rejected manual assignment — returned to dispatcher panel`;
+        const rejectAction = `Driver #${driverId} cancelled/rejected this assigned job. Please assign another driver or start auto dispatch.`;
         await db.query(
             `UPDATE bookings
              SET driver = NULL,
@@ -1528,11 +1528,13 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
             id: bookingIdInt,
             driver_id: driverId,
             database: dbName,
+            booking_status: 'pending',
             booking: updatedBooking,
             message: rejectAction,
         };
 
         emitTenantRooms(dbName, "job-rejected-by-driver", rejectEvent);
+        emitTenantRooms(dbName, "job-cancelled-by-driver", rejectEvent);
         emitTenantRooms(dbName, "booking-updated-event", updatedBooking);
         emitTenantRooms(dbName, "notification-ride", updatedBooking);
         await broadcastDashboardCardsUpdate(tenantDb);
@@ -1540,7 +1542,7 @@ const handleAutoDispatchReject = async ({ bookingIdInt, tenantDb, driverId }) =>
 
         return {
             status: 200,
-            body: { success: true, message: "Manual assignment rejected — returned to dispatcher panel" },
+            body: { success: true, booking_status: 'pending', message: rejectAction },
         };
     }
 
@@ -1614,9 +1616,7 @@ const { createPlotDispatchService } = require("./plotDispatchService");
 const waitingQueue = createWaitingQueueService({
     io,
     plotDriverQueues,
-    driverLastLocationTime,
     getConnection,
-    RECONNECTING_THRESHOLD_MS,
 });
 
 const getQueueSnapshot = (plotKey) => plotDriverQueues.get(plotKey) || [];
@@ -2728,22 +2728,7 @@ io.on("connection", (socket) => {
 
             gpsStats.accepted += 1;
 
-            if (driverIdFromData) {
-                const prevTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
-                const wasReconnecting = prevTime > 0
-                    && (Date.now() - prevTime) > RECONNECTING_THRESHOLD_MS
-                    && (Date.now() - prevTime) < LOCATION_TIMEOUT_MS;
-
-                if (runtimeKey) driverLastLocationTime.set(runtimeKey, Date.now());
-
-                if (wasReconnecting) {
-                    const dbName = dataArray.database || socket.handshake.query.database;
-                    if (dbName) {
-                        console.log(`[LocationUpdate] Driver #${driverIdFromData} back from reconnecting — re-broadcasting queue`);
-                        broadcastFullQueueToDrivers(dbName).catch(() => { });
-                    }
-                }
-            }
+            if (runtimeKey) driverLastLocationTime.set(runtimeKey, Date.now());
 
             const cachedDriver = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
             const livePayload = normalizeDriverRealtimePayload(cachedDriver || {
@@ -3127,7 +3112,6 @@ io.on("connection", (socket) => {
 
                         if (driver && driver.driving_status === "idle" && driver.online_status === "online") {
                             await broadcastFullQueueToDrivers(database);
-                            console.log(`[Disconnect] Driver #${driverId} marked as reconnecting in queue`);
                         } else {
                             await removeFromQueue(driverId, database);
                             const plotId = driver?.plot_id;
@@ -3299,9 +3283,6 @@ const buildDriverStateSnapshot = async (db, database) => {
         const isBusy = String(driver.driving_status || '').toLowerCase() === 'busy';
         const plotId = driver.plot_id;
         const rank = !isBusy && plotId ? await getOrAssignRankForDriver(plotId, database, driver.id) : null;
-        const runtimeKey = tenantSocketKey(database, driver.id);
-        const lastUpdate = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
-        const timeSinceUpdate = Date.now() - lastUpdate;
         const payload = normalizeDriverRealtimePayload(driver, database, {
             rank,
             status: driver.driving_status || 'idle',
@@ -3309,7 +3290,7 @@ const buildDriverStateSnapshot = async (db, database) => {
             online_status: driver.online_status,
             latitude: driver.latitude,
             longitude: driver.longitude,
-            is_reconnecting: lastUpdate > 0 && timeSinceUpdate > RECONNECTING_THRESHOLD_MS && timeSinceUpdate < LOCATION_TIMEOUT_MS,
+            is_reconnecting: false,
         });
 
         if (isBusy) onJob.push(payload);
@@ -5812,17 +5793,34 @@ app.post("/send-new-ride", async (req, res) => {
 
         for (const driverId of drivers) {
             const isAccepted = booking.booking_status === 'ongoing';
-            const title = isAccepted ? "New Ride Assigned" : "New Ride Available";
-            const message = isAccepted ? `You have been assigned a new ride #${booking.booking_id}. It is already accepted.` : "You have a new ride request";
+            const isAdminAssigned = booking.assigned_by_admin === true || booking.assignment_source === "admin";
+            const title = isAdminAssigned || isAccepted ? "New Ride Assigned" : "New Ride Available";
+            const message = booking.assignment_message
+                || (isAccepted
+                    ? `You have been assigned a new ride #${booking.booking_id}. It is already accepted.`
+                    : "You have a new ride request");
 
             // Send Push Notification
             try {
                 await sendNotificationToDriver(db, driverId, title, message, {
                     booking_id: String(booking.id),
-                    type: "new_ride"
+                    type: "new_ride",
+                    assignment_source: booking.assignment_source || null,
+                    assignment_type: booking.assignment_type || null,
                 });
             } catch (notifErr) {
                 console.error("Notification error in /send-new-ride:", notifErr.message);
+            }
+
+            try {
+                await storeNotification(db, {
+                    user_type: "driver",
+                    user_id: driverId,
+                    title,
+                    message,
+                });
+            } catch (storeErr) {
+                console.error("Store notification error in /send-new-ride:", storeErr.message);
             }
 
             const socketId = getTenantSocket(driverSockets, dbName, driverId);
@@ -5837,6 +5835,9 @@ app.post("/send-new-ride", async (req, res) => {
                 } else {
                     io.to(socketId).emit("new-ride-request", {
                         booking_id: booking.id,
+                        assignment_source: booking.assignment_source || null,
+                        assignment_type: booking.assignment_type || null,
+                        assigned_by_admin: isAdminAssigned,
                         message: message,
                         booking: booking
                     });
@@ -7948,61 +7949,9 @@ setInterval(async () => {
         }
     }
 
-    const allDatabases = new Set();
-    for (const [plotKey] of plotDriverQueues.entries()) {
-        const parts = plotKey.split('_');
-        if (parts.length >= 2) {
-            allDatabases.add(parts.slice(1).join('_'));
-        }
-    }
-
-    for (const database of allDatabases) {
-        const hasReconnecting = Array.from(driverLastLocationTime.entries()).some(([driverKey, lastTime]) => {
-            return String(driverKey).startsWith(`${database}:`)
-                && (now - lastTime) > RECONNECTING_THRESHOLD_MS
-                && (now - lastTime) < LOCATION_TIMEOUT_MS;
-        });
-
-        if (hasReconnecting) {
-            await broadcastFullQueueToDrivers(database);
-        }
-    }
 }, 15 * 1000);
 
-setInterval(async () => {
-    const now = Date.now();
 
-    const databaseSet = new Set();
-    for (const [plotKey, queue] of plotDriverQueues.entries()) {
-        if (!queue || queue.length === 0) continue;
-        const parts = plotKey.split('_');
-        if (parts.length >= 2) {
-            databaseSet.add(parts.slice(1).join('_'));
-        }
-    }
-
-    for (const database of databaseSet) {
-        let hasReconnectingDriver = false;
-
-        for (const [plotKey, queue] of plotDriverQueues.entries()) {
-            if (!plotKey.endsWith(`_${database}`)) continue;
-            for (const item of queue) {
-                const runtimeKey = tenantSocketKey(database, item.driver_id);
-                const lastTime = runtimeKey ? (driverLastLocationTime.get(runtimeKey) || 0) : 0;
-                const timeSince = now - lastTime;
-                if (timeSince > RECONNECTING_THRESHOLD_MS && timeSince < LOCATION_TIMEOUT_MS) {
-                    hasReconnectingDriver = true;
-                    break;
-                }
-            }
-            if (hasReconnectingDriver) break;
-        }
-
-        if (hasReconnectingDriver) {
-            await broadcastFullQueueToDrivers(database);
-        }
-    }
-}, 10 * 1000)
 
 server.listen(SOCKET_SERVER_PORT, "0.0.0.0", SOCKET_LISTEN_BACKLOG, () => {
     console.log(`🚀 Socket server running on port ${SOCKET_SERVER_PORT} (backlog ${SOCKET_LISTEN_BACKLOG})`);

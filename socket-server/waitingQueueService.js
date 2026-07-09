@@ -195,9 +195,7 @@ const getPlotReferencePoint = (plot, booking) => {
 const createWaitingQueueService = ({
     io,
     plotDriverQueues,
-    driverLastLocationTime,
     getConnection,
-    RECONNECTING_THRESHOLD_MS,
 }) => {
     const plotKeyFor = (plotId, database) => `${plotId}_${database}`;
 
@@ -403,7 +401,6 @@ const createWaitingQueueService = ({
             [driverIds]
         );
 
-        const now = Date.now();
         const plotName = drivers[0]?.plot_name || `Plot #${plotId}`;
 
         const payloadDrivers = queue
@@ -413,17 +410,13 @@ const createWaitingQueueService = ({
                     return null;
                 }
 
-                const lastUpdate = driverLastLocationTime.get(`${database}:${driver.id}`) || 0;
-                const timeSince = now - lastUpdate;
-                const isReconnecting = lastUpdate > 0 && timeSince > RECONNECTING_THRESHOLD_MS;
-
                 return normalizeDriverRealtimePayload(driver, database, {
                     plot_id: plotId,
                     plot_name: driver.plot_name || plotName,
                     rank: entry.rank,
                     latitude: driver.latitude,
                     longitude: driver.longitude,
-                    is_reconnecting: isReconnecting,
+                    is_reconnecting: false,
                     status: driver.driving_status || 'idle',
                     driving_status: driver.driving_status || 'idle',
                     online_status: driver.online_status || 'online',
@@ -474,7 +467,7 @@ const createWaitingQueueService = ({
                 driver_id: driver.driver_id,
                 plot: plotId,
                 rank: driver.rank,
-                is_reconnecting: driver.is_reconnecting,
+                is_reconnecting: false,
             };
 
             io.to(`dispatcher_${dbName}`).emit('waiting-driver-rank-updated', legacyEvent);

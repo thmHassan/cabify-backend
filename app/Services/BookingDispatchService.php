@@ -63,7 +63,7 @@ class BookingDispatchService
                 $this->applyDriverBookingDeductions($driver, $companySetting);
             }
 
-            $this->notifyAssignedDriver($booking, $socketApiBaseUrl);
+            $this->notifyAssignedDriver($booking, $tenantDatabase, $socketApiBaseUrl);
 
             return;
         }
@@ -142,20 +142,23 @@ class BookingDispatchService
             return;
         }
 
-        $this->notifyAssignedDriver($booking, $socketApiBaseUrl);
+        $this->notifyAssignedDriver($booking, $tenantDatabase, $socketApiBaseUrl);
     }
 
-    private function notifyAssignedDriver(CompanyBooking $booking, ?string $socketApiBaseUrl = null): void
+    private function notifyAssignedDriver(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         $booking->loadMissing('userDetail');
 
         Http::withHeaders([
             'Authorization' => 'Bearer ' . $this->internalSecret(),
+            'database' => $tenantDatabase,
         ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'send-new-ride'), [
             'drivers' => [$booking->driver],
+            'tenantDb' => $tenantDatabase,
             'booking' => [
                 'id' => $booking->id,
                 'booking_id' => $booking->booking_id,
+                'booking_status' => $booking->booking_status,
                 'pickup_point' => $booking->pickup_point,
                 'destination_point' => $booking->destination_point,
                 'offered_amount' => $booking->offered_amount,
@@ -168,6 +171,14 @@ class BookingDispatchService
                 'note' => $booking->note,
                 'pickup_time' => $booking->pickup_time,
                 'booking_date' => $booking->booking_date,
+                'driver' => $booking->driver,
+                'pending_driver_id' => $booking->pending_driver_id,
+                'dispatcher_action' => $booking->dispatcher_action,
+                'assigned_offer' => true,
+                'assigned_by_admin' => true,
+                'assignment_source' => 'admin',
+                'assignment_type' => ($booking->is_scheduled || $booking->pickup_time_type === 'time') ? 'pre_job' : 'manual_assignment',
+                'assignment_message' => 'This ride was assigned to you by admin/dispatcher.',
             ],
         ]);
 
