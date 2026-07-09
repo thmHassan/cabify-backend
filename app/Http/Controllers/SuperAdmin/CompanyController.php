@@ -1386,7 +1386,9 @@ class CompanyController extends Controller
                 'email' => 'required|email'
             ]);
 
-            $tenant = Tenant::where("data->email", $request->email)->first();
+            $tenant = TenantUser::where('email', $request->email)
+                ->orWhere("data->email", $request->email)
+                ->first();
 
             if (!$tenant) {
                 return response()->json([
@@ -1394,19 +1396,36 @@ class CompanyController extends Controller
                     'message' => 'Tenant not found'
                 ], 404);
             }
-            
-            $token = Password::broker('tenants')->createToken($tenant);
+
+            $tenantEmail = $tenant->email ?? data_get($tenant->data, 'email');
+
+            if (!$tenantEmail) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Email not found for tenant'
+                ], 422);
+            }
+
+            $tenantModel = Tenant::find($tenant->id);
+            if (!$tenantModel) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Tenant not found'
+                ], 404);
+            }
+
+            $token = Password::broker('tenants')->createToken($tenantModel);
             
             $resetLink = env('CLIENT_FRONTEND_URL') .
-                "/reset-password?token={$token}&email={$tenant->email}";
+                "/reset-password?token={$token}&email={$tenantEmail}";
 
             $mailer = \App\Services\MailConfigurationService::resolveMailer();
 
             Mail::mailer($mailer)->send('emails.reset-password', [
                 'name' => $tenant->company_name ?? 'User',
                 'resetLink' => $resetLink,
-            ], function ($message) use ($tenant) {
-                $message->to($tenant->email)
+            ], function ($message) use ($tenantEmail) {
+                $message->to($tenantEmail)
                     ->subject('Reset Your Password');
             });
 
@@ -1459,25 +1478,9 @@ class CompanyController extends Controller
             //     'message' => __($status)
             // ], 400);
 
-            $tokenRow = DB::table('password_reset_tokens')
-            ->where('email', $request->email)
-            ->first();
-
-            if (!$tokenRow) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Invalid or expired reset token'
-                ], 400);
-            }
-
-            if (!Hash::check($request->token, $tokenRow->token)) {
-                return response()->json([
-                    'error' => 1,
-                    'message' => 'Invalid reset token'
-                ], 400);
-            }
-
-            $tenant = TenantUser::where('data->email', $request->email)->first();
+            $tenant = TenantUser::where('email', $request->email)
+                ->orWhere('data->email', $request->email)
+                ->first();
 
             if (!$tenant) {
                 return response()->json([
@@ -1486,14 +1489,49 @@ class CompanyController extends Controller
                 ], 404);
             }
 
+            $tenantEmail = $tenant->email ?? data_get($tenant->data, 'email');
+            if (!$tenantEmail) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Email not found for tenant'
+                ], 422);
+            }
+
+            $resetTokenRecord = DB::table('password_reset_tokens')
+                ->where('email', $tenantEmail)
+                ->first();
+
+            if (!$resetTokenRecord) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid or expired reset token'
+                ], 400);
+            }
+
+            if (!Hash::check($request->token, $resetTokenRecord->token)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid reset token'
+                ], 400);
+            }
+
             $data = $tenant->data;
             $data['password'] = Hash::make($request->password);
 
             $tenant->data = $data;
             $tenant->save();
 
+            $tenantRecord = Tenant::find($tenant->id);
+            if ($tenantRecord) {
+                $tenantRecord->password = Hash::make($request->password);
+                if (!$tenantRecord->email && $tenantEmail) {
+                    $tenantRecord->email = $tenantEmail;
+                }
+                $tenantRecord->save();
+            }
+
             DB::table('password_reset_tokens')
-            ->where('email', $request->email)
+            ->where('email', $tenantEmail)
             ->delete();
 
             return response()->json([
