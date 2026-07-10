@@ -85,6 +85,21 @@ const createPlotDispatchService = ({
     const isTerminalBookingStatus = (status) =>
         TERMINAL_BOOKING_STATUSES.has(String(status || '').toLowerCase());
 
+    const getDriverAcceptedBookingStatus = (booking) => {
+        if (!booking?.booking_date || !booking?.pickup_time) {
+            return 'ongoing';
+        }
+
+        const bookingDate = new Date(`${new Date(booking.booking_date).toISOString().split('T')[0]}T${booking.pickup_time}`);
+        if (Number.isNaN(bookingDate.getTime())) {
+            return 'ongoing';
+        }
+
+        const now = new Date();
+        const diffMins = (bookingDate.getTime() - now.getTime()) / (1000 * 60);
+        return (diffMins >= -30 && diffMins <= 30) ? 'ongoing' : 'pending';
+    };
+
     const terminatePlotDispatchForBooking = async ({
         bookingId,
         tenantDb,
@@ -895,12 +910,32 @@ const createPlotDispatchService = ({
             const [driverRows] = await db.query('SELECT id, name, profile_image FROM drivers WHERE id = ?', [driverId]);
             const driver = driverRows[0] ?? {};
             const acceptedMessage = acceptedAction(driver.name, driverId);
+            const acceptedStatus = getDriverAcceptedBookingStatus(booking);
             await db.query(
-                'UPDATE bookings SET dispatcher_action = ? WHERE id = ?',
-                [acceptedMessage, bookingIdInt]
+                `UPDATE bookings
+                 SET driver = ?,
+                     pending_driver_id = NULL,
+                     booking_status = ?,
+                     dispatcher_action = ?
+                 WHERE id = ?`,
+                [driverId, acceptedStatus, acceptedMessage, bookingIdInt]
             );
+            booking.driver = driverId;
+            booking.pending_driver_id = null;
+            booking.booking_status = acceptedStatus;
             booking.dispatcher_action = acceptedMessage;
             const cycle = await loadCycleByBooking(db, bookingIdInt);
+            if (cycle?.id) {
+                await db.query(
+                    `UPDATE booking_dispatch_cycles
+                     SET status = 'accepted',
+                         current_driver_id = ?,
+                         offer_expires_at = NULL,
+                         updated_at = NOW()
+                     WHERE id = ?`,
+                    [driverId, cycle.id]
+                );
+            }
             const notifiedDriverIds = uniqueStrings(parseJsonArray(cycle?.notified_driver_ids));
             notifiedDriverIds.forEach((notifiedId) => {
                 if (String(notifiedId) !== String(driverId)) {

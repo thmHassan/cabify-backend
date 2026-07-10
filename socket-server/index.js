@@ -106,8 +106,12 @@ const getTenantTodayDate = async (db) => {
 
 const TERMINAL_BOOKING_STATUSES = ['completed', 'no_show', 'cancelled'];
 const terminalStatusesSqlList = TERMINAL_BOOKING_STATUSES.map((status) => `'${status}'`).join(', ');
+const TODAY_HIDDEN_BOOKING_STATUSES = ['completed', 'cancelled'];
+const todayHiddenStatusesSqlList = TODAY_HIDDEN_BOOKING_STATUSES.map((status) => `'${status}'`).join(', ');
 const ACTIVE_RIDE_STATUSES = ['pending_acceptance', 'ongoing', 'arrived', 'started'];
 const activeRideStatusesSqlList = ACTIVE_RIDE_STATUSES.map((status) => `'${status}'`).join(', ');
+const ONGOING_RIDE_STATUSES = ['ongoing', 'started'];
+const ongoingRideStatusesSqlList = ONGOING_RIDE_STATUSES.map((status) => `'${status}'`).join(', ');
 
 const nonTerminalBookingCondition = (alias = '') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
@@ -115,12 +119,18 @@ const nonTerminalBookingCondition = (alias = '') => {
     return `(${column('booking_status')} IS NULL OR ${column('booking_status')} NOT IN (${terminalStatusesSqlList}))`;
 };
 
+const todayVisibleBookingCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+
+    return `(${column('booking_status')} IS NULL OR ${column('booking_status')} NOT IN (${todayHiddenStatusesSqlList}))`;
+};
+
 const todayBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
 
     return `
     DATE(${column('booking_date')}) = ${todayExpression}
-    AND ${nonTerminalBookingCondition(alias)}
+    AND ${todayVisibleBookingCondition(alias)}
 `;
 };
 
@@ -136,6 +146,11 @@ const preBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
 const recentJobsCondition = (alias = '') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
     return `${column('updated_at')} >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+};
+
+const ongoingRideCondition = (alias = '') => {
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+    return `${column('booking_status')} IN (${ongoingRideStatusesSqlList})`;
 };
 
 const isTerminalBookingStatus = (status) =>
@@ -1767,6 +1782,11 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
                 END) AS completed,
 
                 COUNT(CASE 
+                    WHEN ${ongoingRideCondition()}
+                    THEN 1 
+                END) AS ongoing,
+
+                COUNT(CASE 
                     WHEN booking_status = 'no_show'
                     THEN 1 
                 END) AS no_show,
@@ -1789,6 +1809,7 @@ const broadcastDashboardCardsUpdate = async (tenantDb) => {
             todaysBooking: counts.todays_booking,
             preBookings: counts.pre_bookings,
             recentJobs: counts.recent_jobs,
+            ongoing: counts.ongoing,
             completed: counts.completed,
             noShow: counts.no_show,
             cancelled: counts.cancelled
@@ -4027,6 +4048,11 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 END) AS completed,
 
                 COUNT(CASE 
+                    WHEN ${ongoingRideCondition()}
+                    THEN 1 
+                END) AS ongoing,
+
+                COUNT(CASE 
                     WHEN booking_status = 'no_show'
                     THEN 1 
                 END) AS no_show,
@@ -4052,6 +4078,7 @@ app.get("/bookings/dashboard-cards", async (req, res) => {
                 todaysBooking: counts.todays_booking,
                 preBookings: counts.pre_bookings,
                 recentJobs: counts.recent_jobs,
+                ongoing: counts.ongoing,
                 completed: counts.completed,
                 noShow: counts.no_show,
                 cancelled: counts.cancelled
@@ -4074,6 +4101,16 @@ app.get("/bookings", async (req, res) => {
         }
 
         let { status, date, user_id, driver_id, dispatcher_id, sub_company, search, filter, scope, page = 1, limit = 10 } = req.query;
+        const normalizedStatusList = (rawStatus) => {
+            if (!rawStatus || typeof rawStatus !== 'string') return null;
+            const values = rawStatus
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean);
+            return values.length ? values : null;
+        };
+
+        const statusList = normalizedStatusList(status);
 console.log("Fetching bookings with query:", req.query);
         const pageNum = Math.max(parseInt(page) || 1, 1);
         const limitNum = Math.max(parseInt(limit) || 10, 1);
@@ -4100,6 +4137,12 @@ console.log("Fetching bookings with query:", req.query);
                 case 'pre_bookings':
                     baseQuery += ` AND ${preBookingsCondition('b', todaySql)}`;
                     break;
+                case 'pending':
+                    baseQuery += ` AND b.booking_status IN ('pending','pending_acceptance')`;
+                    break;
+                case 'ongoing':
+                    baseQuery += ` AND ${ongoingRideCondition('b')}`;
+                    break;
                 case 'completed':
                     baseQuery += ` AND b.booking_status = 'completed'`;
                     break;
@@ -4115,7 +4158,16 @@ console.log("Fetching bookings with query:", req.query);
             }
         }
 
-        if (status) { baseQuery += ` AND b.booking_status = ?`; params.push(status); }
+        if (statusList && statusList.length > 0) {
+            if (statusList.length === 1) {
+                baseQuery += ` AND b.booking_status = ?`;
+                params.push(statusList[0]);
+            } else {
+                const placeholders = statusList.map(() => '?').join(', ');
+                baseQuery += ` AND b.booking_status IN (${placeholders})`;
+                params.push(...statusList);
+            }
+        }
         if (date) { baseQuery += ` AND DATE(b.booking_date) = ?`; params.push(date); }
         if (user_id) { baseQuery += ` AND b.user_id = ?`; params.push(user_id); }
         if (driver_id) { baseQuery += ` AND b.driver = ?`; params.push(driver_id); }
