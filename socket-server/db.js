@@ -81,6 +81,7 @@ const createPoolRegistry = ({
         queueLimit,
         enableKeepAlive: true,
         keepAliveInitialDelay: 0,
+        dateStrings: ['DATE'],
     });
 
     const getPoolCounts = (pool) => {

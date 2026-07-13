@@ -159,13 +159,20 @@ const isTerminalBookingStatus = (status) =>
 const toDateOnlyString = (value) => {
     if (!value) return null;
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return value.toISOString().split('T')[0];
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
     const text = String(value);
     const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
     if (match) return match[1];
     const parsed = new Date(text);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().split('T')[0];
+    if (Number.isNaN(parsed.getTime())) return null;
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 };
 
 const isPreBookingRow = (booking, todayDate = null) => {
@@ -4203,6 +4210,7 @@ console.log("Fetching bookings with query:", req.query);
 
             return {
                 ...bookingData,
+                booking_date: toDateOnlyString(bookingData.booking_date),
                 pre_booking: isPreBookingRow(bookingData, todayDate),
                 driverDetail: driver_id ? { id: driver_id, name: driver_name, email: driver_email, phone_no: driver_phone, profile_image: driver_profile_image } : null,
                 vehicleDetail: vehicle_type_id ? { id: vehicle_type_id, vehicle_type_name, vehicle_type_service } : null,
@@ -4313,7 +4321,7 @@ app.put("/bookings/:id/assign-driver", async (req, res) => {
         let isWithinWindow = false;
 
         if (booking.booking_date && booking.pickup_time) {
-            const bookingDateStr = new Date(booking.booking_date).toISOString().split("T")[0];
+            const bookingDateStr = toDateOnlyString(booking.booking_date);
             const bookingDateTime = new Date(`${bookingDateStr}T${booking.pickup_time}`);
 
             const now = new Date();

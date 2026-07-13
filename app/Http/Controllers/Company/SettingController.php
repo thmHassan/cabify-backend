@@ -57,10 +57,12 @@ class SettingController extends Controller
                 $data['company_description'] = "";
                 $data['search_radius'] = CompanySetting::resolveSearchRadiusKm();
                 $data['dispatch_timeout'] = CompanySetting::resolveDispatchTimeoutSeconds();
+                $data['driver_job_start_window_minutes'] = CompanySetting::DEFAULT_DRIVER_JOB_START_WINDOW_MINUTES;
                 $data = (object) $data;
             } else {
                 $data->search_radius = CompanySetting::resolveSearchRadiusKm($settings);
                 $data->dispatch_timeout = CompanySetting::resolveDispatchTimeoutSeconds($settings);
+                $data->driver_job_start_window_minutes = CompanySetting::resolveDriverJobStartWindowMinutes($settings);
             }
             return response()->json([
                 'success' => 1,
@@ -1292,6 +1294,15 @@ class SettingController extends Controller
                 $settings->save();
             }
 
+            if ($request->has('driver_job_start_window_minutes') || $request->has('driver_job_start_window_hours')) {
+                $settings = CompanySetting::orderBy('id', 'DESC')->first() ?? new CompanySetting;
+                $minutes = $request->has('driver_job_start_window_minutes')
+                    ? (int) $request->input('driver_job_start_window_minutes')
+                    : ((int) $request->input('driver_job_start_window_hours') * 60);
+                $settings->driver_job_start_window_minutes = max(0, min($minutes, 1440));
+                $settings->save();
+            }
+
             $tenantId = TenantRequestContext::databaseId($request);
             if ($tenantId) {
                 $this->notifyDispatchSettingsChanged($request, $tenantId);
@@ -1348,6 +1359,7 @@ class SettingController extends Controller
                 'success' => 1,
                 'data' => $data,
                 'release_settings' => CompanySetting::resolveReleaseSettings($settings),
+                'driver_job_start_window_minutes' => CompanySetting::resolveDriverJobStartWindowMinutes($settings),
             ]);
         } catch (\Exception $e) {
             return response()->json([

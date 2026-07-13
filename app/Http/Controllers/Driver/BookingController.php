@@ -17,6 +17,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Services\FCMService;
+use App\Services\PreBookingService;
 use App\Models\CompanyNotification;
 use App\Models\Setting;
 use App\Models\TenantUser;
@@ -74,6 +75,30 @@ class BookingController extends Controller
             ], 400);
         }
     }
+
+    public function noShowRideList(Request $request)
+    {
+        try {
+            $query = CompanyBooking::where("booking_status", "no_show")->where("driver", auth('driver')->user()->id);
+            if (isset($request->date) && $request->date != NULL) {
+                $query->whereDate("booking_date", $request->date);
+            }
+            $noShowRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail', 'waitingDetail'])
+                ->orderBy("booking_date", "DESC")
+                ->paginate(10);
+
+            return response()->json([
+                'success' => 1,
+                'list' => $noShowRides
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
     public function upcomingRide(Request $request)
     {
         try {
@@ -88,6 +113,7 @@ class BookingController extends Controller
             }
             $pendingRides = $query->with(['userDetail', 'driverDetail', 'ratingDetail'])->orderBy("booking_date", "DESC")->paginate(10);
             $this->attachDisplayDistanceToPaginator($pendingRides, $request, $driverId, $includeAssignedOffers);
+            $this->attachDriverStartWindowToPaginator($pendingRides);
 
             return response()->json([
                 'success' => 1,
@@ -291,7 +317,8 @@ class BookingController extends Controller
     public function rideDetail(Request $request)
     {
         try {
-            $rideDetail = CompanyBooking::where("id", $request->ride_id)->with(['userDetail', 'ratingDetail'])->first();
+            $rideDetail = CompanyBooking::where("id", $request->ride_id ?? $request->booking_id)->with(['userDetail', 'ratingDetail'])->first();
+            $this->attachDriverStartWindowToBooking($rideDetail);
 
             return response()->json([
                 'success' => 1,
@@ -1061,6 +1088,7 @@ class BookingController extends Controller
                         ->orWhere("booking_status", 'arrived')
                         ->orWhere("booking_status", 'ongoing');
                 })->with(['userDetail', 'vehicleDetail', 'waitingDetail'])->first();
+            $this->attachDriverStartWindowToBooking($booking);
 
             return response()->json([
                 'success' => 1,
@@ -1074,10 +1102,118 @@ class BookingController extends Controller
         }
     }
 
+    private function attachDriverStartWindowToPaginator($paginator): void
+    {
+        $settings = CompanySetting::orderBy('id', 'DESC')->first();
+        $paginator->getCollection()->transform(function ($booking) use ($settings) {
+            $this->attachDriverStartWindowToBooking($booking, $settings);
+            return $booking;
+        });
+    }
+
+    private function attachDriverStartWindowToBooking(?CompanyBooking $booking, ?CompanySetting $settings = null): void
+    {
+        if (!$booking) {
+            return;
+        }
+
+        $settings = $settings ?: CompanySetting::orderBy('id', 'DESC')->first();
+        $windowMinutes = CompanySetting::resolveDriverJobStartWindowMinutes($settings);
+        $booking->setAttribute('driver_job_start_window_minutes', $windowMinutes);
+
+        $isScheduled = ($booking->pickup_time_type ?? null) === 'time' || (bool) $booking->is_scheduled;
+        $isAsap = strtolower(trim((string) $booking->pickup_time)) === 'asap'
+            || ($booking->pickup_time_type ?? null) === 'asap';
+
+        if (!$isScheduled || $isAsap || !$booking->booking_date || !$booking->pickup_time) {
+            $booking->setAttribute('can_start_ride', true);
+            $booking->setAttribute('start_allowed_from', null);
+            $booking->setAttribute('start_allowed_from_utc', null);
+            return;
+        }
+
+        try {
+            $preBookingService = app(PreBookingService::class);
+            $pickupAt = $preBookingService->parseCompanyDateTimeToUtc(
+                $booking->booking_date . ' ' . $booking->pickup_time,
+                $preBookingService->companyTimezone($settings)
+            );
+            $allowedFrom = $pickupAt->copy()->subMinutes($windowMinutes);
+
+            $booking->setAttribute('can_start_ride', Carbon::now('UTC')->gte($allowedFrom));
+            $booking->setAttribute(
+                'start_allowed_from',
+                $preBookingService->formatStoredDateTimeForCompany($allowedFrom, 'Y-m-d H:i:s')
+            );
+            $booking->setAttribute('start_allowed_from_utc', $allowedFrom->toDateTimeString());
+        } catch (\Throwable $e) {
+            Log::warning('Unable to attach driver start window fields', [
+                'booking_id' => $booking->id,
+                'error' => $e->getMessage(),
+            ]);
+            $booking->setAttribute('can_start_ride', true);
+            $booking->setAttribute('start_allowed_from', null);
+            $booking->setAttribute('start_allowed_from_utc', null);
+        }
+    }
+
+    private function scheduledRideActionWindowError(CompanyBooking $booking, string $action)
+    {
+        $isScheduled = ($booking->pickup_time_type ?? null) === 'time' || (bool) $booking->is_scheduled;
+        $isAsap = strtolower(trim((string) $booking->pickup_time)) === 'asap'
+            || ($booking->pickup_time_type ?? null) === 'asap';
+
+        if (!$isScheduled || $isAsap || !$booking->booking_date || !$booking->pickup_time) {
+            return null;
+        }
+
+        try {
+            $settings = CompanySetting::orderBy('id', 'DESC')->first();
+            $windowMinutes = CompanySetting::resolveDriverJobStartWindowMinutes($settings);
+            $preBookingService = app(PreBookingService::class);
+            $pickupAt = $preBookingService->parseCompanyDateTimeToUtc(
+                $booking->booking_date . ' ' . $booking->pickup_time,
+                $preBookingService->companyTimezone($settings)
+            );
+
+            if (Carbon::now('UTC')->lt($pickupAt->copy()->subMinutes($windowMinutes))) {
+                $pickupDisplay = $preBookingService->formatStoredDateTimeForCompany($pickupAt, 'd M Y H:i');
+                return response()->json([
+                    'success' => 0,
+                    'message' => "Ride can only be {$action} within {$windowMinutes} minutes of pickup time.",
+                    'pickup_time' => $pickupDisplay,
+                    'allowed_from' => $preBookingService->formatStoredDateTimeForCompany(
+                        $pickupAt->copy()->subMinutes($windowMinutes),
+                        'd M Y H:i'
+                    ),
+                ], 422);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Scheduled ride action window validation failed', [
+                'booking_id' => $booking->id,
+                'action' => $action,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
     public function arrivedStatus(Request $request)
     {
         try {
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found'
+                ], 404);
+            }
+
+            if ($earlyResponse = $this->scheduledRideActionWindowError($booking, 'marked arrived')) {
+                return $earlyResponse;
+            }
+
             $booking->booking_status = "arrived";
             $booking->save();
 
@@ -1332,6 +1468,17 @@ class BookingController extends Controller
     {
         try {
             $booking = CompanyBooking::where("id", $request->booking_id)->first();
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Booking not found'
+                ], 404);
+            }
+
+            if ($earlyResponse = $this->scheduledRideActionWindowError($booking, 'started')) {
+                return $earlyResponse;
+            }
+
             // if ($booking->otp == $request->otp) {
                 $booking->booking_status = "started";
                 $booking->driver_pickup_time = now()->format('Y-m-d H:i:s');

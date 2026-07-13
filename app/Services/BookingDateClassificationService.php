@@ -11,6 +11,7 @@ class BookingDateClassificationService
 {
     private const TERMINAL_STATUSES = ['completed', 'no_show', 'cancelled'];
     private const TODAY_HIDDEN_STATUSES = ['completed', 'cancelled'];
+    private const ONGOING_STATUSES = ['ongoing', 'started'];
 
     private function applyNonTerminalFilter(Builder $query): Builder
     {
@@ -76,7 +77,11 @@ class BookingDateClassificationService
 
     public function todayDateString(): string
     {
-        return Carbon::today()->toDateString();
+        try {
+            return Carbon::now(app(PreBookingService::class)->companyTimezone())->toDateString();
+        } catch (\Throwable $e) {
+            return Carbon::today()->toDateString();
+        }
     }
 
     public function isToday(string $bookingDate): bool
@@ -99,7 +104,7 @@ class BookingDateClassificationService
             case 'today':
             case 'todays_booking':
                 return $query
-                    ->whereDate('booking_date', Carbon::today())
+                    ->whereDate('booking_date', $this->todayDateString())
                     ->where(function (Builder $inner) {
                         $inner
                             ->whereNull('booking_status')
@@ -107,10 +112,12 @@ class BookingDateClassificationService
                     });
             case 'pre_bookings':
                 return $this->applyUnreleasedScheduledFilter(
-                    $this->applyNonTerminalFilter($query->whereDate('booking_date', '>', Carbon::today()))
+                    $this->applyNonTerminalFilter($query->whereDate('booking_date', '>', $this->todayDateString()))
                 );
             case 'completed':
                 return $query->where('booking_status', 'completed');
+            case 'ongoing':
+                return $query->whereIn('booking_status', self::ONGOING_STATUSES);
             case 'no_show':
                 return $query->where('booking_status', 'no_show');
             case 'cancelled':
@@ -125,7 +132,7 @@ class BookingDateClassificationService
     public function dashboardCounts(?Builder $baseQuery = null): array
     {
         $query = $baseQuery ?? CompanyBooking::query();
-        $today = Carbon::today();
+        $today = $this->todayDateString();
 
         return [
             'todaysBooking' => PlotDispatch::applyTodaysBookingVisibilityFilter(
@@ -134,6 +141,7 @@ class BookingDateClassificationService
             'preBookings' => $this->applyNonTerminalFilter(
                 $this->applyUnreleasedScheduledFilter((clone $query)->whereDate('booking_date', '>', $today))
             )->count(),
+            'ongoing' => (clone $query)->whereIn('booking_status', self::ONGOING_STATUSES)->count(),
             'completed' => (clone $query)->where('booking_status', 'completed')->count(),
             'noShow' => (clone $query)->where('booking_status', 'no_show')->count(),
             'cancelled' => (clone $query)->where('booking_status', 'cancelled')->count(),

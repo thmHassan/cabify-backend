@@ -13,6 +13,7 @@ class CompanySetting extends Model
     public const DEFAULT_DISPATCH_TIMEOUT_SECONDS = 30;
     public const DEFAULT_RELEASE_LEAD_MINUTES = 60;
     public const DEFAULT_RELEASE_MODE = 'auto_then_bidding';
+    public const DEFAULT_DRIVER_JOB_START_WINDOW_MINUTES = 120;
     public const RELEASE_MODES = [
         'auto_dispatch',
         'bidding',
@@ -25,6 +26,7 @@ class CompanySetting extends Model
     protected $casts = [
         'auto_release_enabled' => 'boolean',
         'default_release_lead_minutes' => 'integer',
+        'driver_job_start_window_minutes' => 'integer',
     ];
 
     public static function isNearestDriverDispatchEnabled(): bool
@@ -81,6 +83,20 @@ class CompanySetting extends Model
         $mode = (string) ($this->default_release_mode ?: static::DEFAULT_RELEASE_MODE);
 
         return in_array($mode, static::RELEASE_MODES, true) ? $mode : static::DEFAULT_RELEASE_MODE;
+    }
+
+    public function driverJobStartWindowMinutes(): int
+    {
+        $minutes = (int) ($this->driver_job_start_window_minutes ?? static::DEFAULT_DRIVER_JOB_START_WINDOW_MINUTES);
+
+        return max(0, min($minutes, 1440));
+    }
+
+    public static function resolveDriverJobStartWindowMinutes(?self $settings = null): int
+    {
+        $settings = $settings ?? static::orderBy('id', 'DESC')->first();
+
+        return $settings ? $settings->driverJobStartWindowMinutes() : static::DEFAULT_DRIVER_JOB_START_WINDOW_MINUTES;
     }
 
     public static function resolveReleaseSettings(?self $settings = null): array

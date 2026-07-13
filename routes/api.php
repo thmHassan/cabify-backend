@@ -412,6 +412,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
         Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
+        Route::get('/driver/no-show-ride', [DriverBookingController::class, 'noShowRideList']);
         Route::get('/driver/upcoming-ride', [DriverBookingController::class, 'upcomingRide']);
         Route::get('/driver/assigned-ride-offers', [DriverBookingController::class, 'assignedRideOffers']);
         Route::get('/driver/list-ride-for-bidding', [DriverBookingController::class, 'listRideForBidding']);
