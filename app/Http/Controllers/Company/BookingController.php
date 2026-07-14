@@ -1165,11 +1165,23 @@ class BookingController extends Controller
             return $prefix . ' Driver selected - dispatching now.';
         }
 
+        if ($booking->booking_system === 'bidding') {
+            return $prefix . ' No driver selected - released to bidding.';
+        }
+
+        if ($booking->booking_system === 'bidding_fixed_fare_plot_base') {
+            return $prefix . ' No driver selected - released to fixed fare bidding.';
+        }
+
         return $prefix . ' No driver selected - dispatching now.';
     }
 
     private function applyAutomaticDispatchBookingDefaults(CompanyBooking $booking): void
     {
+        if (in_array($booking->booking_system, ['bidding', 'bidding_fixed_fare_plot_base'], true)) {
+            return;
+        }
+
         $plotDispatchEnabled = $this->bookingDispatchService->isPlotDispatchEnabled();
         $nearestDispatchEnabled = $this->bookingDispatchService->isNearestDriverDispatchEnabled();
 

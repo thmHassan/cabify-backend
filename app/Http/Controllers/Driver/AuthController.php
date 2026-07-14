@@ -18,6 +18,7 @@ use App\Models\CompanyDocumentType;
 use App\Models\CompanyVehicleType;
 use App\Models\DriverDocument;
 use App\Services\DriverSessionService;
+use App\Services\FCMService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
@@ -27,6 +28,7 @@ use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenBlacklistedException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException;
 use PHPOpenSourceSaver\JWTAuth\Exceptions\TokenInvalidException;
+use App\Support\TenantRequestContext;
 
 class AuthController extends Controller
 {
@@ -349,8 +351,17 @@ class AuthController extends Controller
             ], 400);
         }
 
-        $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
-        $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
+        $incomingDeviceToken = $request->input('deviceToken', $request->input('device_token', $user->device_token));
+        $incomingFcmToken = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
+        $previousDeviceToken = $user->device_token;
+        $previousFcmToken = $user->fcm_token;
+        $shouldNotifyPreviousSession = (int) ($user->auth_version ?? 0) > 0;
+        $isAnotherDeviceLogin = filled($incomingDeviceToken)
+            && filled($previousDeviceToken)
+            && $incomingDeviceToken !== $previousDeviceToken;
+
+        $user->device_token = $incomingDeviceToken;
+        $user->fcm_token = $incomingFcmToken;
         $user->save();
 
         if (!$this->driverEmailVerified($user)) {
@@ -358,6 +369,22 @@ class AuthController extends Controller
         }
 
         $token = $this->issueSingleSessionToken($user);
+        $currentAuthVersion = (int) ($user->fresh()?->auth_version ?? $user->auth_version ?? 0);
+
+        if ($isAnotherDeviceLogin || $shouldNotifyPreviousSession) {
+            $notificationTokens = $this->getOtherDriverDeviceTokensForLogin(
+                $user,
+                $incomingDeviceToken,
+                $previousDeviceToken,
+                $previousFcmToken
+            );
+            $this->notifyDriverLoginOnOtherDevice($notificationTokens, $user->name);
+            $this->notifyDriverSessionForceLogoutViaSocket(
+                $request,
+                $user->id,
+                $currentAuthVersion
+            );
+        }
 
         $profileData = $this->formatDriverProfileData($user);
 
@@ -384,6 +411,114 @@ class AuthController extends Controller
             ->delete();
 
         return JWTAuth::fromUser($user->fresh() ?? $user);
+    }
+
+    private function getOtherDriverDeviceTokensForLogin(
+        CompanyDriver $user,
+        ?string $incomingDeviceToken,
+        ?string $previousDeviceToken,
+        ?string $previousFcmToken
+    ): array {
+        if (!filled($incomingDeviceToken)) {
+            return [];
+        }
+
+        $query = CompanyToken::where('user_id', $user->id)
+            ->where('user_type', 'driver')
+            ->whereNotNull('fcm_token');
+
+        if (filled($incomingDeviceToken)) {
+            $query->where(function ($tokenQuery) use ($incomingDeviceToken) {
+                $tokenQuery->whereNull('device_token')
+                    ->orWhere('device_token', '!=', $incomingDeviceToken);
+            });
+        }
+
+        $tokenList = $query->pluck('fcm_token')
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
+
+        if (
+            filled($previousFcmToken)
+            && filled($previousDeviceToken)
+            && $incomingDeviceToken !== $previousDeviceToken
+            && !in_array($previousFcmToken, $tokenList, true)
+        ) {
+            $tokenList[] = $previousFcmToken;
+        }
+
+        return $tokenList;
+    }
+
+    private function notifyDriverLoginOnOtherDevice(array $fcmTokens, ?string $driverName = null): void
+    {
+        if (empty($fcmTokens)) {
+            return;
+        }
+
+        $name = $driverName ?: 'Driver';
+
+        foreach ($fcmTokens as $token) {
+            FCMService::sendToDevice(
+                $token,
+                'Account signed in on another device',
+                "{$name}, your account is now active on another device. If this wasn't you, please secure your account.",
+                [
+                    'event' => 'DRIVER_SESSION_FORCE_LOGOUT',
+                    'action' => 'force_logout',
+                    'reason' => 'another_device_login',
+                ]
+            );
+        }
+    }
+
+    private function notifyDriverSessionForceLogoutViaSocket(
+        Request $request,
+        int $driverId,
+        int $authVersion,
+        string $reason = 'another_device_login'
+    ): void
+    {
+        $socketUrl = rtrim((string) config('services.node_socket.url'), '/');
+        $socketSecret = (string) config('services.node_socket.internal_secret');
+        $tenantDatabase = TenantRequestContext::databaseId($request);
+
+        if ($socketUrl === '' || $socketSecret === '') {
+            return;
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $socketSecret,
+                'database' => $tenantDatabase,
+                'x-database' => $tenantDatabase,
+            ])->timeout(5)->post($socketUrl . '/driver-force-logout', [
+                'driverId' => $driverId,
+                'auth_version' => $authVersion,
+                'reason' => $reason,
+                'event' => 'DRIVER_SESSION_FORCE_LOGOUT',
+                'action' => 'force_logout',
+            ]);
+
+            if (!$response->successful()) {
+                \Log::warning('Driver force logout socket call failed', [
+                    'driver_id' => $driverId,
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                    'reason' => $reason,
+                    'database' => $tenantDatabase,
+                ]);
+            }
+        } catch (\Throwable $socketException) {
+            \Log::warning('Driver force logout socket call failed', [
+                'driver_id' => $driverId,
+                'error' => $socketException->getMessage(),
+                'reason' => $reason,
+                'database' => $tenantDatabase,
+            ]);
+        }
     }
 
     public function resendOtp(Request $request)
@@ -1036,12 +1171,18 @@ class AuthController extends Controller
                 ]);
             }
 
-            if (!$this->passwordMatchesAndUpgrade($user, (string) $request->password)){
+                if (!$this->passwordMatchesAndUpgrade($user, (string) $request->password)){
                 return response()->json(['error' => 1, 'message' => 'Invalid Password'], 400);
             }
-            
-            $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
-            $user->fcm_token = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
+
+            $incomingDeviceToken = $request->input('deviceToken', $request->input('device_token', $user->device_token));
+            $incomingFcmToken = $request->input('fcmToken', $request->input('fcm_token', $user->fcm_token));
+            $previousDeviceToken = $user->device_token;
+            $previousFcmToken = $user->fcm_token;
+            $previousAuthVersion = (int) ($user->auth_version ?? 0);
+
+            $user->device_token = $incomingDeviceToken;
+            $user->fcm_token = $incomingFcmToken;
             $user->save();
 
             if (!$this->driverEmailVerified($user)) {
@@ -1049,6 +1190,26 @@ class AuthController extends Controller
             }
 
             $token = $this->issueSingleSessionToken($user);
+            $currentAuthVersion = (int) ($user->fresh()?->auth_version ?? $user->auth_version ?? 0);
+            $shouldNotifyPreviousSession = $previousAuthVersion > 0;
+            $isAnotherDeviceLogin = filled($incomingDeviceToken)
+                && filled($previousDeviceToken)
+                && $incomingDeviceToken !== $previousDeviceToken;
+
+            if ($isAnotherDeviceLogin || $shouldNotifyPreviousSession) {
+                $notificationTokens = $this->getOtherDriverDeviceTokensForLogin(
+                    $user,
+                    $incomingDeviceToken,
+                    $previousDeviceToken,
+                    $previousFcmToken
+                );
+                $this->notifyDriverLoginOnOtherDevice($notificationTokens, $user->name);
+                $this->notifyDriverSessionForceLogoutViaSocket(
+                    $request,
+                    $user->id,
+                    $currentAuthVersion
+                );
+            }
 
             $profileData = $this->formatDriverProfileData($user);
 
@@ -1231,8 +1392,19 @@ class AuthController extends Controller
                 $driver->delete_reason = $request->reason;    
                 $driver->delete_description = $request->description;    
                 $driver->save();
+                DriverSessionService::invalidate($driver);
+                $this->notifyDriverSessionForceLogoutViaSocket(
+                    $request,
+                    (int) $driver->id,
+                    (int) $driver->auth_version,
+                    'driver_deleted'
+                );
                 $driver->delete();
-                auth('driver')->logout();
+                try {
+                    auth('driver')->logout();
+                } catch (\Exception $e) {
+                    // Token may already be invalid after auth_version bump.
+                }
             }
             return response()->json([
                 'success' => 1,

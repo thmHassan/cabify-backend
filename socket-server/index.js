@@ -940,7 +940,7 @@ const persistDriverLocationSnapshot = async ({
 
         params.push(driverId);
         await db.query(
-            `UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`,
+            `UPDATE drivers SET ${updates.join(', ')} WHERE id = ? AND deleted_at IS NULL`,
             params
         );
 
@@ -955,7 +955,7 @@ const persistDriverLocationSnapshot = async ({
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
              LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
-             WHERE d.id = ? LIMIT 1`,
+             WHERE d.id = ? AND d.deleted_at IS NULL LIMIT 1`,
             [driverId]
         );
 
@@ -1185,6 +1185,7 @@ const fetchNearbyIdleDrivers = async (db, lat, lng, searchRadius, excludeDriverI
         FROM drivers d
         WHERE d.driving_status = 'idle'
         AND d.online_status = 'online'
+        AND d.deleted_at IS NULL
         AND d.latitude IS NOT NULL
         AND d.longitude IS NOT NULL
         ${activeRideExclusion.sql}
@@ -1215,6 +1216,7 @@ const fetchBiddingFallbackDrivers = async (db, booking) => {
         WHERE d.status = 'accepted'
         AND d.driving_status = 'idle'
         AND d.online_status = 'online'
+        AND d.deleted_at IS NULL
         ${activeRideExclusion.sql}
         ${vehicleFilter.sql}
         ORDER BY d.id ASC
@@ -2700,9 +2702,9 @@ io.on("connection", (socket) => {
                     `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name
                  FROM drivers d
                  LEFT JOIN plots p ON d.plot_id = p.id
-                 WHERE d.id = ? LIMIT 1`,
-                    [driverId]
-                );
+                 WHERE d.id = ? AND d.deleted_at IS NULL LIMIT 1`,
+                [driverId]
+            );
 
                 if (!rows.length) return;
                 const driver = rows[0];
@@ -2873,7 +2875,7 @@ io.on("connection", (socket) => {
             }
 
             params.push(driverIdFromData);
-            await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`, params);
+            await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ? AND deleted_at IS NULL`, params);
 
             await emitDriverStatusForTenant({
                 db,
@@ -3016,7 +3018,7 @@ io.on("connection", (socket) => {
 
             if (!plotId && driverId) {
                 const [driverRows] = await db.query(
-                    "SELECT plot_id, latitude, longitude FROM drivers WHERE id = ? LIMIT 1",
+                    "SELECT plot_id, latitude, longitude FROM drivers WHERE id = ? AND deleted_at IS NULL LIMIT 1",
                     [driverId]
                 );
                 plotId = driverRows[0]?.plot_id || null;
@@ -3041,7 +3043,7 @@ io.on("connection", (socket) => {
                                 });
                             }
                             try {
-                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ?", [plotId, driverId]);
+                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ? AND deleted_at IS NULL", [plotId, driverId]);
                             } catch (error) {
                                 console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
                             }
@@ -3059,7 +3061,7 @@ io.on("connection", (socket) => {
                                 });
                             }
                             try {
-                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ?", [plotId, driverId]);
+                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ? AND deleted_at IS NULL", [plotId, driverId]);
                             } catch (error) {
                                 console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
                             }
@@ -3158,7 +3160,7 @@ io.on("connection", (socket) => {
                     try {
                         const db = getConnection(toTenantDbName(database));
                         const [rows] = await db.query(
-                            "SELECT plot_id, driving_status, online_status FROM drivers WHERE id = ? LIMIT 1",
+                            "SELECT plot_id, driving_status, online_status FROM drivers WHERE id = ? AND deleted_at IS NULL LIMIT 1",
                             [driverId]
                         );
                         const driver = rows[0];
@@ -3195,12 +3197,12 @@ io.on("connection", (socket) => {
                         const db = getConnection(toTenantDbName(database));
 
                         await db.query(
-                            "UPDATE drivers SET online_status = 'offline' WHERE id = ?",
+                            "UPDATE drivers SET online_status = 'offline' WHERE id = ? AND deleted_at IS NULL",
                             [driverId]
                         );
 
                         const [rows] = await db.query(
-                            "SELECT plot_id FROM drivers WHERE id = ? LIMIT 1",
+                            "SELECT plot_id FROM drivers WHERE id = ? AND deleted_at IS NULL LIMIT 1",
                             [driverId]
                         );
                         const plotId = rows[0]?.plot_id;
@@ -3326,6 +3328,7 @@ const buildDriverStateSnapshot = async (db, database) => {
          LEFT JOIN plots p ON d.plot_id = p.id
          LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
          WHERE d.online_status = 'online'
+         AND d.deleted_at IS NULL
          ORDER BY d.plot_id ASC, d.updated_at ASC, d.id ASC`
     );
 
@@ -3361,7 +3364,7 @@ const emitDriverStatusForTenant = async ({ db, database, driverId, reason = 'sta
          FROM drivers d
          LEFT JOIN plots p ON d.plot_id = p.id
          LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
-         WHERE d.id = ? LIMIT 1`,
+         WHERE d.id = ? AND d.deleted_at IS NULL LIMIT 1`,
         [driverId]
     );
 
@@ -3475,7 +3478,7 @@ app.post("/driver-status-change", async (req, res) => {
         }
 
         params.push(driverId);
-        await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`, params);
+        await db.query(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ? AND deleted_at IS NULL`, params);
 
         const result = await emitDriverStatusForTenant({
             db,
@@ -6314,7 +6317,7 @@ app.post("/driver-message-notification", (req, res) => {
 
 app.post("/driver-force-logout", async (req, res) => {
     try {
-        const { driverId } = req.body;
+        const { driverId, auth_version, reason = "dispatcher_logout", event, action } = req.body;
 
         if (!driverId) {
             return res.status(400).json({ success: false, message: "Missing driverId" });
@@ -6366,20 +6369,31 @@ app.post("/driver-force-logout", async (req, res) => {
 
         const driverSocketId = getTenantSocket(driverSockets, dbName, driverIdStr);
         if (driverSocketId) {
-            io.to(driverSocketId).emit("driver-forced-offline", {
+            const logoutEvent = event || "driver-forced-offline";
+            const logoutPayload = {
                 driver_id: driverId,
-                message: "You have been logged out by dispatch.",
-                reason: "dispatcher_logout",
+                message: "You have been logged out.",
+                reason,
+                action: action || "force_logout",
                 token_revoked: true,
-                auth_version: req.body.auth_version ?? null,
-            });
+                auth_version,
+            };
+
+            io.to(driverSocketId).emit("driver-forced-offline", logoutPayload);
+            if (logoutEvent && logoutEvent !== "driver-forced-offline") {
+                io.to(driverSocketId).emit(logoutEvent, logoutPayload);
+            }
+            const driverSocket = io.sockets.sockets.get(driverSocketId);
+            if (driverSocket) {
+                driverSocket.disconnect(true);
+            }
         }
 
         const offlineData = {
             driver_id: driverId,
             driver_name: driverName,
             online_status: "offline",
-            reason: "dispatcher_logout",
+            reason,
         };
 
         io.to(`dispatcher_${dbName}`).emit("driver-offline-event", offlineData);
@@ -6773,7 +6787,7 @@ app.post("/waiting-driver", async (req, res) => {
                     p.name AS plot_name, d.priority_plot, d.updated_at
              FROM drivers d
              LEFT JOIN plots p ON d.plot_id = p.id
-             WHERE d.id = ? 
+             WHERE d.id = ? AND d.deleted_at IS NULL
              LIMIT 1`,
             [driver_id]
         );
@@ -7990,7 +8004,7 @@ setInterval(async () => {
             const driverIds = queue.map(d => d.driver_id);
 
             const [drivers] = await db.query(
-                `SELECT id, driving_status, online_status, plot_id FROM drivers WHERE id IN (?)`,
+                `SELECT id, driving_status, online_status, plot_id FROM drivers WHERE id IN (?) AND deleted_at IS NULL`,
                 [driverIds]
             );
 
@@ -8030,7 +8044,7 @@ setInterval(async () => {
                     if (isTimeout) {
                         try {
                             await db.query(
-                                "UPDATE drivers SET online_status = 'offline' WHERE id = ?",
+                                "UPDATE drivers SET online_status = 'offline' WHERE id = ? AND deleted_at IS NULL",
                                 [driverIdStr]
                             );
                             console.log(`[QueueCheck] Driver #${driverIdStr} → offline (15 min location timeout)`);

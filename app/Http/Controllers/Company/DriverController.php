@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Mail;
 use App\Models\CompanyToken;
 use App\Models\CompanyVehicleType;
 use App\Services\DriverSessionService;
+use App\Support\TenantRequestContext;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -822,6 +823,8 @@ class DriverController extends Controller
 
             $driver = CompanyDriver::where("id", $request->id)->first();
             if (isset($driver) && $driver != NULL) {
+                DriverSessionService::invalidate($driver);
+                $this->forceLogoutDriverSocket($request, $driver, 'driver_deleted');
                 $driver->delete();
             }
             return response()->json([
@@ -1486,21 +1489,7 @@ class DriverController extends Controller
             }
 
             DriverSessionService::invalidate($driver);
-
-            try {
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-                    'database' => $request->header('database'),
-                ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/driver-force-logout', [
-                    'driverId' => $request->driver_id,
-                    'auth_version' => $driver->auth_version,
-                ]);
-            } catch (\Exception $socketException) {
-                \Log::warning('Driver force logout socket call failed', [
-                    'driver_id' => $request->driver_id,
-                    'error' => $socketException->getMessage(),
-                ]);
-            }
+            $this->forceLogoutDriverSocket($request, $driver, 'dispatcher_logout');
 
             return response()->json([
                 'success' => 1,
@@ -1513,6 +1502,47 @@ class DriverController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function forceLogoutDriverSocket(Request $request, CompanyDriver $driver, string $reason): void
+    {
+        $socketUrl = rtrim((string) config('services.node_socket.url'), '/');
+        $socketSecret = (string) config('services.node_socket.internal_secret');
+        $tenantDatabase = TenantRequestContext::databaseId($request) ?? (string) $request->header('database');
+
+        if ($socketUrl === '' || $socketSecret === '' || $tenantDatabase === '') {
+            return;
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $socketSecret,
+                'database' => $tenantDatabase,
+                'x-database' => $tenantDatabase,
+            ])->timeout(5)->post($socketUrl . '/driver-force-logout', [
+                'driverId' => $driver->id,
+                'auth_version' => $driver->auth_version,
+                'reason' => $reason,
+                'action' => 'force_logout',
+            ]);
+
+            if (!$response->successful()) {
+                \Log::warning('Driver force logout socket call failed', [
+                    'driver_id' => $driver->id,
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                    'reason' => $reason,
+                    'database' => $tenantDatabase,
+                ]);
+            }
+        } catch (\Exception $socketException) {
+            \Log::warning('Driver force logout socket call failed', [
+                'driver_id' => $driver->id,
+                'error' => $socketException->getMessage(),
+                'reason' => $reason,
+                'database' => $tenantDatabase,
+            ]);
         }
     }
 

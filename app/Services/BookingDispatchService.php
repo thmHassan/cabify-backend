@@ -107,12 +107,12 @@ class BookingDispatchService
         ?string $socketApiBaseUrl = null
     ): void {
         $hasDriver = !empty($booking->driver);
-        $dispatchSystem = $this->primaryDispatchSystem();
+        $dispatchSystem = $this->effectiveDispatchSystem($booking);
         $nearestDriverDispatch = !$hasDriver && $dispatchSystem === 'auto_dispatch_nearest_driver';
         $plotDispatch = !$hasDriver && $dispatchSystem === 'auto_dispatch_plot_base';
 
         if (!$hasDriver && $dispatchSystem === 'bidding') {
-            $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
+            $this->notifyBiddingDrivers($booking, $tenantDatabase, $socketApiBaseUrl);
 
             return;
         }
@@ -217,7 +217,7 @@ class BookingDispatchService
             ? app(PreBookingService::class)->normalizeReleaseMode($booking->dispatch_release_mode)
             : null;
 
-        $dispatchSystem = $this->primaryDispatchSystem();
+        $dispatchSystem = $this->effectiveDispatchSystem($booking);
         if (!$dispatchSystem || $dispatchSystem === 'manual_dispatch_only') {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - available for manual dispatch.');
             $booking->save();
@@ -227,7 +227,7 @@ class BookingDispatchService
         if ($releaseMode === PreBookingService::RELEASE_MODE_BIDDING || $dispatchSystem === 'bidding') {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to bidding.');
             $booking->save();
-            $this->notifyBiddingDrivers($booking, $socketApiBaseUrl);
+            $this->notifyBiddingDrivers($booking, $tenantDatabase, $socketApiBaseUrl);
 
             return;
         }
@@ -391,10 +391,10 @@ class BookingDispatchService
         }
     }
 
-    private function notifyBiddingDrivers(CompanyBooking $booking, ?string $socketApiBaseUrl = null): void
+    private function notifyBiddingDrivers(CompanyBooking $booking, string $tenantDatabase, ?string $socketApiBaseUrl = null): void
     {
         $driverIds = CompanyDriver::query()
-            ->where('status', 'accepted')
+            ->whereIn('status', ['accepted', 'approved', 'active'])
             ->where('driving_status', 'idle')
             ->where('online_status', 'online')
             ->when(
@@ -404,17 +404,33 @@ class BookingDispatchService
             ->pluck('id');
 
         $payload = $this->bookingSocketPayload($booking, [
+            'booking_status' => $booking->booking_status,
+            'booking_system' => 'bidding',
+            'bidding_fallback' => false,
             'fixed_fare' => true,
             'assignment_type' => 'fixed_fare_bidding',
         ]);
 
         foreach ($driverIds as $driverId) {
-            Http::withHeaders([
+            $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $this->internalSecret(),
+                'database' => $tenantDatabase,
+                'x-database' => $tenantDatabase,
             ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'send-new-ride'), [
                 'drivers' => [$driverId],
+                'tenantDb' => $tenantDatabase,
                 'booking' => $payload,
             ]);
+
+            if (!$response->successful()) {
+                \Log::warning('Bidding socket send failed', [
+                    'booking_id' => $booking->id,
+                    'driver_id' => $driverId,
+                    'tenant' => $tenantDatabase,
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+            }
 
             $sendRide = new CompanySendNewRide;
             $sendRide->booking_id = $booking->id;
@@ -463,6 +479,15 @@ class BookingDispatchService
             ->groupBy('dispatch_system')
             ->orderByRaw('MIN(priority) ASC')
             ->value('dispatch_system');
+    }
+
+    private function effectiveDispatchSystem(CompanyBooking $booking): ?string
+    {
+        if (in_array($booking->booking_system, ['bidding', 'bidding_fixed_fare_plot_base'], true)) {
+            return $booking->booking_system;
+        }
+
+        return $this->primaryDispatchSystem();
     }
 
     private function applyDriverBookingDeductions(CompanyDriver $driver, CompanySetting $companySetting): void
