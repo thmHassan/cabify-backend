@@ -28,6 +28,11 @@ class RiderAuthenticate
                 return response()->json(['message' => 'Unauthenticated'], 401);
             }
 
+            $tokenAuthVersion = (int) auth('rider')->payload()->get('auth_version', 0);
+            if ($tokenAuthVersion !== (int) ($rider->auth_version ?? 0)) {
+                return response()->json(['message' => 'Token revoked'], 401);
+            }
+
             $request->attributes->set('rider', $rider);
 
         } catch (\PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException $e) {

@@ -242,26 +242,50 @@ class BookingDispatchService
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to auto dispatch.');
             $booking->save();
 
-            Http::withHeaders([
-                'database' => $tenantDatabase,
-                'Accept' => 'application/json',
-            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-auto-dispatch'));
+            $this->postStartDispatchToSocket(
+                $socketApiBaseUrl,
+                'bookings/' . $booking->id . '/start-auto-dispatch',
+                $tenantDatabase
+            );
         } elseif ($dispatchSystem === 'bidding_fixed_fare_plot_base') {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to fixed fare bidding.');
             $booking->save();
 
-            SendBiddingFixedFareNotificationJob::dispatch($booking->id, null, 0, $tenantDatabase);
+            SendBiddingFixedFareNotificationJob::dispatchSync($booking->id, null, 0, $tenantDatabase);
         } elseif ($dispatchSystem === 'auto_dispatch_nearest_driver') {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - released to nearest driver dispatch.');
             $booking->save();
 
-            Http::withHeaders([
-                'database' => $tenantDatabase,
-                'Accept' => 'application/json',
-            ])->timeout(5)->post($this->socketEndpoint($socketApiBaseUrl, 'bookings/' . $booking->id . '/start-nearest-dispatch'));
+            $this->postStartDispatchToSocket(
+                $socketApiBaseUrl,
+                'bookings/' . $booking->id . '/start-nearest-dispatch',
+                $tenantDatabase
+            );
         } else {
             $booking->dispatcher_action = $this->withCreatorLog($booking, 'No driver selected - available for manual dispatch.');
             $booking->save();
+        }
+    }
+
+    private function postStartDispatchToSocket(?string $socketApiBaseUrl, string $path, string $tenantDatabase): void
+    {
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->internalSecret(),
+            'database' => $tenantDatabase,
+            'x-database' => $tenantDatabase,
+            'Accept' => 'application/json',
+        ])->timeout(10)->post($this->socketEndpoint($socketApiBaseUrl, $path), [
+            'tenantDb' => $tenantDatabase,
+            'database' => $tenantDatabase,
+        ]);
+
+        if (!$response->successful()) {
+            \Log::warning('Start dispatch socket call failed', [
+                'path' => $path,
+                'tenant' => $tenantDatabase,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
         }
     }
 
@@ -420,7 +444,15 @@ class BookingDispatchService
 
     public function isPlotDispatchEnabled(): bool
     {
-        return $this->primaryDispatchSystem() === 'auto_dispatch_plot_base';
+        return in_array($this->primaryDispatchSystem(), [
+            'auto_dispatch_plot_base',
+            'bidding_fixed_fare_plot_base',
+        ], true);
+    }
+
+    public function isFixedFarePlotDispatchEnabled(): bool
+    {
+        return $this->primaryDispatchSystem() === 'bidding_fixed_fare_plot_base';
     }
 
     private function primaryDispatchSystem(): ?string

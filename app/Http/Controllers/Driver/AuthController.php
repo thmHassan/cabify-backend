@@ -357,7 +357,7 @@ class AuthController extends Controller
             return $this->sendOtpRequiredResponse($user, $request);
         }
 
-        $token = JWTAuth::fromUser($user);
+        $token = $this->issueSingleSessionToken($user);
 
         $profileData = $this->formatDriverProfileData($user);
 
@@ -368,6 +368,22 @@ class AuthController extends Controller
             'data' => $profileData,
             'user' => $profileData,
         ]);
+    }
+
+    private function issueSingleSessionToken(CompanyDriver $user): string
+    {
+        $user->auth_version = (int) ($user->auth_version ?? 0) + 1;
+        $user->save();
+
+        CompanyToken::where('user_id', $user->id)
+            ->where('user_type', 'driver')
+            ->where(function ($query) use ($user) {
+                $query->whereNull('device_token')
+                    ->orWhere('device_token', '!=', $user->device_token);
+            })
+            ->delete();
+
+        return JWTAuth::fromUser($user->fresh() ?? $user);
     }
 
     public function resendOtp(Request $request)
@@ -1032,7 +1048,7 @@ class AuthController extends Controller
                 return $this->sendOtpRequiredResponse($user, $request);
             }
 
-            $token = JWTAuth::fromUser($user);
+            $token = $this->issueSingleSessionToken($user);
 
             $profileData = $this->formatDriverProfileData($user);
 
@@ -1092,7 +1108,7 @@ class AuthController extends Controller
             $user->device_token = $request->input('deviceToken', $request->input('device_token', $user->device_token));
             $user->save();
 
-            $token = JWTAuth::fromUser($user);
+            $token = $this->issueSingleSessionToken($user);
             $profileData = $this->formatDriverProfileData($user);
 
             return response()->json([

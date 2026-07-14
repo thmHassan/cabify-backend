@@ -52,15 +52,14 @@ class BookingController extends Controller
                 'longitude' => 'required',
             ]);
 
-            $lat = $request->latitude;
-            $lng = $request->longitude;
+            $lat = (float) $request->latitude;
+            $lng = (float) $request->longitude;
 
             $records = CompanyPlot::orderBy("id", "DESC")->get();
             $matched = null;
             foreach ($records as $rec) {
-                $polygon = json_decode($rec->features, true);
-                $array = json_decode($polygon['geometry']['coordinates'], true)[0];
-                if ($this->pointInPolygon($lat, $lng, $array)) {
+                $array = $this->extractPlotCoordinates($rec->features);
+                if ($array && $this->pointInPolygon($lat, $lng, $array)) {
                     $matched = $rec;
                     break;
                 }
@@ -76,6 +75,39 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function extractPlotCoordinates(mixed $features): ?array
+    {
+        if (!$features) {
+            return null;
+        }
+
+        $decoded = is_string($features) ? json_decode($features, true) : $features;
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        if (isset($decoded['features'][0]['geometry']) && is_array($decoded['features'][0]['geometry'])) {
+            $decoded = $decoded['features'][0];
+        }
+
+        $geometry = $decoded['geometry'] ?? $decoded;
+        $coordinates = $geometry['coordinates'] ?? null;
+
+        if (is_string($coordinates)) {
+            $coordinates = json_decode($coordinates, true);
+        }
+
+        if (!is_array($coordinates)) {
+            return null;
+        }
+
+        if (is_array($coordinates[0][0][0] ?? null)) {
+            return $coordinates[0][0];
+        }
+
+        return is_array($coordinates[0][0] ?? null) ? $coordinates[0] : $coordinates;
     }
 
     public function pointInPolygon($lat, $lng, $polygon)
@@ -136,7 +168,7 @@ class BookingController extends Controller
                 'journey_type' => 'required',
                 'vehicle' => 'required_if:request_for_vehicle,yes',
                 'passenger' => 'required',
-                'booking_amount' => 'required',
+                'booking_amount' => 'required|numeric|gt:0',
                 'payment_method' => 'required',
                 'driver' => $plotDispatchEnabled ? 'nullable' : 'required_without:booking_system',
                 'booking_system' => $plotDispatchEnabled ? 'nullable' : 'required_without:driver',
@@ -153,6 +185,7 @@ class BookingController extends Controller
             $this->bookingLocationResolver->resolveFromRequest($request);
 
             $socketApiBaseUrl = SocketApiUrlResolver::resolve($request);
+            $tenantDatabase = TenantRequestContext::databaseId($request) ?? (string) $request->header('database');
 
             $isScheduled = $this->preBookingService->isScheduledRequest($request);
             $pickupTimeType = $this->preBookingService->resolvePickupTimeType($request);
@@ -253,7 +286,7 @@ class BookingController extends Controller
                     $newBooking = $this->buildBookingFromRequest($request, $occurrenceDate, $existUser, $distance);
                     $newBooking->multi_booking = 'yes';
                     $newBooking->multi_days = $multiDaysStored;
-                    $this->applyPlotDispatchBookingDefaults($newBooking);
+                    $this->applyAutomaticDispatchBookingDefaults($newBooking);
                     $newBooking->save();
 
                     if (!$isScheduled && isset($request->driver) && $request->driver != NULL) {
@@ -262,36 +295,37 @@ class BookingController extends Controller
 
                     $this->bookingReminderService->scheduleReminder(
                         $newBooking,
-                        (string) $request->header('database')
+                        $tenantDatabase
                     );
 
                     if ($isScheduled) {
                         $this->preBookingService->scheduleDispatchRelease(
                             $newBooking,
-                            (string) $request->header('database')
+                            $tenantDatabase
                         );
                     }
-
-                    $createdBookingSummaries[] = $this->formatCreatedBookingSummary($newBooking);
 
                     $createdBookings[] = $newBooking;
                 }
 
                 foreach ($createdBookings as $createdBooking) {
                     if ($isScheduled) {
-                        $this->bookingDispatchService->notifyPreBookingCreated(
+                        $this->bookingDispatchService->releaseForDispatch(
                             $createdBooking,
-                            (string) $request->header('database'),
+                            $tenantDatabase,
                             $socketApiBaseUrl
                         );
                     } else {
                         $this->bookingDispatchService->notifyImmediateBookingCreated(
                             $createdBooking,
-                            (string) $request->header('database'),
+                            $tenantDatabase,
                             true,
                             $socketApiBaseUrl
                         );
                     }
+
+                    $createdBooking->refresh();
+                    $createdBookingSummaries[] = $this->formatCreatedBookingSummary($createdBooking);
                 }
             } else {
                 if ($request->pickup_time != 'asap' && $request->driver != NULL) {
@@ -335,7 +369,7 @@ class BookingController extends Controller
                 $newBooking->multi_booking = $request->multi_booking;
                 $newBooking->multi_days = $request->multi_days;
                 $newBooking->week = $request->week;
-                $this->applyPlotDispatchBookingDefaults($newBooking);
+                $this->applyAutomaticDispatchBookingDefaults($newBooking);
                 $newBooking->save();
 
                 if (!$isScheduled && isset($request->driver) && $request->driver != NULL){
@@ -344,29 +378,34 @@ class BookingController extends Controller
 
                 $this->bookingReminderService->scheduleReminder(
                     $newBooking,
-                    (string) $request->header('database')
+                    $tenantDatabase
                 );
 
                 if ($isScheduled) {
                     $this->preBookingService->scheduleDispatchRelease(
                         $newBooking,
-                        (string) $request->header('database')
+                        $tenantDatabase
                     );
-                    $this->bookingDispatchService->notifyPreBookingCreated(
+                    $this->bookingDispatchService->releaseForDispatch(
                         $newBooking,
-                        (string) $request->header('database'),
+                        $tenantDatabase,
                         $socketApiBaseUrl
                     );
                 } else {
                     $this->bookingDispatchService->notifyImmediateBookingCreated(
                         $newBooking,
-                        (string) $request->header('database'),
+                        $tenantDatabase,
                         false,
                         $socketApiBaseUrl
                     );
                 }
 
+                $newBooking->refresh();
                 $createdBookingSummaries[] = $this->formatCreatedBookingSummary($newBooking);
+            }
+
+            if ($isScheduled) {
+                $this->releaseDuePreBookingsAfterCreate($request, $socketApiBaseUrl);
             }
 
             return response()->json([
@@ -417,7 +456,7 @@ class BookingController extends Controller
                 'journey_type' => 'sometimes|required',
                 'vehicle' => 'sometimes|required_if:request_for_vehicle,yes',
                 'passenger' => 'sometimes|required',
-                'booking_amount' => 'sometimes|required',
+                'booking_amount' => 'sometimes|required|numeric|gt:0',
                 'payment_method' => 'sometimes|required',
                 'pickup_time_type' => 'nullable|in:asap,time',
                 'reminder_minutes' => 'nullable|integer|in:5,15,30,50',
@@ -943,6 +982,27 @@ class BookingController extends Controller
         }
     }
 
+    private function releaseDuePreBookingsAfterCreate(Request $request, ?string $socketApiBaseUrl = null): void
+    {
+        $tenantDatabase = TenantRequestContext::databaseId($request);
+        if (!$tenantDatabase) {
+            return;
+        }
+
+        try {
+            $this->duePreBookingReleaseService->releaseDueForCurrentTenant(
+                $tenantDatabase,
+                $socketApiBaseUrl ?: SocketApiUrlResolver::resolve($request),
+                25
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Create booking due pre-booking release sweep failed', [
+                'tenant' => $tenantDatabase,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function rideDetail(Request $request)
     {
         try {
@@ -1059,9 +1119,10 @@ class BookingController extends Controller
         $newBooking->toll = $request->toll;
         $newBooking->booking_status = 'pending';
         $newBooking->distance = $distance;
-        $newBooking->booking_amount = $request->booking_amount;
-        $newBooking->recommended_amount = $request->booking_amount;
-        $newBooking->offered_amount = $request->booking_amount;
+        $bookingAmount = (float) $request->booking_amount;
+        $newBooking->booking_amount = $bookingAmount;
+        $newBooking->recommended_amount = $bookingAmount;
+        $newBooking->offered_amount = $bookingAmount;
         $newBooking->dispatcher_id = $request->dispatcher_id;
         $newBooking->week = $request->week;
         $newBooking->start_at = $request->start_at;
@@ -1107,15 +1168,23 @@ class BookingController extends Controller
         return $prefix . ' No driver selected - dispatching now.';
     }
 
-    private function applyPlotDispatchBookingDefaults(CompanyBooking $booking): void
+    private function applyAutomaticDispatchBookingDefaults(CompanyBooking $booking): void
     {
-        if (!$this->bookingDispatchService->isPlotDispatchEnabled()) {
+        $plotDispatchEnabled = $this->bookingDispatchService->isPlotDispatchEnabled();
+        $nearestDispatchEnabled = $this->bookingDispatchService->isNearestDriverDispatchEnabled();
+
+        if (!$plotDispatchEnabled && !$nearestDispatchEnabled) {
             return;
         }
 
-        if (!$booking->is_scheduled && !$booking->driver) {
+        if ($plotDispatchEnabled && !$booking->is_scheduled && !$booking->driver) {
             $booking->driver = null;
             $booking->pending_driver_id = null;
+        }
+
+        if ($plotDispatchEnabled && $this->bookingDispatchService->isFixedFarePlotDispatchEnabled() && !$booking->driver) {
+            $booking->booking_system = 'bidding_fixed_fare_plot_base';
+            $booking->bidding_fallback = true;
         }
 
         if (!$booking->pickup_plot_id) {
@@ -1133,6 +1202,24 @@ class BookingController extends Controller
             'pre_booking' => (bool) $booking->is_scheduled && !$booking->dispatch_released,
             'booking_date' => $booking->booking_date,
             'pickup_time' => $booking->pickup_time,
+            'booking_status' => $booking->booking_status,
+            'booking_amount' => $booking->booking_amount,
+            'recommended_amount' => $booking->recommended_amount,
+            'offered_amount' => $booking->offered_amount,
+            'payment_method' => $booking->payment_method,
+            'passenger' => $booking->passenger,
+            'phone_no' => $booking->phone_no,
+            'pickup_location' => $booking->pickup_location,
+            'destination_location' => $booking->destination_location,
+            'pickup_point' => $booking->pickup_point,
+            'destination_point' => $booking->destination_point,
+            'distance' => $booking->distance,
+            'vehicle' => $booking->vehicle,
+            'driver' => $booking->driver,
+            'booking_system' => $booking->booking_system,
+            'bidding_fallback' => (bool) $booking->bidding_fallback,
+            'pickup_plot_id' => $booking->pickup_plot_id,
+            'dispatcher_action' => $booking->dispatcher_action,
             'reminder_minutes' => $booking->reminder_minutes,
             'dispatch_release_at' => $this->preBookingService->formatStoredDateTimeForCompany($booking->dispatch_release_at),
             'dispatch_release_mode' => $booking->dispatch_release_mode,

@@ -112,6 +112,8 @@ const ACTIVE_RIDE_STATUSES = ['pending_acceptance', 'ongoing', 'arrived', 'start
 const activeRideStatusesSqlList = ACTIVE_RIDE_STATUSES.map((status) => `'${status}'`).join(', ');
 const ONGOING_RIDE_STATUSES = ['ongoing', 'started'];
 const ongoingRideStatusesSqlList = ONGOING_RIDE_STATUSES.map((status) => `'${status}'`).join(', ');
+const PRE_BOOKING_HIDDEN_STATUSES = [...TERMINAL_BOOKING_STATUSES, 'ongoing', 'started', 'arrived'];
+const preBookingHiddenStatusesSqlList = PRE_BOOKING_HIDDEN_STATUSES.map((status) => `'${status}'`).join(', ');
 
 const nonTerminalBookingCondition = (alias = '') => {
     const column = (name) => (alias ? `${alias}.${name}` : name);
@@ -139,7 +141,7 @@ const preBookingsCondition = (alias = '', todayExpression = 'CURDATE()') => {
 
     return `
     DATE(${column('booking_date')}) > ${todayExpression}
-    AND ${nonTerminalBookingCondition(alias)}
+    AND (${column('booking_status')} IS NULL OR ${column('booking_status')} NOT IN (${preBookingHiddenStatusesSqlList}))
 `;
 };
 
@@ -1278,7 +1280,10 @@ const parseServicePlotPolygon = (plot) => {
     if (!plot?.features) return null;
 
     try {
-        const features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
+        let features = typeof plot.features === 'string' ? JSON.parse(plot.features) : plot.features;
+        if (features?.features?.[0]?.geometry) {
+            features = features.features[0];
+        }
         const geometry = features.geometry || features;
         let coordinates = geometry.coordinates;
 
@@ -1287,6 +1292,10 @@ const parseServicePlotPolygon = (plot) => {
         }
 
         if (!Array.isArray(coordinates)) return null;
+
+        if (Array.isArray(coordinates[0]?.[0]?.[0])) {
+            return coordinates[0][0];
+        }
 
         return Array.isArray(coordinates[0]?.[0]) ? coordinates[0] : coordinates;
     } catch (error) {
@@ -2315,7 +2324,23 @@ const nearestDriverDispatch = async ({
         }
 
         if (isFreshStart) {
-            const servicePlot = await findServicePlotForPickup(db, lat, lng);
+            let servicePlot = null;
+
+            if (booking.pickup_plot_id) {
+                try {
+                    const [plotRows] = await db.query(
+                        'SELECT id, name, features FROM plots WHERE id = ? LIMIT 1',
+                        [booking.pickup_plot_id]
+                    );
+                    servicePlot = plotRows[0] ?? null;
+                } catch (error) {
+                    console.error('[NearestDispatch] Existing pickup_plot_id lookup error:', error.message);
+                }
+            }
+
+            if (!servicePlot) {
+                servicePlot = await findServicePlotForPickup(db, lat, lng);
+            }
             if (!servicePlot) {
                 console.log('[NearestDispatch] Pickup is outside all service plots → manual dispatch');
                 await fallbackToManualDispatch({
@@ -5171,6 +5196,9 @@ app.put("/bookings/:id/status", async (req, res) => {
         if (bookings.length === 0) return res.status(404).json({ success: false, message: "Booking not found" });
 
         const booking = bookings[0];
+        const targetDriverIds = booking_status === 'cancelled'
+            ? await cancellationDriverTargets(db, id, booking.driver)
+            : (booking.driver ? [String(booking.driver)] : []);
         let res_user = null;
 
         const dispatcherName = req.body.dispatcher_name || "Dispatcher";
@@ -5246,21 +5274,23 @@ app.put("/bookings/:id/status", async (req, res) => {
                 }
             }
 
-            if (booking.driver) {
-                try {
-                    await sendNotificationToDriver(db, booking.driver, notifTitle, notifMessage, {
-                        booking_id: String(id),
-                        type: "ride_cancelled"
-                    });
-                    await storeNotification(db, {
-                        user_type: 'driver',
-                        user_id: booking.driver,
-                        title: notifTitle,
-                        message: notifMessage
-                    });
-                    console.log("Cancel notification sent to driver:", booking.driver);
-                } catch (notifErr) {
-                    console.error("Notification error in ride cancellation (driver):", notifErr.message);
+            if (targetDriverIds.length) {
+                for (const driverId of targetDriverIds) {
+                    try {
+                        await sendNotificationToDriver(db, driverId, notifTitle, notifMessage, {
+                            booking_id: String(id),
+                            type: "ride_cancelled"
+                        });
+                        await storeNotification(db, {
+                            user_type: 'driver',
+                            user_id: driverId,
+                            title: notifTitle,
+                            message: notifMessage
+                        });
+                        console.log("Cancel notification sent to driver:", driverId);
+                    } catch (notifErr) {
+                        console.error("Notification error in ride cancellation (driver):", notifErr.message);
+                    }
                 }
             }
 
@@ -5440,8 +5470,8 @@ app.put("/bookings/:id/status", async (req, res) => {
             }
         }
 
-        if (booking.driver) {
-            const driverSocketId = getTenantSocket(driverSockets, dbName, booking.driver);
+        for (const driverId of targetDriverIds) {
+            const driverSocketId = getTenantSocket(driverSockets, dbName, driverId);
             if (driverSocketId) {
                 io.to(driverSocketId).emit("booking-status-updated", {
                     booking_id: id,
@@ -5512,8 +5542,11 @@ app.put("/bookings/:id/status", async (req, res) => {
             const userSocketId = getTenantSocket(userSockets, dbName, updatedBooking.user_id);
             if (userSocketId) io.to(userSocketId).emit("user-ride-status-event", socketPayload);
         }
-        if (updatedBooking.driver) {
-            const driverSocketId = getTenantSocket(driverSockets, dbName, updatedBooking.driver);
+        const statusSocketDriverIds = booking_status === 'cancelled'
+            ? targetDriverIds
+            : (updatedBooking.driver ? [String(updatedBooking.driver)] : []);
+        for (const driverId of statusSocketDriverIds) {
+            const driverSocketId = getTenantSocket(driverSockets, dbName, driverId);
             if (driverSocketId) io.to(driverSocketId).emit("driver-ride-status-event", socketPayload);
         }
 
@@ -5854,6 +5887,11 @@ app.post("/send-new-ride", async (req, res) => {
         for (const driverId of drivers) {
             const isAccepted = booking.booking_status === 'ongoing';
             const isAdminAssigned = booking.assigned_by_admin === true || booking.assignment_source === "admin";
+            const isFixedFareBidding = booking.fixed_fare === true
+                || booking.fixed_fare === 1
+                || booking.fixed_fare === '1'
+                || booking.assignment_type === 'fixed_fare_bidding'
+                || booking.assignment_type === 'fixed_fare_bidding_fallback';
             const title = isAdminAssigned || isAccepted ? "New Ride Assigned" : "New Ride Available";
             const message = booking.assignment_message
                 || (isAccepted
@@ -5901,10 +5939,16 @@ app.post("/send-new-ride", async (req, res) => {
                         message: message,
                         booking: booking
                     });
+                    if (isFixedFareBidding) {
+                        io.to(socketId).emit("new-ride", booking);
+                    }
                 }
                 sentCount++;
+            } else {
+                console.warn(`[Socket /send-new-ride] Driver socket not found driver=${driverId} db=${dbName} booking=${booking?.id || booking?.booking_id || 'unknown'}`);
             }
         }
+        console.log(`[Socket /send-new-ride] booking=${booking?.id || booking?.booking_id || 'unknown'} db=${dbName || 'none'} drivers=${drivers.length} sent=${sentCount}`);
         return res.json({ success: true, sent_to: sentCount });
     } catch (error) {
         console.error("/send-new-ride error:", error);
@@ -5927,6 +5971,30 @@ app.post("/send-notification-dispatcher", (req, res) => {
     return res.json({ success: true, sent_to: sentCount });
 });
 
+const cancellationDriverTargets = async (db, bookingId, assignedDriverId = null, explicitDrivers = []) => {
+    const ids = new Set();
+    if (assignedDriverId) ids.add(String(assignedDriverId));
+    explicitDrivers.forEach((driverId) => {
+        if (driverId) ids.add(String(driverId));
+    });
+
+    if (db && bookingId) {
+        try {
+            const [rows] = await db.query(
+                "SELECT DISTINCT driver_id FROM send_new_rides WHERE booking_id = ?",
+                [bookingId]
+            );
+            rows.forEach((row) => {
+                if (row.driver_id) ids.add(String(row.driver_id));
+            });
+        } catch (error) {
+            console.error("Cancellation target driver lookup error:", error.message);
+        }
+    }
+
+    return Array.from(ids);
+};
+
 app.post("/change-cancel-ride", async (req, res) => {
     const { status, booking } = req.body;
     const drivers = Array.isArray(req.body.drivers) ? req.body.drivers : [];
@@ -5943,6 +6011,7 @@ app.post("/change-cancel-ride", async (req, res) => {
 
     let targetUserId = booking.user_id || persistedBooking?.user_id;
     const assignedDriverId = booking.driver || persistedBooking?.driver || null;
+    const targetDriverIds = await cancellationDriverTargets(db, booking.id, assignedDriverId, drivers);
 
     if (targetUserId) {
         try {
@@ -5964,31 +6033,30 @@ app.post("/change-cancel-ride", async (req, res) => {
         }
     }
 
-    if (assignedDriverId) {
+    if (targetDriverIds.length) {
         const driverNotifTitle = "Ride Cancelled";
         const driverNotifMessage = req.body.cancelled_by === 'user' ? `Ride #${booking.booking_id} has been cancelled by customer` : `Ride #${booking.booking_id} has been cancelled`;
 
-        try {
-            await sendNotificationToDriver(db, assignedDriverId, driverNotifTitle, driverNotifMessage, {
-                booking_id: String(booking.id),
-                type: "ride_cancelled"
-            });
-            await storeNotification(db, {
-                user_type: 'driver',
-                user_id: assignedDriverId,
-                title: driverNotifTitle,
-                message: driverNotifMessage
-            });
-        } catch (driverNotifErr) {
-            console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
+        for (const driverId of targetDriverIds) {
+            try {
+                await sendNotificationToDriver(db, driverId, driverNotifTitle, driverNotifMessage, {
+                    booking_id: String(booking.id),
+                    type: "ride_cancelled"
+                });
+                await storeNotification(db, {
+                    user_type: 'driver',
+                    user_id: driverId,
+                    title: driverNotifTitle,
+                    message: driverNotifMessage
+                });
+            } catch (driverNotifErr) {
+                console.error("Driver Notification error in /change-cancel-ride:", driverNotifErr.message);
+            }
         }
     }
 
     let sentCount = 0;
-    const socketDriverIds = Array.from(new Set([
-        ...drivers.map((driverId) => String(driverId)),
-        ...(assignedDriverId ? [String(assignedDriverId)] : []),
-    ].filter(Boolean)));
+    const socketDriverIds = targetDriverIds;
 
     socketDriverIds.forEach(driverId => {
         const socketId = getTenantSocket(driverSockets, dbName, driverId);
@@ -6722,16 +6790,9 @@ app.post("/waiting-driver", async (req, res) => {
         // ✅ FIX: plot_name already comes from LEFT JOIN — real name like "USA"
         const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
 
-        let rank = 1;
-        if (plotId) {
-            const [rankRows] = await db.query(
-                `SELECT COUNT(*) as count 
-                 FROM drivers 
-                 WHERE plot_id = ? AND driving_status = ? AND (updated_at < ? OR (updated_at = ? AND id < ?))`,
-                [plotId, driver.driving_status, driver.updated_at, driver.updated_at, driver.id]
-            );
-            rank = rankRows[0].count + 1;
-        }
+        const rank = plotId
+            ? await getOrAssignRankForDriver(plotId, dbName, driver.id)
+            : "-";
 
         const eventData = {
             driver_id: driver.id,

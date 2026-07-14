@@ -26,7 +26,9 @@ class CompanyRider extends Authenticatable implements JWTSubject
 
     public function getJWTCustomClaims()
     {
-        return [];
+        return [
+            'auth_version' => (int) ($this->auth_version ?? 0),
+        ];
     }
 
     public function getRatingAttribute(){

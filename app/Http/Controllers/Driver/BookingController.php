@@ -279,6 +279,11 @@ class BookingController extends Controller
                         ->orWhere("pickup_time_type", "asap");
                 })
                 ->where("booking_status", "pending")
+                ->where(function ($query) {
+                    $query->whereNull("cancelled_by")
+                        ->orWhere("cancelled_by", "");
+                })
+                ->whereDate("booking_date", ">=", now()->toDateString())
                 ->where(function ($query) use ($driver) {
                     $query->whereNull('vehicle')
                         ->orWhere('vehicle', '');
@@ -322,7 +327,10 @@ class BookingController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'rideDetail' => $rideDetail
+                'driver_job_start_window_minutes' => $rideDetail?->getAttribute('driver_job_start_window_minutes'),
+                'can_start_ride' => $rideDetail?->getAttribute('can_start_ride'),
+                'start_allowed_from' => $rideDetail?->getAttribute('start_allowed_from'),
+                'start_allowed_from_utc' => $rideDetail?->getAttribute('start_allowed_from_utc'),
             ]);
         } catch (\Exception $e) {
             return response()->json([

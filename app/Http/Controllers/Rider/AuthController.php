@@ -226,6 +226,22 @@ class AuthController extends Controller
         }
     }
 
+    private function issueSingleSessionToken(CompanyRider $user): string
+    {
+        $user->auth_version = (int) ($user->auth_version ?? 0) + 1;
+        $user->save();
+
+        CompanyToken::where('user_id', $user->id)
+            ->where('user_type', 'rider')
+            ->where(function ($query) use ($user) {
+                $query->whereNull('device_token')
+                    ->orWhere('device_token', '!=', $user->device_token);
+            })
+            ->delete();
+
+        return JWTAuth::fromUser($user->fresh() ?? $user);
+    }
+
     public function verifyPassword(Request $request){
         try{
             $request->validate([
@@ -260,7 +276,7 @@ class AuthController extends Controller
             $user->fcm_token = $request->fcm_token;
             $user->save();
 
-            $token = JWTAuth::fromUser($user);
+            $token = $this->issueSingleSessionToken($user);
 
             return response()->json([
                 'message' => 'Login successful',
@@ -307,7 +323,7 @@ class AuthController extends Controller
             $user->fcm_token = $request->fcm_token;
             $user->save();
 
-            $token = JWTAuth::fromUser($user);
+            $token = $this->issueSingleSessionToken($user);
 
             return response()->json([
                 'message' => 'Login successful',

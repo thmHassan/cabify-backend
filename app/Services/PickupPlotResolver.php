@@ -41,6 +41,10 @@ class PickupPlotResolver
             return null;
         }
 
+        if (isset($decoded['features'][0]['geometry']) && is_array($decoded['features'][0]['geometry'])) {
+            $decoded = $decoded['features'][0];
+        }
+
         $geometry = $decoded['geometry'] ?? $decoded;
         $coordinates = $geometry['coordinates'] ?? null;
 
@@ -50,6 +54,10 @@ class PickupPlotResolver
 
         if (!is_array($coordinates)) {
             return null;
+        }
+
+        if (is_array($coordinates[0][0][0] ?? null)) {
+            return $coordinates[0][0];
         }
 
         return is_array($coordinates[0][0] ?? null) ? $coordinates[0] : $coordinates;
