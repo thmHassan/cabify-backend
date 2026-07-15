@@ -547,39 +547,70 @@ const createWaitingQueueService = ({
         return queue.find((entry) => entry.driver_id === driverIdStr)?.rank ?? queue.length;
     };
 
-    const removeFromQueue = async (db, driverId, database) => {
+    const removeDriverFromQueues = async (db, driverId, database, { keepPlotId = null } = {}) => {
         const driverIdStr = String(driverId);
-        let changedPlots = [];
+        const changedPlots = new Set();
+        const persistedPlots = new Set();
+        const keepPlotKey = keepPlotId == null ? null : String(keepPlotId);
+
+        try {
+            const query = keepPlotKey == null
+                ? 'SELECT DISTINCT plot_id FROM plot_driver_queues WHERE driver_id = ?'
+                : 'SELECT DISTINCT plot_id FROM plot_driver_queues WHERE driver_id = ? AND plot_id <> ?';
+            const params = keepPlotKey == null ? [driverIdStr] : [driverIdStr, keepPlotKey];
+            const [rows] = await db.query(query, params);
+
+            rows.forEach((row) => {
+                if (row.plot_id != null) {
+                    const plotId = String(row.plot_id);
+                    changedPlots.add(plotId);
+                    persistedPlots.add(plotId);
+                }
+            });
+        } catch (error) {
+            console.error('[WaitingQueue] Failed to find persisted queue removals:', error.message);
+        }
 
         for (const [plotKey, queue] of plotDriverQueues.entries()) {
             if (!plotKey.endsWith(`_${database}`)) {
                 continue;
             }
 
-            const index = queue.findIndex((entry) => entry.driver_id === driverIdStr);
-            if (index === -1) {
+            if (!queue.some((entry) => entry.driver_id === driverIdStr)) {
                 continue;
             }
 
-            queue.splice(index, 1);
-            queue.forEach((entry, idx) => {
-                entry.rank = idx + 1;
-            });
-
             const plotId = plotKey.slice(0, plotKey.length - (`_${database}`).length);
-            plotDriverQueues.set(plotKey, queue);
-
-            try {
-                await persistPlotQueue(db, plotId, queue);
-            } catch (error) {
-                console.error('[WaitingQueue] Failed to persist queue removal:', error.message);
+            if (keepPlotKey != null && String(plotId) === keepPlotKey) {
+                continue;
             }
-
-            changedPlots.push(plotId);
+            changedPlots.add(String(plotId));
         }
 
-        return changedPlots;
+        for (const plotId of changedPlots) {
+            const plotKey = plotKeyFor(plotId, database);
+            let queue = persistedPlots.has(plotId) ? null : plotDriverQueues.get(plotKey);
+
+            if (!queue) {
+                queue = await loadPlotQueueFromDb(db, plotId, database);
+            }
+
+            const filtered = queue.filter((entry) => entry.driver_id !== driverIdStr);
+            if (filtered.length !== queue.length) {
+                await setPlotQueue(db, plotId, database, filtered);
+            }
+        }
+
+        return Array.from(changedPlots);
     };
+
+    const removeFromQueue = async (db, driverId, database) => (
+        removeDriverFromQueues(db, driverId, database)
+    );
+
+    const removeFromOtherQueues = async (db, driverId, database, keepPlotId) => (
+        removeDriverFromQueues(db, driverId, database, { keepPlotId })
+    );
 
     const updateDriverRankInQueue = async (database, plotId, driverId, newRank) => {
         const plotKey = plotKeyFor(plotId, database);
@@ -640,6 +671,7 @@ const createWaitingQueueService = ({
         broadcastAllPlotRankUpdates,
         getOrAssignRank,
         removeFromQueue,
+        removeFromOtherQueues,
         applyDriverRankUpdate,
         loadPlotQueueFromDb,
         setPlotQueue,

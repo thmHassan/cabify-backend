@@ -573,9 +573,16 @@ const getTenantSocket = (map, database, id) => {
     return key ? map.get(key) : null;
 };
 
-const deleteTenantSocket = (map, database, id) => {
+const deleteTenantSocket = (map, database, id, socketId = null) => {
     const key = tenantSocketKey(database, id);
-    if (key) map.delete(key);
+    if (!key) return;
+    if (socketId && map.get(key) !== socketId) return;
+    map.delete(key);
+};
+
+const isCurrentTenantSocket = (map, database, id, socketId) => {
+    const currentSocketId = getTenantSocket(map, database, id);
+    return !currentSocketId || currentSocketId === socketId;
 };
 
 const emitTenantDriverOffline = (database, payload) => {
@@ -1759,6 +1766,17 @@ const removeFromQueue = async (driverId, database, bookingId = null) => {
     return changedPlots;
 };
 
+const removeFromOtherQueues = async (driverId, database, keepPlotId, bookingId = null) => {
+    const db = getConnection(toTenantDbName(database));
+    const changedPlots = await waitingQueue.removeFromOtherQueues(db, driverId, database, keepPlotId);
+
+    for (const plotId of changedPlots) {
+        await waitingQueue.broadcastPlotRankUpdate(database, plotId, bookingId);
+    }
+
+    return changedPlots;
+};
+
 const applyDriverRankUpdate = async (database, plotId, driverId, newRank) => {
     return waitingQueue.applyDriverRankUpdate(database, plotId, driverId, newRank);
 };
@@ -2683,6 +2701,20 @@ io.on("connection", (socket) => {
     if (role === "admin" && adminId) setTenantSocket(adminSockets, database, adminId, socket.id);
 
     if (driverId) {
+        const previousSocketId = getTenantSocket(driverSockets, database, driverId);
+        if (previousSocketId && previousSocketId !== socket.id) {
+            const previousSocket = io.sockets.sockets.get(previousSocketId);
+            if (previousSocket) {
+                previousSocket.emit("driver-session-replaced", {
+                    success: true,
+                    database,
+                    driver_id: driverId,
+                    message: "Driver account connected on another device.",
+                });
+                previousSocket.disconnect(true);
+            }
+        }
+
         setTenantSocket(driverSockets, database, driverId, socket.id);
         const driverRuntimeKey = tenantSocketKey(database, driverId);
         if (driverRuntimeKey) driverLastLocationTime.set(driverRuntimeKey, Date.now());
@@ -2722,6 +2754,9 @@ io.on("connection", (socket) => {
                 if (driver.driving_status === "idle" && driver.online_status === "online") {
                     const plotId = driver.plot_id;
                     const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+                    if (plotId) {
+                        await removeFromOtherQueues(driverId, database, plotId);
+                    }
                     const rank = plotId ? await getOrAssignRankForDriver(plotId, database, driverId) : "-";
 
                     const emitData = {
@@ -2778,6 +2813,11 @@ io.on("connection", (socket) => {
                 if (!tenantDbName) {
                     console.error(`[driver-location] failed to resolve tenant db for ${requestedDb}`);
                 }
+                return;
+            }
+
+            if (!isCurrentTenantSocket(driverSockets, dbName, driverIdFromData, socket.id)) {
+                console.log(`[driver-location] Ignoring stale socket ${socket.id} for driver #${driverIdFromData}`);
                 return;
             }
 
@@ -2973,6 +3013,11 @@ io.on("connection", (socket) => {
             const driverId = payload?.driver_id || socket.driverId || socket.handshake.query.driver_id || null;
             const supportsRank = await driverRankSupported(db);
 
+            if (driverId && !isCurrentTenantSocket(driverSockets, socketDbName, driverId, socket.id)) {
+                console.log(`[get-my-rank] Ignoring stale socket ${socket.id} for driver #${driverId}`);
+                return;
+            }
+
             if (!supportsRank) {
                 socket.emit("my-rank-update", {
                     success: true,
@@ -3071,6 +3116,9 @@ io.on("connection", (socket) => {
             }
 
             if (plotId) {
+                if (driverId) {
+                    await removeFromOtherQueues(driverId, socketDbName, plotId, bookingId);
+                }
                 const queue = await waitingQueue.loadPlotQueueFromDb(db, plotId, socketDbName);
                 const rank = driverId ? await getOrAssignRankForDriver(plotId, socketDbName, driverId) : null;
                 const { plots, currentPlot } = await buildPlotSummary(plotId);
@@ -3129,7 +3177,12 @@ io.on("connection", (socket) => {
         }
 
         if (driverId) {
-            deleteTenantSocket(driverSockets, database, driverId);
+            if (!isCurrentTenantSocket(driverSockets, database, driverId, socket.id)) {
+                console.log(`[Disconnect] Ignoring stale driver socket ${socket.id} for driver #${driverId}`);
+                return;
+            }
+
+            deleteTenantSocket(driverSockets, database, driverId, socket.id);
             const driverRuntimeKey = tenantSocketKey(database, driverId);
             if (driverRuntimeKey) {
                 driverLocationCache.delete(driverRuntimeKey);

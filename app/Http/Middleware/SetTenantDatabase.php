@@ -34,7 +34,7 @@ class SetTenantDatabase
         if (!$database) {
             return response()->json([
                 'error' => 1,
-                'message' => 'Database header or database query parameter is missing.',
+                'message' => 'Invalid Data',
             ], 400);
         }
 
