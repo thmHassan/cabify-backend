@@ -66,6 +66,7 @@ class CompanyController extends Controller
                 'country_of_use' => 'required',
                 'time_zone' => 'required',
                 'enable_smtp' => 'required',
+                'billing_mode' => 'nullable|in:one_time,auto_renew',
                 'dispatcher' => 'required',
                 'map' => 'required',
                 'push_notification' => 'required',
@@ -121,6 +122,10 @@ class CompanyController extends Controller
             $tenant->country_of_use = $request->country_of_use;
             $tenant->time_zone = $request->time_zone;
             $tenant->enable_smtp = $request->enable_smtp;
+            $selectedSubscription = Subscription::where("id", $request->subscription_type)->first();
+            $tenant->billing_mode = $selectedSubscription?->deduct_type === 'cash'
+                ? 'one_time'
+                : ($request->billing_mode ?? 'one_time');
             $tenant->dispatcher = $request->dispatcher;
             $tenant->map = $request->map;
             $tenant->google_api_key = MapsApi::normalize($request->maps_api) === MapsApi::GOOGLE
@@ -139,6 +144,8 @@ class CompanyController extends Controller
             $tenant->password = Hash::make($request->password);
             $tenant->picture = $filename ?? null;
             $tenant->payment_status = 'pending';
+            // $tenant->database = config('tenancy.database.prefix', 'tenant') . $tenantId . config('tenancy.database.suffix', '');
+            // $this->syncTenantData($tenant);
             $tenant->database = 'tenant_' . $tenantId;
             $tenant->save();
 
@@ -394,6 +401,7 @@ class CompanyController extends Controller
                 'address' => 'max:255',
                 'city' => 'max:255',
                 'maps_api' => ['nullable', Rule::in(MapsApi::allowedInputValues())],
+                'billing_mode' => 'nullable|in:one_time,auto_renew',
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
@@ -403,9 +411,11 @@ class CompanyController extends Controller
             if($tenant->subscription_type != $request->subscription_type){
                 $existingSubscription = Subscription::where("id", $tenant->subscription_type)->first();
                 $newSubscription = SUbscription::where("id", $request->subscription_type)->first();
+                $hasStripeSubscription = !empty($tenant->stripe_subscription_id)
+                    && str_starts_with((string) $tenant->stripe_subscription_id, 'sub_');
 
                 if($newSubscription->deduct_type == "cash"){
-                    if($existingSubscription->deduct_type == "card"){
+                    if($existingSubscription->deduct_type == "card" && $hasStripeSubscription){
                         Stripe::setApiKey(Setting::stripeSecret());
 
                         StripeSubscription::update(
@@ -415,7 +425,7 @@ class CompanyController extends Controller
                     }
                 }
                 elseif($newSubscription->deduct_type == "card"){
-                    if($existingSubscription->deduct_type == "card"){
+                    if($existingSubscription->deduct_type == "card" && $hasStripeSubscription){
                         Stripe::setApiKey(Setting::stripeSecret());
 
                         StripeSubscription::update(
@@ -481,7 +491,7 @@ class CompanyController extends Controller
                         $tenant->stripe_subscription_id = $newStripeSubscription->id;
                         $tenant->save();
                     }
-                    elseif($existingSubscription->deduct_type == "cash"){
+                    elseif($existingSubscription->deduct_type == "cash" || !$hasStripeSubscription){
                         $newSubscriptionCreate = 1;                        
                     }
                 }
@@ -520,6 +530,10 @@ class CompanyController extends Controller
             $tenant->country_of_use = isset($request->country_of_use) ? $request->country_of_use : $tenant->country_of_use;
             $tenant->time_zone = isset($request->time_zone) ? $request->time_zone : $tenant->time_zone;
             $tenant->enable_smtp = isset($request->enable_smtp) ? $request->enable_smtp : $tenant->enable_smtp;
+            $selectedSubscription = Subscription::where("id", $tenant->subscription_type)->first();
+            $tenant->billing_mode = $selectedSubscription?->deduct_type === 'cash'
+                ? 'one_time'
+                : (isset($request->billing_mode) ? $request->billing_mode : ($tenant->billing_mode ?? 'one_time'));
             $tenant->dispatcher = isset($request->dispatcher) ? $request->dispatcher : $tenant->dispatcher;
             $tenant->map = isset($request->map) ? $request->map : $tenant->map;
             $tenant->push_notification = isset($request->push_notification) ? $request->push_notification : $tenant->push_notification;
@@ -534,6 +548,7 @@ class CompanyController extends Controller
                 ? CompanyInactiveService::normalizeStatus($request->status)
                 : CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
             $tenant->password = (isset($request->password) && $request->password != NULL) ? Hash::make($request->password) : $tenant->password;
+            // $this->syncTenantData($tenant);
             $tenant->save();
 
             if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
@@ -546,7 +561,12 @@ class CompanyController extends Controller
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->move(public_path('pictures'), $filename);
                 $tenant->picture = 'pictures/'.$filename;
+
+                $tenantData = is_array($tenant->data ?? null) ? $tenant->data : [];
+                $tenantData['picture'] = $tenant->picture;
+                $tenant->data = $tenantData;
             }
+            // $this->syncTenantData($tenant);
             $tenant->save();
 
             $tenant->run(function () use ($tenant) {
@@ -611,11 +631,104 @@ class CompanyController extends Controller
         }
     }
 
+    // private function syncTenantData(Tenant $tenant): void
+    // {
+    //     $data = is_array($tenant->data ?? null) ? $tenant->data : [];
+
+    //     foreach ($this->tenantFrontendFields() as $field) {
+    //         $value = $tenant->getAttribute($field);
+    //         if ($value !== null) {
+    //             $data[$field] = $value;
+    //         }
+    //     }
+
+    //     if ($tenant->getAttribute('password')) {
+    //         $data['password'] = $tenant->getAttribute('password');
+    //     }
+
+    //     $tenant->data = $data;
+    // }
+
+    // private function hydrateTenantDataForFrontend(Tenant $tenant): void
+    // {
+    //     $data = is_array($tenant->data ?? null) ? $tenant->data : [];
+
+    //     foreach ($this->tenantFrontendFields() as $field) {
+    //         $value = $tenant->getAttribute($field);
+    //         if ($value !== null) {
+    //             $data[$field] = $value;
+    //         }
+    //     }
+
+    //     $tenant->data = $data;
+    // }
+
+    // private function tenantFrontendFields(): array
+    // {
+    //     return [
+    //         'company_name',
+    //         'company_admin_name',
+    //         'user_name',
+    //         'company_id',
+    //         'email',
+    //         'contact_person',
+    //         'phone',
+    //         'address',
+    //         'city',
+    //         'currency',
+    //         'maps_api',
+    //         'google_api_key',
+    //         'barikoi_api_key',
+    //         'search_api',
+    //         'log_map_search_result',
+    //         'voip',
+    //         'drivers_allowed',
+    //         'sub_company',
+    //         'passengers_allowed',
+    //         'uber_plot_hybrid',
+    //         'dispatchers_allowed',
+    //         'subscription_type',
+    //         'fleet_management',
+    //         'sos_features',
+    //         'notes',
+    //         'stripe_enable',
+    //         'stripe_enablement',
+    //         'units',
+    //         'country_of_use',
+    //         'time_zone',
+    //         'enable_smtp',
+    //         'dispatcher',
+    //         'map',
+    //         'push_notification',
+    //         'usage_monitoring',
+    //         'revenue_statements',
+    //         'zone',
+    //         'manage_zones',
+    //         'cms',
+    //         'lost_found',
+    //         'accounts',
+    //         'status',
+    //         'picture',
+    //         'database',
+    //         'payment_status',
+    //         'payment_method',
+    //         'payment_amount',
+    //         'billing_mode',
+    //         'expiry_date',
+    //         'subscription_start_date',
+    //         'stripe_subscription_id',
+    //         'stripe_customer_id',
+    //         'password',
+    //     ];
+    // }
+
     public function companyCards(){
         try{
             $totalCompanies = Tenant::count();
             $activeCompanies = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
-            $monthlyRevenue = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())->sum('data->payment_amount');
+            $monthlyRevenue = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())
+                ->get()
+                ->sum(fn ($tenant) => (float) data_get($tenant->data, 'payment_amount', 0));
 
             return response()->json([
                 'success' => 1,
@@ -640,13 +753,21 @@ class CompanyController extends Controller
                 $perPage = $request->perPage;
             }
             $tenants = Tenant::orderBy("created_at","DESC");
-            if($request->status != 'all'){
-                $tenants = Tenant::orderBy("created_at","DESC")->where('data->status', $request->status);
+            if($request->filled('status') && $request->status != 'all'){
+                $tenants->where(function ($query) use ($request) {
+                    $query->where('data->status', $request->status);
+
+                    if ($request->status === 'active') {
+                        $query->orWhereNull('data->status');
+                    }
+                });
             }
             if(isset($request->search) && $request->search != NULL){
                 $tenants->where(function($query) use ($request){
                     $query->where("data->company_name", "LIKE" ,"%".$request->search."%")
-                            ->orWhere("data->email", "LIKE" ,"%".$request->search."%");
+                            ->orWhere("data->email", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("company_name", "LIKE" ,"%".$request->search."%")
+                            ->orWhere("email", "LIKE" ,"%".$request->search."%");
                 });
             }
             if (!empty($request->upcoming_subscription)) {
@@ -667,13 +788,23 @@ class CompanyController extends Controller
             $data = $tenants->paginate($perPage);
 
             $data->getCollection()->transform(function ($tenant) {
-                tenancy()->initialize($tenant);
-                $monthlyAmount = DB::table('wallet_transactions')
-                    ->whereMonth('created_at', Carbon::now()->month)
-                    ->whereYear('created_at', Carbon::now()->year)
-                    ->sum('amount');
+                // $this->hydrateTenantDataForFrontend($tenant);
 
-                tenancy()->end();
+                $monthlyAmount = 0;
+                try {
+                    tenancy()->initialize($tenant);
+                    $monthlyAmount = DB::table('wallet_transactions')
+                        ->whereMonth('created_at', Carbon::now()->month)
+                        ->whereYear('created_at', Carbon::now()->year)
+                        ->sum('amount');
+                } catch (\Throwable $e) {
+                    \Log::warning('Company list tenant revenue lookup failed', [
+                        'tenant' => $tenant->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                } finally {
+                    tenancy()->end();
+                }
 
                 $tenant->monthly_revenue = $monthlyAmount ?? 0;
 
@@ -795,6 +926,7 @@ class CompanyController extends Controller
             $user = Tenant::where("id", $request->id)->first();
             $user->payment_status = "success";
             $user->payment_method = "cash";
+            // $this->syncTenantData($user);
             $user->save();
 
             $subscription = Subscription::where("id", $user->subscription_type)->first();
@@ -809,6 +941,7 @@ class CompanyController extends Controller
             }
             $user->subscription_start_date = date('Y-m-d');
             $user->payment_amount = $subscription->amount;
+            // $this->syncTenantData($user);
             $user->save();
 
             $payment = new Transaction;
@@ -869,6 +1002,11 @@ class CompanyController extends Controller
 
     public function createStripePaymentUrl(Request $request){
         try{
+            $request->validate([
+                'id' => 'required|string',
+                'billing_mode' => 'nullable|in:one_time,auto_renew',
+            ]);
+
             $stripeSecret = Setting::stripeSecret();
             if (!$stripeSecret) {
                 return response()->json([
@@ -878,79 +1016,63 @@ class CompanyController extends Controller
             }
 
             Stripe::setApiKey($stripeSecret);
-            // $YOUR_DOMAIN = "http://localhost:5173/";
             $YOUR_DOMAIN = env('FRONTEND_URL');
             
             $tenantId = $request->id;
             $tenant = Tenant::where("id", $tenantId)->first();
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Company not found.',
+                ], 404);
+            }
 
             $subscription = Subscription::where("id", $tenant->subscription_type)->first();
+            if (!$subscription) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Subscription plan not found.',
+                ], 404);
+            }
+
+            $billingMode = $request->input('billing_mode', 'one_time');
             $amount = $subscription->amount * 100;
             $interval = "month";
-            if($subscription->billing_cycle == "monthly"){
-                $interval = "month";
-            }
-            elseif($subscription->billing_cycle == "yearly"){
+            if($subscription->billing_cycle == "yearly"){
                 $interval = "year";
-            }      
-
-            $products = Product::all(['limit' => 100]);
-            $existing = collect($products->data)->firstWhere('name', $subscription->id);
-
-            if($existing){
-                $productId = $existing->id;
-            }
-            else{
-                $product = Product::create([
-                    'name' => $subscription->id,
-                    'description' => $subscription->plan_name . ", ". $subscription->billing_cycle. ", ". $subscription->amount .", ". $subscription->features,
-                ]);
-                $productId = $product->id;
             }
 
-            $existingPrice = Price::all([
-                'limit' => 100,
-                'product' => $productId,
-            ]);
-
-            $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
-                $p->unit_amount == $amount && $p->recurring->interval == $interval
-            );
-
-            if ($matching) {
-                $priceId = $matching->id;
-            } else {
-                $price = Price::create([
-                    'unit_amount' => $amount,
-                    'currency' => 'usd',
-                    'recurring' => ['interval' => $interval],
-                    'product' => $productId,
-                ]);
-                $priceId = $price->id;
-            }
-
-            $checkout_session = Session::create([
-                'mode' => 'subscription',
+            $sessionPayload = [
+                'mode' => $billingMode === 'auto_renew' ? 'subscription' : 'payment',
                 'payment_method_types' => ['card'],
-                'line_items' => [[
-                    'price' => $priceId,
-                    'quantity' => 1,
-                ]],
+                'line_items' => [
+                    $this->stripeCheckoutLineItem($subscription, $amount, $interval, $billingMode),
+                ],
                 'success_url' => $YOUR_DOMAIN . 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
                 'cancel_url' => $YOUR_DOMAIN . 'payment-failed',
                 'metadata' => [
                     'user_id' => $tenantId,
                     'subscription_id' => $subscription->id,
+                    'billing_mode' => $billingMode,
                 ],
-                'subscription_data' => [
+            ];
+
+            if ($billingMode === 'auto_renew') {
+                $sessionPayload['subscription_data'] = [
                     'metadata' => [
                         'user_id' => $tenantId,
                         'subscription_id' => $subscription->id,
+                        'billing_mode' => $billingMode,
                     ],
-                ],
-            ]);
+                ];
+            }
 
-            return response()->json(['url' => $checkout_session->url]);
+            $checkout_session = Session::create($sessionPayload);
+
+            return response()->json([
+                'url' => $checkout_session->url,
+                'billing_mode' => $billingMode,
+            ]);
 
         }
         catch(\Exception $e){
@@ -959,6 +1081,221 @@ class CompanyController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function stripeCheckoutLineItem(Subscription $subscription, int $amount, string $interval, string $billingMode): array
+    {
+        if ($billingMode === 'one_time') {
+            return [
+                'price_data' => [
+                    'unit_amount' => $amount,
+                    'currency' => 'usd',
+                    'product_data' => [
+                        'name' => (string) $subscription->id,
+                        'description' => $subscription->plan_name . ", ". $subscription->billing_cycle. ", ". $subscription->amount .", ". $subscription->features,
+                    ],
+                ],
+                'quantity' => 1,
+            ];
+        }
+
+        $products = Product::all(['limit' => 100]);
+        $existing = collect($products->data)->firstWhere('name', $subscription->id);
+
+        if($existing){
+            $productId = $existing->id;
+        }
+        else{
+            $product = Product::create([
+                'name' => $subscription->id,
+                'description' => $subscription->plan_name . ", ". $subscription->billing_cycle. ", ". $subscription->amount .", ". $subscription->features,
+            ]);
+            $productId = $product->id;
+        }
+
+        $existingPrice = Price::all([
+            'limit' => 100,
+            'product' => $productId,
+        ]);
+
+        $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
+            $p->unit_amount == $amount && ($p->recurring->interval ?? null) == $interval
+        );
+
+        if ($matching) {
+            $priceId = $matching->id;
+        } else {
+            $price = Price::create([
+                'unit_amount' => $amount,
+                'currency' => 'usd',
+                'recurring' => ['interval' => $interval],
+                'product' => $productId,
+            ]);
+            $priceId = $price->id;
+        }
+
+        return [
+            'price' => $priceId,
+            'quantity' => 1,
+        ];
+    }
+
+    private function subscriptionExpiryDate(?string $currentExpiry, string $billingCycle): string
+    {
+        $baseDate = Carbon::today();
+
+        if ($currentExpiry) {
+            try {
+                $parsed = Carbon::parse($currentExpiry);
+                if ($parsed->greaterThan($baseDate)) {
+                    $baseDate = $parsed;
+                }
+            } catch (\Throwable) {
+                $baseDate = Carbon::today();
+            }
+        }
+
+        return match ($billingCycle) {
+            'monthly' => $baseDate->copy()->addMonth()->toDateString(),
+            'quarterly' => $baseDate->copy()->addMonths(3)->toDateString(),
+            'yearly' => $baseDate->copy()->addYear()->toDateString(),
+            default => $baseDate->copy()->addMonth()->toDateString(),
+        };
+    }
+
+    public function confirmStripeSession(Request $request)
+    {
+        try {
+            $request->validate([
+                'session_id' => 'required|string',
+            ]);
+
+            $stripeSecret = Setting::stripeSecret();
+            if (!$stripeSecret) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured.',
+                ], 500);
+            }
+
+            Stripe::setApiKey($stripeSecret);
+
+            $session = CheckoutSession::retrieve($request->session_id);
+
+            if (($session->payment_status ?? null) !== 'paid' && empty($session->subscription)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session payment is not completed yet.',
+                    'payment_status' => $session->payment_status ?? null,
+                ], 422);
+            }
+
+            $result = $this->applyStripeSessionPayment($session);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe payment confirmed successfully',
+                'data' => $result,
+            ]);
+        } catch (\Exception $e) {
+            \Log::warning('Stripe session confirmation failed', [
+                'session_id' => $request->input('session_id'),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function applyStripeSessionPayment($session): array
+    {
+        $metadata = $session->metadata ?? null;
+        $subscriptionDetailsMetadata = $session->subscription_details->metadata ?? null;
+
+        $userId = $metadata->user_id
+            ?? $subscriptionDetailsMetadata->user_id
+            ?? null;
+        $subscriptionId = $metadata->subscription_id
+            ?? $subscriptionDetailsMetadata->subscription_id
+            ?? null;
+        $billingMode = $metadata->billing_mode
+            ?? $subscriptionDetailsMetadata->billing_mode
+            ?? (!empty($session->subscription) ? 'auto_renew' : 'one_time');
+
+        if (!$userId || !$subscriptionId) {
+            throw new \RuntimeException('Stripe session is missing tenant or subscription metadata.');
+        }
+
+        $tenant = Tenant::where("id", $userId)->first();
+        $subscription = Subscription::where("id", $subscriptionId)->first();
+
+        if (!$tenant || !$subscription) {
+            throw new \RuntimeException('Tenant or subscription not found for Stripe session.');
+        }
+
+        $stripeSubscriptionId = $session->subscription;
+        $stripeCustomerId = $session->customer;
+
+        $tenant->payment_status = "success";
+        $tenant->payment_method = "stripe";
+        $tenant->billing_mode = $billingMode;
+        $tenant->stripe_subscription_id = $billingMode === 'auto_renew' ? $stripeSubscriptionId : '';
+        $tenant->stripe_customer_id = $stripeCustomerId;
+        $tenant->payment_amount = $subscription->amount;
+        $tenant->expiry_date = $this->subscriptionExpiryDate($tenant->expiry_date, $subscription->billing_cycle);
+
+        $tenant->subscription_start_date = date('Y-m-d');
+        // $this->syncTenantData($tenant);
+        $tenant->save();
+
+        $existingUserSubscription = UserSubscription::where('user_id', $tenant->id)
+            ->where('subscription_id', $subscription->id)
+            ->where('status', 'active')
+            ->where('amount', $subscription->amount)
+            ->whereDate('created_at', now()->toDateString())
+            ->first();
+
+        if (!$existingUserSubscription) {
+            $userSubscription = new UserSubscription;
+            $userSubscription->subscription_id = $subscription->id;
+            $userSubscription->user_id = $tenant->id;
+            $userSubscription->plan_name = $subscription->plan_name;
+            $userSubscription->billing_cycle = $subscription->billing_cycle;
+            $userSubscription->amount = $subscription->amount;
+            $userSubscription->features = $subscription->features;
+            $userSubscription->status = 'active';
+            $userSubscription->expire_at = $tenant->expiry_date;
+
+            $userSubscription->save();
+        }
+
+        $existingPayment = Transaction::where('user_id', $tenant->id)
+            ->where('amount', $subscription->amount)
+            ->where('status', 'paid')
+            ->where('method', 'card')
+            ->whereDate('created_at', now()->toDateString())
+            ->first();
+
+        if (!$existingPayment) {
+            $payment = new Transaction;
+            $payment->user_id = $tenant->id;
+            $payment->amount = $subscription->amount;
+            $payment->status = 'paid';
+            $payment->method = 'card';
+            $payment->save();
+        }
+
+        return [
+            'tenant_id' => $tenant->id,
+            'payment_status' => $tenant->payment_status,
+            'payment_method' => $tenant->payment_method,
+            'payment_amount' => $tenant->payment_amount,
+            'billing_mode' => $tenant->billing_mode,
+            'expiry_date' => $tenant->expiry_date,
+        ];
     }
 
     public function stripeWebhook(Request $request){
@@ -983,6 +1320,7 @@ class CompanyController extends Controller
                     $session = $event->data->object;
                     $userId = $session->metadata->user_id ?? null;
                     $subscriptionId = $session->metadata->subscription_id ?? null;
+                    $billingMode = $session->metadata->billing_mode ?? (!empty($session->subscription) ? 'auto_renew' : 'one_time');
                     $stripeSubscriptionId = $session->subscription;
                     $stripeCustomerId = $session->customer;
                     
@@ -991,9 +1329,11 @@ class CompanyController extends Controller
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
-                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
+                    $tenant->billing_mode = $billingMode;
+                    $tenant->stripe_subscription_id  = $billingMode === 'auto_renew' ? $stripeSubscriptionId : '';
                     $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
+                    // $this->syncTenantData($tenant);
                     $tenant->save();
 
                     if($subscription->billing_cycle == "monthly"){
@@ -1006,6 +1346,7 @@ class CompanyController extends Controller
                         $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
                     }
                     $tenant->subscription_start_date = date('Y-m-d');
+                    // $this->syncTenantData($tenant);
                     $tenant->save();
 
                     $userSubscription = new UserSubscription;
@@ -1080,9 +1421,11 @@ class CompanyController extends Controller
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
+                    $tenant->billing_mode = "auto_renew";
                     $tenant->stripe_subscription_id  = $stripeSubscriptionId;
                     $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
+                    // $this->syncTenantData($tenant);
                     $tenant->save();
 
                     if($subscription->billing_cycle == "monthly"){
@@ -1095,6 +1438,7 @@ class CompanyController extends Controller
                         $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
                     }
                     $tenant->subscription_start_date = date('Y-m-d');
+                    // $this->syncTenantData($tenant);
                     $tenant->save();
 
                     $userSubscription = new UserSubscription;
@@ -1586,9 +1930,11 @@ class CompanyController extends Controller
 
                     $tenant->payment_status = "success";
                     $tenant->payment_method = "stripe";
+                    $tenant->billing_mode = "auto_renew";
                     $tenant->stripe_subscription_id  = $stripeSubscriptionId;
                     $tenant->stripe_customer_id  = $stripeCustomerId;
                     $tenant->payment_amount = $subscription->amount;
+                    // $this->syncTenantData($tenant);
                     $tenant->save();
 
                     if($subscription->billing_cycle == "monthly"){
@@ -1601,6 +1947,7 @@ class CompanyController extends Controller
                         $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
                     }
                     $tenant->subscription_start_date = date('Y-m-d');
+                    // $this->syncTenantData($tenant);
                     $tenant->save();
 
                     $userSubscription = new UserSubscription;

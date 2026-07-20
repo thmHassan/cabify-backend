@@ -565,6 +565,33 @@ class SettingController extends Controller
     public function saveStripeInformation(Request $request)
     {
         try {
+            $request->validate([
+                'stripe_key' => 'nullable|string',
+                'stripe_secret_key' => 'nullable|string',
+                'stripe_webhook_secret' => 'nullable|string',
+            ]);
+
+            if ($request->filled('stripe_key') && !str_starts_with((string) $request->stripe_key, 'pk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe publishable key must start with pk_test_ or pk_live_.'
+                ], 422);
+            }
+
+            if ($request->filled('stripe_secret_key') && !str_starts_with((string) $request->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key must start with sk_test_ or sk_live_. Please do not paste the publishable key in the secret key field.'
+                ], 422);
+            }
+
+            if ($request->filled('stripe_webhook_secret') && !str_starts_with((string) $request->stripe_webhook_secret, 'whsec_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe webhook secret must start with whsec_.'
+                ], 422);
+            }
+
             $settings = CompanySetting::orderBy("id", "DESC")->first();
 
             if (!isset($settings) || $settings == NULL) {

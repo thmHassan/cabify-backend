@@ -26,7 +26,11 @@ use App\Models\MobileAppSetting;
 use App\Models\PackageRideCountSetting;
 use App\Models\CompanyPlot;
 use App\Models\CompanyDispatchSystem;
+use App\Support\TenantDatabaseConfigurator;
 use Illuminate\Support\Facades\Schema;
+use Stripe\Checkout\Session as CheckoutSession;
+use Stripe\Stripe;
+use Stripe\Webhook;
 
 class SettingController extends Controller
 {
@@ -563,6 +567,522 @@ class SettingController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function createPackageStripePaymentUrl(Request $request)
+    {
+        try {
+            $package = $this->resolveDriverPackagePaymentData($request);
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.'
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.'
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $successUrl = $request->success_url
+                ?: rtrim(config('app.url'), '/') . '/api/driver/stripe-package-success?session_id={CHECKOUT_SESSION_ID}';
+            $cancelUrl = $request->cancel_url
+                ?: rtrim(config('app.url'), '/') . '/api/driver/stripe-package-cancel';
+            $currency = strtolower($setting->company_currency ?: 'usd');
+
+            $session = CheckoutSession::create([
+                'payment_method_types' => ['card'],
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => $currency,
+                        'product_data' => [
+                            'name' => $package['name'],
+                        ],
+                        'unit_amount' => (int) round($package['amount'] * 100),
+                    ],
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment',
+                'success_url' => $successUrl,
+                'cancel_url' => $cancelUrl,
+                'metadata' => [
+                    'driver_id' => (string) auth('driver')->user()->id,
+                    'package_type' => (string) $package['package_type'],
+                    'package_top_up_id' => (string) $package['package_top_up_id'],
+                    'package_top_up_name' => (string) $package['package_top_up_name'],
+                    'amount' => (string) $package['amount'],
+                    'days' => (string) ($package['days'] ?? ''),
+                    'package_duration' => (string) ($package['package_duration'] ?? ''),
+                ],
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe package payment URL created successfully',
+                'checkout_url' => $session->url,
+                'session_id' => $session->id,
+                'publishable_key' => $setting->stripe_key,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function createWalletStripePaymentUrl(Request $request)
+    {
+        try {
+            $request->validate([
+                'amount' => 'required|numeric|min:1',
+                'success_url' => 'nullable|string',
+                'cancel_url' => 'nullable|string',
+            ]);
+
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.'
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.'
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $amount = (float) $request->amount;
+            $successUrl = $request->success_url
+                ?: rtrim(config('app.url'), '/') . '/api/driver/stripe-wallet-success?session_id={CHECKOUT_SESSION_ID}';
+            $cancelUrl = $request->cancel_url
+                ?: rtrim(config('app.url'), '/') . '/api/driver/stripe-wallet-cancel';
+            $currency = strtolower($setting->company_currency ?: 'usd');
+
+            $session = CheckoutSession::create([
+                'payment_method_types' => ['card'],
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => $currency,
+                        'product_data' => [
+                            'name' => 'Driver wallet top-up',
+                        ],
+                        'unit_amount' => (int) round($amount * 100),
+                    ],
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment',
+                'success_url' => $successUrl,
+                'cancel_url' => $cancelUrl,
+                'metadata' => [
+                    'payment_for' => 'driver_wallet_topup',
+                    'driver_id' => (string) auth('driver')->user()->id,
+                    'amount' => (string) $amount,
+                ],
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe wallet payment URL created successfully',
+                'checkout_url' => $session->url,
+                'session_id' => $session->id,
+                'publishable_key' => $setting->stripe_key,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function confirmPackageStripePayment(Request $request)
+    {
+        try {
+            $request->validate([
+                'session_id' => 'required|string',
+            ]);
+
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.'
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.'
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $session = CheckoutSession::retrieve($request->session_id);
+
+            if (($session->payment_status ?? null) !== 'paid') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe package payment is not completed yet.',
+                    'payment_status' => $session->payment_status ?? null,
+                ], 422);
+            }
+
+            $metadata = $session->metadata;
+            $driverId = (string) auth('driver')->user()->id;
+
+            if (($metadata->driver_id ?? null) !== $driverId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session does not belong to this driver.'
+                ], 403);
+            }
+
+            $existingPayment = WalletTransaction::where('user_type', 'driver')
+                ->where('user_id', $driverId)
+                ->where('comment', 'Stripe package purchase: ' . $session->id)
+                ->first();
+
+            if ($existingPayment) {
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Stripe package payment already confirmed',
+                ]);
+            }
+
+            $package = [
+                'package_type' => $metadata->package_type ?? 'packages_postpaid',
+                'package_top_up_id' => $metadata->package_top_up_id ?? null,
+                'package_top_up_name' => $metadata->package_top_up_name ?? null,
+                'amount' => (float) ($metadata->amount ?? 0),
+                'days' => $metadata->days !== '' ? (int) $metadata->days : null,
+                'package_duration' => $metadata->package_duration ?: null,
+            ];
+
+            $this->activateStripeDriverPackage($driverId, $package, $session->id);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Package purchased successfully through Stripe'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function confirmWalletStripePayment(Request $request)
+    {
+        try {
+            $request->validate([
+                'session_id' => 'required|string',
+            ]);
+
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.'
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.'
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $session = CheckoutSession::retrieve($request->session_id);
+
+            if (($session->payment_status ?? null) !== 'paid') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe wallet payment is not completed yet.',
+                    'payment_status' => $session->payment_status ?? null,
+                ], 422);
+            }
+
+            $metadata = $session->metadata;
+            $driverId = (string) auth('driver')->user()->id;
+
+            if (($metadata->payment_for ?? null) !== 'driver_wallet_topup') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session is not a wallet top-up payment.'
+                ], 400);
+            }
+
+            if (($metadata->driver_id ?? null) !== $driverId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session does not belong to this driver.'
+                ], 403);
+            }
+
+            $this->activateStripeWalletTopUp($driverId, (float) ($metadata->amount ?? 0), $session->id);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Wallet amount added successfully through Stripe'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function stripePackageWebhook(Request $request, string $tenant)
+    {
+        try {
+            $configured = TenantDatabaseConfigurator::configure($tenant);
+            if (!$configured['configured']) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => $configured['error'] ?? 'Unable to configure tenant database.',
+                ], $configured['status'] ?? 500);
+            }
+
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            if (!$setting || !$setting->stripe_webhook_secret || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe webhook or secret key is not configured for this company.',
+                ], 500);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $payload = $request->getContent();
+            $signature = $request->header('Stripe-Signature');
+
+            $event = Webhook::constructEvent(
+                $payload,
+                $signature,
+                $setting->stripe_webhook_secret
+            );
+
+            if ($event->type !== 'checkout.session.completed') {
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Stripe event ignored.',
+                ]);
+            }
+
+            $session = $event->data->object;
+
+            if (($session->payment_status ?? null) !== 'paid') {
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Stripe checkout session is not paid yet.',
+                ]);
+            }
+
+            $metadata = $session->metadata;
+            $driverId = (string) ($metadata->driver_id ?? '');
+
+            if ($driverId === '') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session is missing driver metadata.',
+                ], 400);
+            }
+
+            if (($metadata->payment_for ?? null) === 'driver_wallet_topup') {
+                $this->activateStripeWalletTopUp($driverId, (float) ($metadata->amount ?? 0), $session->id);
+
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Stripe wallet webhook processed successfully.',
+                ]);
+            }
+
+            $existingPayment = WalletTransaction::where('user_type', 'driver')
+                ->where('user_id', $driverId)
+                ->where('comment', 'Stripe package purchase: ' . $session->id)
+                ->first();
+
+            if (!$existingPayment) {
+                $package = [
+                    'package_type' => $metadata->package_type ?? 'packages_postpaid',
+                    'package_top_up_id' => $metadata->package_top_up_id ?? null,
+                    'package_top_up_name' => $metadata->package_top_up_name ?? null,
+                    'amount' => (float) ($metadata->amount ?? 0),
+                    'days' => ($metadata->days ?? '') !== '' ? (int) $metadata->days : null,
+                    'package_duration' => ($metadata->package_duration ?? '') ?: null,
+                ];
+
+                $this->activateStripeDriverPackage($driverId, $package, $session->id);
+            }
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe package webhook processed successfully.',
+            ]);
+        } catch (\UnexpectedValueException|\Stripe\Exception\SignatureVerificationException $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Invalid Stripe webhook signature.',
+            ], 400);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function resolveDriverPackagePaymentData(Request $request): array
+    {
+        $request->validate([
+            'package_type' => 'nullable',
+            'days' => 'required_without:package_type|integer|min:1',
+            'post_paid_amount' => 'required_without:package_type|numeric|min:0',
+            'package_duration' => 'required_without:package_type|in:day,week,month',
+            'package_top_up_id' => 'required',
+            'package_top_up_name' => 'required_without:package_type',
+            'success_url' => 'nullable|string',
+            'cancel_url' => 'nullable|string',
+        ]);
+
+        if ($request->package_type === "ride_count_price") {
+            $packageData = PackageRideCountSetting::where("id", $request->package_top_up_id)->firstOrFail();
+
+            return [
+                'package_type' => 'ride_count_price',
+                'package_top_up_id' => $request->package_top_up_id,
+                'package_top_up_name' => 'Ride count package',
+                'amount' => (float) $packageData->package_amount,
+                'name' => 'Ride count package',
+            ];
+        }
+
+        return [
+            'package_type' => 'packages_postpaid',
+            'package_top_up_id' => $request->package_top_up_id,
+            'package_top_up_name' => $request->package_top_up_name,
+            'amount' => (float) $request->post_paid_amount,
+            'days' => (int) $request->days,
+            'package_duration' => $request->package_duration,
+            'name' => $request->package_top_up_name,
+        ];
+    }
+
+    private function activateStripeDriverPackage(string $driverId, array $package, string $sessionId): void
+    {
+        $user = CompanyDriver::where("id", $driverId)->firstOrFail();
+
+        if ($package['package_type'] === "ride_count_price") {
+            $packageData = PackageRideCountSetting::where("id", $package['package_top_up_id'])->firstOrFail();
+            $user->ride_count_price = $packageData->package_ride_count;
+            $user->save();
+
+            DriverPackage::create([
+                'driver_id' => $driverId,
+                'package_type' => 'ride_count_price',
+                'post_paid_amount' => $packageData->package_amount,
+                'package_top_up_id' => $package['package_top_up_id'],
+            ]);
+        } else {
+            $add = $package['days'];
+            if ($package['package_duration'] == "week") {
+                $add = $package['days'] * 7;
+            } elseif ($package['package_duration'] == "month") {
+                $add = $package['days'] * 30;
+            }
+
+            DriverPackage::create([
+                'driver_id' => $driverId,
+                'package_type' => 'packages_postpaid',
+                'start_date' => now()->toDateString(),
+                'expire_date' => now()->addDays($add)->toDateString(),
+                'post_paid_amount' => $package['amount'],
+                'package_top_up_id' => $package['package_top_up_id'],
+                'package_top_up_name' => $package['package_top_up_name'],
+            ]);
+        }
+
+        $wallet = new WalletTransaction;
+        $wallet->user_type = "driver";
+        $wallet->user_id = $driverId;
+        $wallet->type = 'add';
+        $wallet->amount = $package['amount'];
+        $wallet->comment = 'Stripe package purchase: ' . $sessionId;
+        $wallet->save();
+
+        FCMService::sendToDriver(
+            $driverId,
+            'Package Purchased',
+            "{$package['package_top_up_name']} purchased successfully.",
+            [
+                'type' => 'package_purchase',
+                'payment_method' => 'stripe',
+                'package_type' => (string) $package['package_type'],
+                'package_top_up_id' => (string) $package['package_top_up_id'],
+            ]
+        );
+    }
+
+    private function activateStripeWalletTopUp(string $driverId, float $amount, string $sessionId): void
+    {
+        if ($amount <= 0) {
+            throw new \RuntimeException('Stripe wallet top-up amount is invalid.');
+        }
+
+        $existingPayment = WalletTransaction::where('user_type', 'driver')
+            ->where('user_id', $driverId)
+            ->where('comment', 'Stripe wallet top-up: ' . $sessionId)
+            ->first();
+
+        if ($existingPayment) {
+            return;
+        }
+
+        $user = CompanyDriver::where("id", $driverId)->firstOrFail();
+        $user->wallet_balance += $amount;
+        $user->save();
+
+        $wallet = new WalletTransaction;
+        $wallet->user_type = "driver";
+        $wallet->user_id = $driverId;
+        $wallet->type = 'add';
+        $wallet->amount = $amount;
+        $wallet->comment = 'Stripe wallet top-up: ' . $sessionId;
+        $wallet->save();
+
+        FCMService::sendToDriver(
+            $driverId,
+            'Wallet Updated',
+            'Wallet topped up successfully.',
+            [
+                'type' => 'wallet_topup',
+                'payment_method' => 'stripe',
+                'amount' => (string) $amount,
+            ]
+        );
     }
 
     public function getPurchasePackage(Request $request){

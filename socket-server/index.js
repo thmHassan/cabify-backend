@@ -943,6 +943,8 @@ const persistDriverLocationSnapshot = async ({
         if (plotId) {
             updates.push('plot_id = ?');
             params.push(plotId);
+        } else {
+            updates.push('plot_id = NULL');
         }
 
         params.push(driverId);
@@ -968,36 +970,62 @@ const persistDriverLocationSnapshot = async ({
 
         if (dbDriverRows.length > 0) {
             const dbDriver = dbDriverRows[0];
-            const previousPlotId = cachedDriver?.plot_id;
-            const plotChanged = cachedDriver && String(previousPlotId ?? '') !== String(dbDriver.plot_id ?? '');
+            const previousPlotId = cachedDriver?.plot_id ?? dbDriver.plot_id;
+            const currentPlotId = plotId || null;
+            const plotChanged = String(previousPlotId ?? '') !== String(currentPlotId ?? '');
             if (runtimeKey) {
                 driverLocationCache.set(runtimeKey, {
                     ...dbDriver,
                     latitude,
                     longitude,
+                    plot_id: currentPlotId,
                 });
             }
 
             emitTenantRooms(effectiveSocketDb, "driver-location-update", normalizeDriverRealtimePayload(dbDriver, effectiveSocketDb, {
                 latitude,
                 longitude,
+                plot_id: currentPlotId,
+                plot: currentPlotId ?? "N/A",
+                plot_name: currentPlotId ? dbDriver.plot_name : "N/A",
                 status: dbDriver.driving_status || "idle",
+                outside_plot: !currentPlotId,
             }));
 
             const isIdleAndOnline = dbDriver.driving_status === "idle" && dbDriver.online_status === "online";
             if (plotChanged && isIdleAndOnline) {
                 await removeFromQueue(dbDriver.id, dbName);
-                const rank = dbDriver.plot_id ? await getOrAssignRankForDriver(dbDriver.plot_id, dbName, dbDriver.id) : "-";
+                const rank = currentPlotId ? await getOrAssignRankForDriver(currentPlotId, dbName, dbDriver.id) : "-";
+                if (!currentPlotId) {
+                    socket?.emit("my-rank-update", {
+                        success: true,
+                        database: effectiveSocketDb,
+                        plot_id: null,
+                        booking_id: null,
+                        rank: null,
+                        rank_available: false,
+                        outside_plot: true,
+                        current_location: { latitude, longitude },
+                        current_plot: null,
+                        total_drivers: 0,
+                        message: "Outside of plot",
+                    });
+                }
                 const eventData = normalizeDriverRealtimePayload(dbDriver, dbName, {
                     rank,
+                    plot_id: currentPlotId,
+                    plot: currentPlotId ?? "N/A",
+                    plot_name: currentPlotId ? dbDriver.plot_name : "N/A",
                     status: dbDriver.driving_status,
                     latitude,
                     longitude,
                     online_status: dbDriver.online_status,
                     is_reconnecting: false,
                 });
-                emitTenantWaitingDriver(dbName, eventData);
-                socket?.emit("waiting-driver-event", eventData);
+                if (currentPlotId) {
+                    emitTenantWaitingDriver(dbName, eventData);
+                    socket?.emit("waiting-driver-event", eventData);
+                }
             } else if (isActiveRideStatus(dbDriver.driving_status)) {
                 emitTenantOnJobDriver(dbName, normalizeDriverRealtimePayload(dbDriver, dbName, {
                     rank: null,
@@ -2752,8 +2780,25 @@ io.on("connection", (socket) => {
                 console.log(`[Connect] Driver #${driverId} online_status=${driver.online_status} driving_status=${driver.driving_status}`);
 
                 if (driver.driving_status === "idle" && driver.online_status === "online") {
-                    const plotId = driver.plot_id;
-                    const plotName = driver.plot_name || (plotId ? `Plot #${plotId}` : "N/A");
+                    let plotId = driver.plot_id;
+                    const driverLatitude = parseCoordinate(driver.latitude);
+                    const driverLongitude = parseCoordinate(driver.longitude);
+                    if (driverLatitude !== null && driverLongitude !== null) {
+                        const resolvedPlotId = await resolvePlotIdForLocation(db, database, driverLatitude, driverLongitude);
+                        if (resolvedPlotId) {
+                            plotId = resolvedPlotId;
+                            if (String(driver.plot_id ?? "") !== String(plotId)) {
+                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ? AND deleted_at IS NULL", [plotId, driverId]);
+                            }
+                        } else {
+                            plotId = null;
+                            await db.query("UPDATE drivers SET plot_id = NULL WHERE id = ? AND deleted_at IS NULL", [driverId]);
+                            await removeFromQueue(driverId, database);
+                        }
+                    }
+                    const plotName = plotId && String(plotId) === String(driver.plot_id)
+                        ? (driver.plot_name || `Plot #${plotId}`)
+                        : (plotId ? `Plot #${plotId}` : "N/A");
                     if (plotId) {
                         await removeFromOtherQueues(driverId, database, plotId);
                     }
@@ -3012,6 +3057,8 @@ io.on("connection", (socket) => {
             const bookingId = payload?.booking_id || null;
             const driverId = payload?.driver_id || socket.driverId || socket.handshake.query.driver_id || null;
             const supportsRank = await driverRankSupported(db);
+            let outsideCurrentLocation = false;
+            let currentLocationForRank = null;
 
             if (driverId && !isCurrentTenantSocket(driverSockets, socketDbName, driverId, socket.id)) {
                 console.log(`[get-my-rank] Ignoring stale socket ${socket.id} for driver #${driverId}`);
@@ -3061,57 +3108,59 @@ io.on("connection", (socket) => {
                 return { plots, currentPlot };
             };
 
-            if (!plotId && driverId) {
+            if (driverId) {
                 const [driverRows] = await db.query(
                     "SELECT plot_id, latitude, longitude FROM drivers WHERE id = ? AND deleted_at IS NULL LIMIT 1",
                     [driverId]
                 );
-                plotId = driverRows[0]?.plot_id || null;
+                const runtimeKey = tenantSocketKey(socketDbName, driverId);
+                const cachedDriver = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
+                const cachedLatitude = parseCoordinate(cachedDriver?.latitude);
+                const cachedLongitude = parseCoordinate(cachedDriver?.longitude);
                 const driverLatitude = parseCoordinate(driverRows[0]?.latitude);
                 const driverLongitude = parseCoordinate(driverRows[0]?.longitude);
 
-                if (!plotId) {
-                    const runtimeKey = tenantSocketKey(socketDbName, driverId);
-                    const cachedDriver = runtimeKey ? driverLocationCache.get(runtimeKey) : null;
-                    plotId = cachedDriver?.plot_id || cachedDriver?.plot;
+                const resolveFreshLocationPlot = async (lat, lng) => {
+                    if (lat === null || lng === null) return { checked: false, plotId: null };
+                    const resolvedPlotId = await resolvePlotIdForLocation(db, socketDbName, lat, lng);
+                    return {
+                        checked: true,
+                        plotId: resolvedPlotId || null,
+                    };
+                };
 
-                    if (!plotId && cachedDriver?.latitude !== null && cachedDriver?.longitude !== null) {
-                        const lat = parseCoordinate(cachedDriver.latitude);
-                        const lng = parseCoordinate(cachedDriver.longitude);
-                        const resolvedPlotId = await resolvePlotIdForLocation(db, socketDbName, lat, lng);
-                        if (resolvedPlotId) {
-                            plotId = resolvedPlotId;
-                            if (runtimeKey) {
-                                driverLocationCache.set(runtimeKey, {
-                                    ...cachedDriver,
-                                    plot_id: plotId,
-                                });
-                            }
-                            try {
-                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ? AND deleted_at IS NULL", [plotId, driverId]);
-                            } catch (error) {
-                                console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
-                            }
-                        }
+                const freshLocation = cachedLatitude !== null && cachedLongitude !== null
+                    ? await resolveFreshLocationPlot(cachedLatitude, cachedLongitude)
+                    : await resolveFreshLocationPlot(driverLatitude, driverLongitude);
+
+                if (freshLocation.checked) {
+                    currentLocationForRank = {
+                        latitude: cachedLatitude ?? driverLatitude,
+                        longitude: cachedLongitude ?? driverLongitude,
+                    };
+                    plotId = freshLocation.plotId;
+                    outsideCurrentLocation = !freshLocation.plotId;
+
+                    if (runtimeKey) {
+                        driverLocationCache.set(runtimeKey, {
+                            ...(cachedDriver || {}),
+                            id: driverId,
+                            driver_id: driverId,
+                            latitude: currentLocationForRank.latitude,
+                            longitude: currentLocationForRank.longitude,
+                            plot_id: plotId,
+                        });
                     }
 
-                    if (!plotId && driverLatitude !== null && driverLongitude !== null) {
-                        const resolvedPlotId = await resolvePlotIdForLocation(db, socketDbName, driverLatitude, driverLongitude);
-                        if (resolvedPlotId) {
-                            plotId = resolvedPlotId;
-                            if (runtimeKey) {
-                                driverLocationCache.set(runtimeKey, {
-                                    ...cachedDriver,
-                                    plot_id: plotId,
-                                });
-                            }
-                            try {
-                                await db.query("UPDATE drivers SET plot_id = ? WHERE id = ? AND deleted_at IS NULL", [plotId, driverId]);
-                            } catch (error) {
-                                console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
-                            }
+                    if (plotId && String(driverRows[0]?.plot_id ?? "") !== String(plotId)) {
+                        try {
+                            await db.query("UPDATE drivers SET plot_id = ? WHERE id = ? AND deleted_at IS NULL", [plotId, driverId]);
+                        } catch (error) {
+                            console.error("[get-my-rank] Failed to persist inferred plot_id:", error.message);
                         }
                     }
+                } else {
+                    plotId = plotId || driverRows[0]?.plot_id || cachedDriver?.plot_id || cachedDriver?.plot || null;
                 }
             }
 
@@ -3137,6 +3186,10 @@ io.on("connection", (socket) => {
                 return;
             }
 
+            if (driverId && outsideCurrentLocation) {
+                await removeFromQueue(driverId, socketDbName, bookingId);
+            }
+
             const { plots } = await buildPlotSummary(null);
 
             socket.emit("my-rank-update", {
@@ -3146,10 +3199,14 @@ io.on("connection", (socket) => {
                 booking_id: bookingId,
                 rank: null,
                 rank_available: false,
+                outside_plot: outsideCurrentLocation,
+                current_location: outsideCurrentLocation ? currentLocationForRank : null,
                 plots,
                 current_plot: null,
                 total_drivers: 0,
-                message: plots.length ? "No current plot found" : "No plots found",
+                message: outsideCurrentLocation
+                    ? "Outside of plot"
+                    : (plots.length ? "No current plot found" : "No plots found"),
             });
 
         } catch (err) {

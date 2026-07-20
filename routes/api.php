@@ -76,6 +76,8 @@ Route::post('/company/login', [CompanyController::class, 'companyLogin']);
 Route::post('/company/logout-all-dispatchers', [DispatcherController::class, 'logoutAllDispatchers']);
 Route::post('/company/forgot-password', [CompanyController::class, 'forgotPassword']);
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
+Route::post('/driver/stripe-package-webhook/{tenant}', [DriverSettingController::class, 'stripePackageWebhook']);
+Route::post('/driver/stripe-wallet-webhook/{tenant}', [DriverSettingController::class, 'stripePackageWebhook']);
 Route::get('/driver/verify-company-code', [DriverAuthController::class, 'verifyCompanyCode']);
 
 Route::group(['middleware' => ['tenant.db']], function () {
@@ -106,6 +108,7 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/company-subscription-list', [CompanyController::class, 'subscriptionList']);
         Route::post('/super-admin/cash-payment', [CompanyController::class, 'cashPayment']);
         Route::post('/super-admin/create-stripe-payment-url', [CompanyController::class, 'createStripePaymentUrl']);
+        Route::post('/super-admin/confirm-stripe-session', [CompanyController::class, 'confirmStripeSession']);
         Route::get('/super-admin/payment-history', [CompanyController::class, 'paymentHistory']);
         Route::get('/super-admin/delete-company', [CompanyController::class, 'deleteCompany']);
 
@@ -402,6 +405,10 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::get('/driver/get-commission-data', [DriverSettingController::class, 'getCommissionData']);
         Route::post('/driver/purchase-package', [DriverSettingController::class, 'purchasePackage']);
+        Route::post('/driver/create-wallet-stripe-payment-url', [DriverSettingController::class, 'createWalletStripePaymentUrl']);
+        Route::post('/driver/confirm-wallet-stripe-payment', [DriverSettingController::class, 'confirmWalletStripePayment']);
+        Route::post('/driver/create-package-stripe-payment-url', [DriverSettingController::class, 'createPackageStripePaymentUrl']);
+        Route::post('/driver/confirm-package-stripe-payment', [DriverSettingController::class, 'confirmPackageStripePayment']);
         Route::get('/driver/list-plot', [DriverSettingController::class, 'plotList']);
         Route::get('/driver/driver-ranking', [DriverSettingController::class, 'driverRanking']);
         Route::get('/driver/change-status', [DriverSettingController::class, 'changeStatus']);

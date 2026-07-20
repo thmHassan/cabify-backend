@@ -387,6 +387,9 @@ const createWaitingQueueService = ({
             };
         }
 
+        const [plotRows] = await db.query('SELECT id, name, features FROM plots WHERE id = ? LIMIT 1', [plotId]);
+        const plot = plotRows[0] || { id: plotId, name: `Plot #${plotId}` };
+        const plotPolygon = parsePlotPolygon(plot);
         const driverIds = queue.map((entry) => entry.driver_id);
         const [drivers] = await db.query(
             `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
@@ -407,6 +410,17 @@ const createWaitingQueueService = ({
             .map((entry) => {
                 const driver = drivers.find((row) => String(row.id) === String(entry.driver_id));
                 if (!driver) {
+                    return null;
+                }
+
+                const lat = Number(driver.latitude);
+                const lng = Number(driver.longitude);
+                if (
+                    plotPolygon
+                    && Number.isFinite(lat)
+                    && Number.isFinite(lng)
+                    && !pointInPolygon(lat, lng, plotPolygon)
+                ) {
                     return null;
                 }
 
