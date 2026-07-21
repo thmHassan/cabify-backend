@@ -10,10 +10,8 @@ use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use App\Models\CompanyToken;
 use Illuminate\Support\Facades\Http;
 use App\Models\TenantUser;
-use Illuminate\Support\Facades\Mail;
-use App\Models\CompanySetting;
-use App\Models\Setting;
 use Illuminate\Support\Facades\Hash;
+use App\Jobs\SendRiderRegistrationOtpJob;
 
 class AuthController extends Controller
 {
@@ -68,13 +66,20 @@ class AuthController extends Controller
             $countUser = CompanyRider::count();
 
             if($countUser >= $dataCheck->data['passengers_allowed']){
-                Http::withHeaders([
-                    'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
-                ])->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
-                    'clientId' => $request->header('database'),
-                    'title' => "Passenger Limit",
-                    'description' => "You have reached your passenger limits"
-                ]);
+                try {
+                    Http::withHeaders([
+                        'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+                    ])->timeout(5)->post(rtrim((string) config('services.node_socket.url'), '/') . '/send-reminder', [
+                        'clientId' => $request->header('database'),
+                        'title' => "Passenger Limit",
+                        'description' => "You have reached your passenger limits"
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::warning('Passenger limit reminder failed', [
+                        'tenant' => $request->header('database'),
+                        'error' => $e->getMessage(),
+                    ]);
+                }
 
                 return response()->json([
                     'error' => 1,
@@ -106,17 +111,11 @@ class AuthController extends Controller
             $user->otp_expires_at = $expiresAt;
             $user->save();
 
-            $settingData = CompanySetting::orderBy("id", "DESC")->first();
             if (isset($user->email) && $user->email != NULL) {
-                $mailer = \App\Services\MailConfigurationService::resolveMailer($settingData);
-
-                Mail::mailer($mailer)->send('emails.send-otp', [
-                    'name' => $user->name ?? 'User',
-                    'otp' => $otp,
-                ], function ($message) use ($user) {
-                    $message->to($user->email)
-                        ->subject('Registration OTP');
-                });
+                SendRiderRegistrationOtpJob::dispatchAfterResponse(
+                    $user->id,
+                    (string) $request->header('database')
+                );
             }
 
             return response()->json([

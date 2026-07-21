@@ -754,10 +754,11 @@ class SettingController extends Controller
                 ], 403);
             }
 
-            $existingPayment = WalletTransaction::where('user_type', 'driver')
-                ->where('user_id', $driverId)
-                ->where('comment', 'Stripe package purchase: ' . $session->id)
-                ->first();
+            $existingPayment = $this->stripePaymentExists(
+                $driverId,
+                $session->id,
+                'Stripe package purchase'
+            );
 
             if ($existingPayment) {
                 return response()->json([
@@ -920,10 +921,11 @@ class SettingController extends Controller
                 ]);
             }
 
-            $existingPayment = WalletTransaction::where('user_type', 'driver')
-                ->where('user_id', $driverId)
-                ->where('comment', 'Stripe package purchase: ' . $session->id)
-                ->first();
+            $existingPayment = $this->stripePaymentExists(
+                $driverId,
+                $session->id,
+                'Stripe package purchase'
+            );
 
             if (!$existingPayment) {
                 $package = [
@@ -993,45 +995,59 @@ class SettingController extends Controller
 
     private function activateStripeDriverPackage(string $driverId, array $package, string $sessionId): void
     {
-        $user = CompanyDriver::where("id", $driverId)->firstOrFail();
+        $processed = DB::transaction(function () use ($driverId, $package, $sessionId) {
+            $user = CompanyDriver::where("id", $driverId)->lockForUpdate()->firstOrFail();
 
-        if ($package['package_type'] === "ride_count_price") {
-            $packageData = PackageRideCountSetting::where("id", $package['package_top_up_id'])->firstOrFail();
-            $user->ride_count_price = $packageData->package_ride_count;
-            $user->save();
-
-            DriverPackage::create([
-                'driver_id' => $driverId,
-                'package_type' => 'ride_count_price',
-                'post_paid_amount' => $packageData->package_amount,
-                'package_top_up_id' => $package['package_top_up_id'],
-            ]);
-        } else {
-            $add = $package['days'];
-            if ($package['package_duration'] == "week") {
-                $add = $package['days'] * 7;
-            } elseif ($package['package_duration'] == "month") {
-                $add = $package['days'] * 30;
+            if ($this->stripePaymentExists($driverId, $sessionId, 'Stripe package purchase')) {
+                return false;
             }
 
-            DriverPackage::create([
-                'driver_id' => $driverId,
-                'package_type' => 'packages_postpaid',
-                'start_date' => now()->toDateString(),
-                'expire_date' => now()->addDays($add)->toDateString(),
-                'post_paid_amount' => $package['amount'],
-                'package_top_up_id' => $package['package_top_up_id'],
-                'package_top_up_name' => $package['package_top_up_name'],
-            ]);
-        }
+            if ($package['package_type'] === "ride_count_price") {
+                $packageData = PackageRideCountSetting::where("id", $package['package_top_up_id'])->firstOrFail();
+                $user->ride_count_price = $packageData->package_ride_count;
+                $user->save();
 
-        $wallet = new WalletTransaction;
-        $wallet->user_type = "driver";
-        $wallet->user_id = $driverId;
-        $wallet->type = 'add';
-        $wallet->amount = $package['amount'];
-        $wallet->comment = 'Stripe package purchase: ' . $sessionId;
-        $wallet->save();
+                DriverPackage::create([
+                    'driver_id' => $driverId,
+                    'package_type' => 'ride_count_price',
+                    'post_paid_amount' => $packageData->package_amount,
+                    'package_top_up_id' => $package['package_top_up_id'],
+                ]);
+            } else {
+                $add = $package['days'];
+                if ($package['package_duration'] == "week") {
+                    $add = $package['days'] * 7;
+                } elseif ($package['package_duration'] == "month") {
+                    $add = $package['days'] * 30;
+                }
+
+                DriverPackage::create([
+                    'driver_id' => $driverId,
+                    'package_type' => 'packages_postpaid',
+                    'start_date' => now()->toDateString(),
+                    'expire_date' => now()->addDays($add)->toDateString(),
+                    'post_paid_amount' => $package['amount'],
+                    'package_top_up_id' => $package['package_top_up_id'],
+                    'package_top_up_name' => $package['package_top_up_name'],
+                ]);
+            }
+
+            $wallet = new WalletTransaction;
+            $wallet->user_type = "driver";
+            $wallet->user_id = $driverId;
+            $wallet->type = 'add';
+            $wallet->amount = $package['amount'];
+            $wallet->comment = 'Stripe package purchase';
+            $wallet->payment_provider = 'stripe';
+            $wallet->payment_reference = $sessionId;
+            $wallet->save();
+
+            return true;
+        });
+
+        if (!$processed) {
+            return;
+        }
 
         FCMService::sendToDriver(
             $driverId,
@@ -1052,26 +1068,32 @@ class SettingController extends Controller
             throw new \RuntimeException('Stripe wallet top-up amount is invalid.');
         }
 
-        $existingPayment = WalletTransaction::where('user_type', 'driver')
-            ->where('user_id', $driverId)
-            ->where('comment', 'Stripe wallet top-up: ' . $sessionId)
-            ->first();
+        $processed = DB::transaction(function () use ($driverId, $amount, $sessionId) {
+            $user = CompanyDriver::where("id", $driverId)->lockForUpdate()->firstOrFail();
 
-        if ($existingPayment) {
+            if ($this->stripePaymentExists($driverId, $sessionId, 'Stripe wallet top-up')) {
+                return false;
+            }
+
+            $user->wallet_balance += $amount;
+            $user->save();
+
+            $wallet = new WalletTransaction;
+            $wallet->user_type = "driver";
+            $wallet->user_id = $driverId;
+            $wallet->type = 'add';
+            $wallet->amount = $amount;
+            $wallet->comment = 'Stripe wallet top-up';
+            $wallet->payment_provider = 'stripe';
+            $wallet->payment_reference = $sessionId;
+            $wallet->save();
+
+            return true;
+        });
+
+        if (!$processed) {
             return;
         }
-
-        $user = CompanyDriver::where("id", $driverId)->firstOrFail();
-        $user->wallet_balance += $amount;
-        $user->save();
-
-        $wallet = new WalletTransaction;
-        $wallet->user_type = "driver";
-        $wallet->user_id = $driverId;
-        $wallet->type = 'add';
-        $wallet->amount = $amount;
-        $wallet->comment = 'Stripe wallet top-up: ' . $sessionId;
-        $wallet->save();
 
         FCMService::sendToDriver(
             $driverId,
@@ -1083,6 +1105,17 @@ class SettingController extends Controller
                 'amount' => (string) $amount,
             ]
         );
+    }
+
+    private function stripePaymentExists(string $driverId, string $sessionId, string $legacyDescription): bool
+    {
+        return WalletTransaction::where('user_type', 'driver')
+            ->where('user_id', $driverId)
+            ->where(function ($query) use ($sessionId, $legacyDescription) {
+                $query->where('payment_reference', $sessionId)
+                    ->orWhere('comment', $legacyDescription . ': ' . $sessionId);
+            })
+            ->exists();
     }
 
     public function getPurchasePackage(Request $request){

@@ -10,4 +10,8 @@ class WalletTransaction extends Model
     use HasFactory;
 
     protected $table = "wallet_transactions";
+
+    protected $hidden = [
+        'payment_reference',
+    ];
 }

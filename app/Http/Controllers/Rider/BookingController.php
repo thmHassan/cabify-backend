@@ -106,8 +106,33 @@ class BookingController extends Controller
             $request->validate([
                 'pickup_point' => 'required',
                 'destination_point' => 'required',
-                'vehicle_id' => 'required'
+                'any_ride' => 'nullable|boolean',
+                'anyRide' => 'nullable|boolean',
             ]);
+
+            $isAnyRide = $request->boolean('any_ride')
+                || $request->boolean('anyRide')
+                || strtolower((string) $request->input('request_for_vehicle')) === 'no'
+                || !$request->filled('vehicle_id');
+
+            $selectedVehicle = null;
+            if (!$isAnyRide) {
+                if (!$request->filled('vehicle_id')) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'The vehicle id field is required for a specific ride.',
+                    ], 422);
+                }
+
+                $selectedVehicle = CompanyVehicleType::find($request->vehicle_id);
+
+                if (!$selectedVehicle) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Selected vehicle type is invalid.',
+                    ], 422);
+                }
+            }
 
             $tenant = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $tenantData = json_decode($tenant->data ?? '{}');
@@ -117,9 +142,27 @@ class BookingController extends Controller
             $barikoi_key = $data->barikoi_key;
             $companySettings = CompanySetting::orderBy("id", "DESC")->first();
             $tenant_google_api_key = $tenant->google_api_key ?? ($tenantData->google_api_key ?? null);
-            $google_map_key = in_array(strtolower((string) $map_api), ['google', 'both'], true)
-                ? (trim((string) ($companySettings?->google_api_keys ?? '')) ?: $tenant_google_api_key)
-                : null;
+            $google_map_key = trim((string) ($companySettings?->google_api_keys ?? ''))
+                ?: trim((string) $tenant_google_api_key)
+                ?: trim((string) ($data->google_map_key ?? ''));
+
+            if (MapsApi::isMapify($map_api) && empty($barikoi_key)) {
+                if (!empty($google_map_key)) {
+                    $map_api = MapsApi::GOOGLE;
+                } else {
+                    throw new \Exception('Neither Barikoi nor Google Maps API key is configured.');
+                }
+            }
+
+            if (strtolower((string) $map_api) === 'both') {
+                if (!empty($google_map_key)) {
+                    $map_api = MapsApi::GOOGLE;
+                } elseif (!empty($barikoi_key)) {
+                    $map_api = MapsApi::MAPIFY;
+                } else {
+                    throw new \Exception('Neither Barikoi nor Google Maps API key is configured.');
+                }
+            }
             
             if (MapsApi::isMapify($map_api)) {  
                 
@@ -141,16 +184,25 @@ class BookingController extends Controller
                     ]);
     
                     $response = curl_exec($ch);
-    
-                    if (curl_errno($ch)) {
-                        echo 'cURL Error: ' . curl_error($ch);
-                    } else {
-                        $data = json_decode($response, true);
-                        $route = $data['routes'][0];
-                        $polyline = $route['geometry'];
-                        $distance = $route['distance'];
-                    }
+                    $curlError = curl_error($ch);
                     curl_close($ch);
+    
+                    if ($curlError !== '') {
+                        throw new \Exception('Barikoi route API error: ' . $curlError);
+                    }
+
+                    $data = json_decode((string) $response, true);
+                    if (!is_array($data) || !isset($data['routes'][0]['distance'])) {
+                        $providerMessage = $data['message'] ?? $data['error'] ?? null;
+                        throw new \Exception(
+                            'Unable to calculate route distance. Please check pickup, destination, and Barikoi API key.'
+                            . ($providerMessage ? ' Provider response: ' . (is_string($providerMessage) ? $providerMessage : json_encode($providerMessage)) : '')
+                        );
+                    }
+
+                    $route = $data['routes'][0];
+                    $polyline = $route['geometry'] ?? null;
+                    $distance = (float) $route['distance'];
                 }
                 else{
                     $distance = 0;
@@ -180,17 +232,26 @@ class BookingController extends Controller
                         ]);
         
                         $response = curl_exec($ch);
-        
-                        if (curl_errno($ch)) {
-                            echo 'cURL Error: ' . curl_error($ch);
-                        } else {
-                            $data = json_decode($response, true);
-                            $route = $data['routes'][0];
-                            $polyline = $route['geometry'];
-                            $api_distance = $route['distance'];
-                            $distance += (float) $api_distance;
-                        }
+                        $curlError = curl_error($ch);
                         curl_close($ch);
+        
+                        if ($curlError !== '') {
+                            throw new \Exception('Barikoi route API error: ' . $curlError);
+                        }
+
+                        $data = json_decode((string) $response, true);
+                        if (!is_array($data) || !isset($data['routes'][0]['distance'])) {
+                            $providerMessage = $data['message'] ?? $data['error'] ?? null;
+                            throw new \Exception(
+                                'Unable to calculate route distance for via points. Please check locations and Barikoi API key.'
+                                . ($providerMessage ? ' Provider response: ' . (is_string($providerMessage) ? $providerMessage : json_encode($providerMessage)) : '')
+                            );
+                        }
+
+                        $route = $data['routes'][0];
+                        $polyline = $route['geometry'] ?? null;
+                        $api_distance = $route['distance'];
+                        $distance += (float) $api_distance;
                     }
                 }
             }
@@ -205,7 +266,13 @@ class BookingController extends Controller
                     $response = file_get_contents($url);
                     $data = json_decode($response, true);
 
-                    $distance = $data['rows'][0]['elements'][0]['distance']['value'];
+                    $element = $data['rows'][0]['elements'][0] ?? null;
+                    if (($data['status'] ?? '') !== 'OK' || ($element['status'] ?? '') !== 'OK' || !isset($element['distance']['value'])) {
+                        $status = $data['error_message'] ?? ($element['status'] ?? ($data['status'] ?? 'UNKNOWN'));
+                        throw new \Exception('Unable to calculate route distance using Google Maps. ' . $status);
+                    }
+
+                    $distance = $element['distance']['value'];
                 }
                 else{
                     $distance = 0;
@@ -227,79 +294,66 @@ class BookingController extends Controller
 
                         $response = file_get_contents($url);
                         $data = json_decode($response, true);
-                        $cDistance = $data['rows'][0]['elements'][0]['distance']['value'];
+
+                        $element = $data['rows'][0]['elements'][0] ?? null;
+                        if (($data['status'] ?? '') !== 'OK' || ($element['status'] ?? '') !== 'OK' || !isset($element['distance']['value'])) {
+                            $status = $data['error_message'] ?? ($element['status'] ?? ($data['status'] ?? 'UNKNOWN'));
+                            throw new \Exception('Unable to calculate route distance for via points using Google Maps. ' . $status);
+                        }
+
+                        $cDistance = $element['distance']['value'];
                         $distance += (float) $cDistance;
                     }
                 }
             }
-            else if(isset($map_api) && $map_api == "both"){  
-
-            }
-
-            $vehicle = CompanyVehicleType::where("id", $request->vehicle_id)->first();
             if(json_decode($tenant->data)->units == "miles"){
                 $cdistance = ($distance / 1609.344);
             }
             else{
                 $cdistance = ($distance / 1000);
             }
-            if($vehicle->mileage_system == "fixed"){
-                $firstDistance = 1;
-                $secondDistance = (float) $cdistance - (float) $firstDistance;
-                $firstAmount = $vehicle->first_mile_km;
-                $secondAmount = (float) $secondDistance * (float) $vehicle->second_mile_km;
-                $amount = (float) $firstAmount + (float) $secondAmount;
-            }   
-            else{
-                $fromArray = $vehicle->from_array;
-                $toArray = $vehicle->to_array;
-                $priceArray = $vehicle->price_array;
-                $amount = 0;
-                $remainDistance = $cdistance;
-                for($i = 0; $i < count($fromArray); $i++){
-                    if($cdistance > $toArray[$i] && $remainDistance != 0){
-                        $tempDistance = (float) $toArray[$i] - (float) $fromArray[$i];
-                        $cAmount = (float) $tempDistance * (float) $priceArray[$i];
-                        $amount += (float) $cAmount;
-                        $remainDistance = (float) $cdistance - (float) $toArray[$i];
-                    }
-                    else{
-                        $cAmount = (float) $remainDistance * (float) $priceArray[$i];
-                        $amount += (float) $cAmount;
-                        $remainDistance = 0;
-                    }
-                }
-                if($remainDistance != 0){
-                    $cAmount = (float) $remainDistance * (float) $priceArray[$i-1];
-                    $amount += (float) $cAmount;
-                }
-            }         
-            if($vehicle->base_fare_system_status == "yes"){
-                if($cdistance <= $vehicle->base_fare_less_than_x_miles){
-                    $amount = (float) $amount + (float) $vehicle->base_fare_less_than_x_price;
-                }
-                else if($vehicle->base_fare_from_x_miles <= $cdistance && $cdistance <= $vehicle->base_fare_to_x_miles){
-                    $amount = (float) $amount + (float) $vehicle->base_fare_from_to_price;
-                }
-                else if($cdistance >= $vehicle->base_fare_greater_than_x_miles){
-                    $amount = (float) $amount + (float) $vehicle->base_fare_greater_than_x_price;
-                }
-            }
-
-            if(isset($request->journey_type) && $request->journey_type == "return"){
+            $isReturnJourney = isset($request->journey_type) && $request->journey_type == "return";
+            if($isReturnJourney){
                 $distance = 2 * $distance;
-                $amount = 2 * $amount;
             }
             
             $tenantData = json_decode($tenant->data ?? '{}');
             $distanceUnit = strtolower((string) ($tenantData->units ?? '')) === "miles" ? "miles" : "km";
 
-            return response()->json([
+            $baseResponse = [
                 'success' => 1,
                 'distance' => $distance,
                 'distance_value' => round($distanceUnit === "miles" ? ($distance / 1609.344) : ($distance / 1000), 2),
                 'distance_unit' => $distanceUnit,
-                'calculate_fare' => $amount
+            ];
+
+            if($isAnyRide){
+                $vehicleFares = CompanyVehicleType::orderBy('order_no')->orderBy('id')->get()->map(function ($vehicle) use ($cdistance, $isReturnJourney) {
+                    $amount = $this->calculateVehicleFare($vehicle, $cdistance);
+
+                    return [
+                        'vehicle_id' => $vehicle->id,
+                        'vehicle_type' => $vehicle->vehicle_type_name,
+                        'vehicle_image' => $vehicle->vehicle_image,
+                        'calculate_fare' => $isReturnJourney ? 2 * $amount : $amount,
+                    ];
+                })->values();
+
+                return response()->json($baseResponse + [
+                    'any_ride' => true,
+                    'vehicle_fares' => $vehicleFares,
+                ]);
+            }
+
+            $vehicle = $selectedVehicle;
+            $amount = $this->calculateVehicleFare($vehicle, $cdistance);
+
+            return response()->json($baseResponse + [
+                'any_ride' => false,
+                'vehicle_id' => $vehicle->id,
+                'vehicle_type' => $vehicle->vehicle_type_name,
+                'vehicle_image' => $vehicle->vehicle_image,
+                'calculate_fare' => $isReturnJourney ? 2 * $amount : $amount,
             ]);
         }
         catch(\Exception $e){
@@ -308,6 +362,53 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function calculateVehicleFare(CompanyVehicleType $vehicle, float $distance): float
+    {
+        if($vehicle->mileage_system == "fixed"){
+            $firstDistance = 1;
+            $secondDistance = $distance - $firstDistance;
+            $amount = (float) $vehicle->first_mile_km
+                + ($secondDistance * (float) $vehicle->second_mile_km);
+        }
+        else{
+            $fromArray = $vehicle->from_array;
+            $toArray = $vehicle->to_array;
+            $priceArray = $vehicle->price_array;
+            $amount = 0;
+            $remainDistance = $distance;
+
+            for($i = 0; $i < count($fromArray); $i++){
+                if($distance > $toArray[$i] && $remainDistance != 0){
+                    $tempDistance = (float) $toArray[$i] - (float) $fromArray[$i];
+                    $amount += $tempDistance * (float) $priceArray[$i];
+                    $remainDistance = $distance - (float) $toArray[$i];
+                }
+                else{
+                    $amount += $remainDistance * (float) $priceArray[$i];
+                    $remainDistance = 0;
+                }
+            }
+
+            if($remainDistance != 0 && count($priceArray) > 0){
+                $amount += $remainDistance * (float) $priceArray[count($priceArray) - 1];
+            }
+        }
+
+        if($vehicle->base_fare_system_status == "yes"){
+            if($distance <= $vehicle->base_fare_less_than_x_miles){
+                $amount += (float) $vehicle->base_fare_less_than_x_price;
+            }
+            else if($vehicle->base_fare_from_x_miles <= $distance && $distance <= $vehicle->base_fare_to_x_miles){
+                $amount += (float) $vehicle->base_fare_from_to_price;
+            }
+            else if($distance >= $vehicle->base_fare_greater_than_x_miles){
+                $amount += (float) $vehicle->base_fare_greater_than_x_price;
+            }
+        }
+
+        return $amount;
     }
 
     public function getPlot(Request $request){
