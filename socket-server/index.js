@@ -6632,7 +6632,7 @@ app.post("/socket-api/company/status-changed", emitCompanyStatusChanged);
 app.post("/company-inactive-logout", emitCompanyStatusChanged);
 app.post("/socket-api/company-inactive-logout", emitCompanyStatusChanged);
 
-app.post("/dispatch-settings-changed", async (req, res) => {
+app.post("/company-settings-changed", async (req, res) => {
     try {
         const authHeader = req.headers.authorization || "";
         const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
@@ -6651,27 +6651,41 @@ app.post("/dispatch-settings-changed", async (req, res) => {
         const dbName = clientId.toString();
         const excludeSocketId = req.body.exclude_socket_id || null;
 
+        const section = (req.body.section || "general").toString();
         const payload = {
-            title: "Dispatch settings updated",
-            description: "Auto dispatch configuration was changed. Please refresh the page to load the latest settings.",
-            message: "Auto dispatch configuration was changed. Please refresh the page to load the latest settings.",
+            title: "Company settings updated",
+            description: "Company settings were changed. Connected applications should load the latest configuration.",
+            message: "Company settings were changed. Connected applications should load the latest configuration.",
             type: "refresh_required",
             action: "refresh_page",
-            source: "dispatch_settings",
+            source: "company_settings",
+            section,
             client_id: dbName,
             changed_at: req.body.changed_at || new Date().toISOString(),
+            data: req.body.data && typeof req.body.data === "object" ? req.body.data : {},
         };
 
-        const room = io.to(`client_${dbName}`);
-        if (excludeSocketId) {
-            room.except(excludeSocketId).emit("dispatch-settings-changed", payload);
-        } else {
-            room.emit("dispatch-settings-changed", payload);
+        const rooms = [
+            `client_${dbName}`,
+            `dispatcher_${dbName}`,
+            `driver_${dbName}`,
+            `user_${dbName}`,
+            `customer_${dbName}`,
+            `admin_${dbName}`,
+        ];
+
+        for (const roomName of rooms) {
+            const room = io.to(roomName);
+            if (excludeSocketId) {
+                room.except(excludeSocketId).emit("company-settings-changed", payload);
+            } else {
+                room.emit("company-settings-changed", payload);
+            }
         }
 
         return res.json({ success: true });
     } catch (error) {
-        console.error("Dispatch settings changed notification error:", error);
+        console.error("Company settings changed notification error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });

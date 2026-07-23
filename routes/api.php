@@ -7,6 +7,7 @@ use App\Http\Controllers\SuperAdmin\CompanyController;
 use App\Http\Controllers\SuperAdmin\OnboardingController;
 use App\Http\Controllers\SuperAdmin\DocumentController;
 use App\Http\Controllers\SuperAdmin\VehicleTypeController;
+use App\Http\Controllers\SuperAdmin\TenantMapConfigurationController;
 use App\Http\Controllers\SuperAdmin\HomeController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
@@ -111,6 +112,8 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/super-admin/confirm-stripe-session', [CompanyController::class, 'confirmStripeSession']);
         Route::get('/super-admin/payment-history', [CompanyController::class, 'paymentHistory']);
         Route::get('/super-admin/delete-company', [CompanyController::class, 'deleteCompany']);
+        Route::get('/super-admin/companies/{tenant}/map-configuration', [TenantMapConfigurationController::class, 'show']);
+        Route::put('/super-admin/companies/{tenant}/map-configuration', [TenantMapConfigurationController::class, 'update']);
 
         Route::post('/super-admin/create-onboarding-request', [OnboardingController::class, 'createOnboardingRequest']);
         Route::post('/super-admin/edit-onboarding-request', [OnboardingController::class, 'editOnboardingRequest']);

@@ -241,6 +241,18 @@ class BookingUpdateService
 
         if ($isScheduled) {
             $booking->dispatch_released = false;
+            $pickupTimezone = (string) $request->input(
+                'pickup_timezone',
+                $booking->pickup_timezone ?: $this->preBookingService->companyTimezone()
+            );
+            $booking->pickup_timezone = $pickupTimezone;
+
+            if ($booking->booking_date && $booking->pickup_time && strtolower((string) $booking->pickup_time) !== 'asap') {
+                $booking->pickup_at = $this->preBookingService->parseCompanyDateTimeToUtc(
+                    $booking->booking_date . ' ' . $booking->pickup_time,
+                    $pickupTimezone
+                );
+            }
 
             if (!$request->has('driver') && $booking->driver && !$booking->pending_driver_id) {
                 $booking->pending_driver_id = $booking->driver;
@@ -255,6 +267,8 @@ class BookingUpdateService
         }
 
         $booking->pending_driver_id = null;
+        $booking->pickup_at = null;
+        $booking->pickup_timezone = null;
 
         return false;
     }
@@ -303,6 +317,9 @@ class BookingUpdateService
             'multi_days' => $booking->multi_days,
             'pickup_time' => $booking->pickup_time,
             'pickup_time_type' => $booking->pickup_time_type,
+            'pickup_at' => $booking->pickup_at?->toIso8601String(),
+            'pickup_at_local' => $booking->pickup_at_local,
+            'pickup_timezone' => $booking->pickup_timezone,
             'is_scheduled' => (bool) $booking->is_scheduled,
             'pre_booking' => $booking->pre_booking,
             'dispatch_released' => (bool) $booking->dispatch_released,

@@ -14,6 +14,8 @@ use App\Models\CompanyBooking;
 use App\Models\CompanyNotification;
 use App\Models\WalletTransaction;
 use App\Models\CompanyVehicleType;
+use App\Services\TenantMapProviderResolver;
+use App\Services\DispatchContextService;
 use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -218,29 +220,37 @@ class SettingController extends Controller
                 $company_currency = $tenantData->currency ?? null;
             }
             $enable_map = $tenantData->maps_api ?? null;
+            $tenantMap = app(TenantMapProviderResolver::class)->resolve((string) $request->header('database'));
+            $enable_map = $tenantMap['map_provider'];
             $country_of_user = $tenantData->country_of_use ?? null;
             $units = $tenantData->units ?? null;
-            $company_booking_system = $tenantData->uber_plot_hybrid ?? null;
+            $tenantBookingSystem = $tenantData->uber_plot_hybrid ?? null;
             $tenant_google_api_key = $companyData->google_api_key ?? ($tenantData->google_api_key ?? null);
-            $google_api_keys = in_array(strtolower((string) $enable_map), ['google', 'both'], true)
-                ? (trim((string) ($google_api_keys ?? '')) ?: $tenant_google_api_key)
+            $usesGoogleClient = in_array('google', [
+                $tenantMap['map_provider'],
+                $tenantMap['search_provider'],
+                $tenantMap['geocoding_provider'],
+            ], true);
+            $google_api_keys = $usesGoogleClient
+                ? ($tenantMap['credentials']['google']['browser_key']
+                    ?? trim((string) ($google_api_keys ?? ''))
+                    ?: $tenant_google_api_key)
                 : null;
 
-            if($company_booking_system == "auto"){
-                $company_booking_system = "auto_dispatch";
-            }
-            elseif($company_booking_system == "both"){
-                $company_booking_system = $setting->company_booking_system;
-            }
-            else{
-                $company_booking_system = "bidding";
-            }
+            $company_booking_system = $this->resolveCompanyBookingSystem(
+                $tenantBookingSystem,
+                $setting->company_booking_system,
+                $activeDispatchSystem
+            );
 
             if (!$activeDispatchSystem) {
                 $activeDispatchSystem = $company_booking_system === "bidding"
                     ? "bidding"
                     : "auto_dispatch_plot_base";
             }
+
+            $dispatchContext = app(DispatchContextService::class)->resolve($company_booking_system);
+            $activeDispatchSystem = $dispatchContext['dispatch_system'];
 
             $data = [
                 'stripe_key' => $stripe_key,
@@ -251,7 +261,9 @@ class SettingController extends Controller
                 'company_currency' => $company_currency,
                 'enable_map' => $enable_map,
                 'maps_api' => $enable_map,
-                'search_api' => $tenantData->search_api ?? $enable_map,
+                'search_api' => $tenantMap['search_provider'],
+                'geocoding_api' => $tenantMap['geocoding_provider'],
+                'routing_api' => $tenantMap['routing_provider'],
                 'map_style' => 'dark',
                 'mapify_tiles_style_endpoint' => '/rider/mapify-tiles/dark',
                 'mapify_tiles_endpoint' => '/rider/mapify-tiles/dark',
@@ -268,6 +280,7 @@ class SettingController extends Controller
                 'cash_payment' => 'enable',
                 'support_tickets_enabled' => true,
                 'company_booking_system' => $company_booking_system,
+                'dispatch_context' => $dispatchContext,
                 'customer_capabilities' => [
                     'dispatch_system' => $activeDispatchSystem,
                     'allow_asap' => $activeDispatchSystem !== 'manual_dispatch_only',
@@ -488,5 +501,34 @@ class SettingController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function resolveCompanyBookingSystem(
+        mixed $tenantBookingSystem,
+        mixed $storedBookingSystem,
+        ?string $activeDispatchSystem
+    ): string {
+        $tenantBookingSystem = strtolower(trim((string) $tenantBookingSystem));
+        $storedBookingSystem = strtolower(trim((string) $storedBookingSystem));
+
+        if ($tenantBookingSystem === 'auto') {
+            return 'auto_dispatch';
+        }
+
+        if ($tenantBookingSystem === 'bidding') {
+            return 'bidding';
+        }
+
+        if ($tenantBookingSystem === 'both' && in_array($storedBookingSystem, ['auto_dispatch', 'bidding', 'both'], true)) {
+            return $storedBookingSystem;
+        }
+
+        if (in_array($storedBookingSystem, ['auto_dispatch', 'bidding', 'both'], true)) {
+            return $storedBookingSystem;
+        }
+
+        return str_starts_with((string) $activeDispatchSystem, 'bidding')
+            ? 'bidding'
+            : 'auto_dispatch';
     }
 }

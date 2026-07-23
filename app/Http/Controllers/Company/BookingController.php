@@ -174,6 +174,8 @@ class BookingController extends Controller
                 'booking_system' => $plotDispatchEnabled ? 'nullable' : 'required_without:driver',
                 'bidding_fallback' => 'nullable|in:yes,no,1,0,true,false',
                 'pickup_time_type' => 'nullable|in:asap,time',
+                'pickup_at' => 'nullable|date',
+                'pickup_timezone' => 'nullable|timezone',
                 'dispatch_release_enabled' => 'nullable|in:yes,no,1,0,true,false',
                 'auto_release' => 'nullable|in:yes,no,1,0,true,false',
                 'dispatch_release_at' => 'nullable|date',
@@ -459,6 +461,8 @@ class BookingController extends Controller
                 'booking_amount' => 'sometimes|required|numeric|gt:0',
                 'payment_method' => 'sometimes|required',
                 'pickup_time_type' => 'nullable|in:asap,time',
+                'pickup_at' => 'nullable|date',
+                'pickup_timezone' => 'nullable|timezone',
                 'reminder_minutes' => 'nullable|integer|in:5,15,30,50',
                 'dispatch_release_enabled' => 'nullable|in:yes,no,1,0,true,false',
                 'auto_release' => 'nullable|in:yes,no,1,0,true,false',
@@ -1068,11 +1072,24 @@ class BookingController extends Controller
     {
         $pickupTimeType = $this->preBookingService->resolvePickupTimeType($request);
         $isScheduled = $pickupTimeType === 'time';
+        $pickupTimezone = $isScheduled
+            ? (string) $request->input('pickup_timezone', $this->preBookingService->companyTimezone())
+            : null;
+        $pickupAt = null;
+
+        if ($isScheduled) {
+            $pickupAt = $this->preBookingService->parseCompanyDateTimeToUtc(
+                Carbon::parse($bookingDate)->toDateString() . ' ' . $request->pickup_time,
+                $pickupTimezone
+            );
+        }
 
         $newBooking = new CompanyBooking;
         $newBooking->booking_id = "RD" . strtoupper(uniqid());
         $newBooking->sub_company = $request->sub_company;
         $newBooking->pickup_time = $request->pickup_time;
+        $newBooking->pickup_at = $pickupAt;
+        $newBooking->pickup_timezone = $pickupTimezone;
         $newBooking->pickup_time_type = $pickupTimeType;
         $newBooking->is_scheduled = $isScheduled;
         $newBooking->dispatch_released = false;
@@ -1214,6 +1231,9 @@ class BookingController extends Controller
             'pre_booking' => (bool) $booking->is_scheduled && !$booking->dispatch_released,
             'booking_date' => $booking->booking_date,
             'pickup_time' => $booking->pickup_time,
+            'pickup_at' => $booking->pickup_at?->toIso8601String(),
+            'pickup_at_local' => $booking->pickup_at_local,
+            'pickup_timezone' => $booking->pickup_timezone,
             'booking_status' => $booking->booking_status,
             'booking_amount' => $booking->booking_amount,
             'recommended_amount' => $booking->recommended_amount,

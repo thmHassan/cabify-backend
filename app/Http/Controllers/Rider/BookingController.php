@@ -20,6 +20,7 @@ use App\Jobs\AutoDispatchPlotJob;
 use App\Jobs\SendBiddingFixedFareNotificationJob;
 use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
 use App\Models\WalletTransaction;
@@ -30,6 +31,8 @@ use App\Services\PreBookingService;
 use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
 use App\Support\VehicleDispatchFilter;
+use App\Services\TenantMapProviderResolver;
+use Carbon\Carbon;
 
 class BookingController extends Controller
 {
@@ -136,21 +139,24 @@ class BookingController extends Controller
 
             $tenant = \DB::connection('central')->table('tenants')->where("id", $request->header('database'))->first();
             $tenantData = json_decode($tenant->data ?? '{}');
-            $map_api = $tenantData->maps_api ?? null;
+            $tenantMap = app(TenantMapProviderResolver::class)->resolve((string) $request->header('database'));
+            $map_api = $tenantMap['routing_provider'];
 
             $data = \DB::connection('central')->table('settings')->orderBy("id", "DESC")->first();   
-            $barikoi_key = $data->barikoi_key;
-            $companySettings = CompanySetting::orderBy("id", "DESC")->first();
-            $tenant_google_api_key = $tenant->google_api_key ?? ($tenantData->google_api_key ?? null);
-            $google_map_key = trim((string) ($companySettings?->google_api_keys ?? ''))
-                ?: trim((string) $tenant_google_api_key)
-                ?: trim((string) ($data->google_map_key ?? ''));
+            $barikoi_key = $tenantMap['credentials']['barikoi']['api_key'] ?? null;
+            $google_map_key = $tenantMap['credentials']['google']['server_key']
+                ?? $tenantMap['credentials']['google']['browser_key']
+                ?? null;
+
+            if ($map_api === 'mapify') {
+                throw new \Exception('Mapify routing is selected, but its routing adapter is not configured.');
+            }
 
             if (MapsApi::isMapify($map_api) && empty($barikoi_key)) {
-                if (!empty($google_map_key)) {
+                if ($tenantMap['allow_platform_fallback'] && !empty($google_map_key)) {
                     $map_api = MapsApi::GOOGLE;
                 } else {
-                    throw new \Exception('Neither Barikoi nor Google Maps API key is configured.');
+                    throw new \Exception('Barikoi routing credentials are not configured for this company.');
                 }
             }
 
@@ -421,16 +427,10 @@ class BookingController extends Controller
             $lat = $request->latitude;
             $lng = $request->longitude;
 
-            $records = CompanyPlot::orderBy("id", "DESC")->get();
-            $matched = null;
-            foreach ($records as $rec) {
-                $polygon = json_decode($rec->features, true);
-                $array = json_decode($polygon['geometry']['coordinates'], true)[0];
-                if ($this->pointInPolygon($lat, $lng, $array)) {
-                    $matched = $rec;
-                    break;
-                }
-            }
+            $plotId = app(PickupPlotResolver::class)
+                ->resolveFromPickupPoint("{$lat},{$lng}");
+            $matched = $plotId ? CompanyPlot::find($plotId) : null;
+
             return response()->json([
                 'success' => 1,
                 'found' => $matched ? 1 : 0,
@@ -497,6 +497,10 @@ class BookingController extends Controller
                 'distance' => 'required',
                 'payment_method' => 'required',
                 'pickup_time_type' => 'nullable|in:asap,time',
+                'booking_date' => 'nullable|date_format:Y-m-d',
+                'pickup_time' => 'nullable|string',
+                'pickup_at' => 'nullable|date',
+                'pickup_timezone' => 'nullable|timezone',
                 'dispatch_release_enabled' => 'nullable|in:yes,no,1,0,true,false',
                 'auto_release' => 'nullable|in:yes,no,1,0,true,false',
                 'dispatch_release_at' => 'nullable|date',
@@ -510,10 +514,70 @@ class BookingController extends Controller
             $preBookingService = app(PreBookingService::class);
             $pickupTimeType = $preBookingService->resolvePickupTimeType($request);
             $isScheduled = $pickupTimeType === 'time';
+            $pickupTimezone = $preBookingService->companyTimezone();
+            $pickupAt = null;
+
+            if ($isScheduled) {
+                if ($request->filled('pickup_at')) {
+                    $pickupAt = \Carbon\Carbon::parse(
+                        (string) $request->pickup_at,
+                        $request->input('pickup_timezone', $pickupTimezone)
+                    )->utc();
+                } else {
+                    $request->validate([
+                        'booking_date' => 'required|date_format:Y-m-d',
+                        'pickup_time' => 'required|date_format:H:i:s',
+                    ]);
+
+                    $pickupAt = $preBookingService->parseCompanyDateTimeToUtc(
+                        $request->booking_date . ' ' . $request->pickup_time,
+                        $pickupTimezone
+                    );
+                }
+
+                if (!$pickupAt->isFuture()) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'pickup_at' => 'The scheduled pickup time must be in the future.',
+                    ]);
+                }
+
+                $localPickupAt = $pickupAt->copy()->setTimezone($pickupTimezone);
+                $request->merge([
+                    'booking_date' => $localPickupAt->toDateString(),
+                    'pickup_time' => $localPickupAt->format('H:i:s'),
+                    'pickup_timezone' => $pickupTimezone,
+                ]);
+            } else {
+                $request->validate([
+                    'pickup_at' => 'required|date',
+                    'pickup_timezone' => 'required|timezone',
+                ]);
+
+                // Keep the instant supplied by the rider app and retain its timezone.
+                $pickupTimezone = (string) $request->input('pickup_timezone');
+                $pickupAt = Carbon::parse(
+                    (string) $request->input('pickup_at'),
+                    $pickupTimezone
+                )->utc();
+                $localPickupAt = $pickupAt->copy()->setTimezone($pickupTimezone);
+
+                $request->merge([
+                    'booking_date' => $localPickupAt->toDateString(),
+                    'pickup_time' => $localPickupAt->format('H:i:s'),
+                    'pickup_timezone' => $pickupTimezone,
+                ]);
+            }
+
             $newBooking = new CompanyBooking;
             $newBooking->booking_id = "RD". strtoupper(uniqid());
             $newBooking->pickup_time = (isset($request->pickup_time) && $request->pickup_time != NULL) ? $request->pickup_time : now()->format('H:i:s');
             $newBooking->booking_date = (isset($request->booking_date) && $request->booking_date != NULL) ? $request->booking_date : date("Y-m-d");
+            // Keep booking creation compatible while tenant migrations roll out.
+            // Assigning even null values would include missing columns in INSERT.
+            if (Schema::connection('tenant')->hasColumns('bookings', ['pickup_at', 'pickup_timezone'])) {
+                $newBooking->pickup_at = $pickupAt;
+                $newBooking->pickup_timezone = $pickupTimezone;
+            }
             $newBooking->pickup_time_type = $pickupTimeType;
             $newBooking->is_scheduled = $isScheduled;
             $newBooking->dispatch_released = false;
@@ -756,12 +820,14 @@ class BookingController extends Controller
 
     public function currentRide(Request $request){
         try{
-            $currentBooking = CompanyBooking::where("user_id", auth('rider')->user()->id)
-                        ->where(function($q){
-                            $q->where("booking_status", 'arrived')
-                              ->orWhere("booking_status", 'started')
-                              ->orWhere("booking_status", 'ongoing');
-                        })->with(['driverDetail', 'vehicleDetail', 'waitingDetail'])->first();
+            $query = CompanyBooking::where("user_id", auth('rider')->user()->id);
+            $this->applyRiderCurrentRideFilter($query);
+
+            $currentBooking = $query
+                ->with(['driverDetail', 'vehicleDetail', 'waitingDetail'])
+                ->orderByRaw("CASE WHEN booking_status IN ('arrived', 'started', 'ongoing') THEN 0 ELSE 1 END")
+                ->orderBy('id', 'DESC')
+                ->first();
 
             return response()->json([
                 'success' => 1,
@@ -952,6 +1018,7 @@ class BookingController extends Controller
     public function upcomingRide(Request $request){
         try{
             $query = CompanyBooking::where("booking_status", "pending")->where("user_id", auth('rider')->user()->id);
+            $this->excludeAsapRides($query);
             if(isset($request->date) && $request->date != NULL){
                 $query->whereDate("booking_date", $request->date);
             }
@@ -971,6 +1038,31 @@ class BookingController extends Controller
                 'message' => $e->getMessage()
             ], 400);
         }
+    }
+
+    private function applyRiderCurrentRideFilter($query): void
+    {
+        $query->where(function ($statusQuery) {
+            $statusQuery->whereIn('booking_status', ['arrived', 'started', 'ongoing'])
+                ->orWhere(function ($pendingAsapQuery) {
+                    $pendingAsapQuery->where('booking_status', 'pending')
+                        ->where(function ($asapQuery) {
+                            $asapQuery->where('pickup_time_type', 'asap')
+                                ->orWhereRaw('LOWER(TRIM(pickup_time)) = ?', ['asap']);
+                        });
+                });
+        });
+    }
+
+    private function excludeAsapRides($query): void
+    {
+        $query->where(function ($typeQuery) {
+            $typeQuery->whereNull('pickup_time_type')
+                ->orWhere('pickup_time_type', '!=', 'asap');
+        })->where(function ($timeQuery) {
+            $timeQuery->whereNull('pickup_time')
+                ->orWhereRaw('LOWER(TRIM(pickup_time)) != ?', ['asap']);
+        });
     }
 
     public function rideDetail(Request $request){

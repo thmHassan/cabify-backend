@@ -60,6 +60,15 @@ class SettingController extends Controller
                 $data['driver_job_start_window_minutes'] = CompanySetting::DEFAULT_DRIVER_JOB_START_WINDOW_MINUTES;
                 $data = (object) $data;
             } else {
+                $centralTenant = (new CentralTenant)
+                    ->setConnection('central')
+                    ->where('id', TenantRequestContext::centralTenantId($request))
+                    ->first();
+
+                // Email belongs to the central login identity and is superadmin-managed.
+                if ($centralTenant) {
+                    $data->company_email = $centralTenant->email;
+                }
                 $data->search_radius = CompanySetting::resolveSearchRadiusKm($settings);
                 $data->dispatch_timeout = CompanySetting::resolveDispatchTimeoutSeconds($settings);
                 $data->driver_job_start_window_minutes = CompanySetting::resolveDriverJobStartWindowMinutes($settings);
@@ -123,10 +132,31 @@ class SettingController extends Controller
     {
         try {
             $nearestDriverDispatchEnabled = CompanySetting::isNearestDriverDispatchEnabled();
+            $tenantId = TenantRequestContext::centralTenantId($request);
+            $centralTenant = (new CentralTenant)
+                ->setConnection('central')
+                ->where('id', $tenantId)
+                ->first();
+
+            if (!$centralTenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Tenant not found',
+                ], 404);
+            }
+
+            // A client admin may view the login email, but only a superadmin may change it.
+            if ($request->filled('company_email')
+                && strcasecmp(trim((string) $request->company_email), trim((string) $centralTenant->email)) !== 0) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Company email can only be updated by a superadmin.',
+                ], 422);
+            }
 
             $rules = [
                 'company_name' => 'required|max:255',
-                'company_email' => 'required|max:255',
+                'company_email' => 'nullable|email|max:255',
                 'company_phone_no' => 'required|max:255',
                 'company_business_license' => 'required|max:255',
                 'company_business_address' => 'required|max:255',
@@ -159,7 +189,7 @@ class SettingController extends Controller
             }
 
             $settings->company_name = $request->company_name;
-            $settings->company_email = $request->company_email;
+            $settings->company_email = $centralTenant->email;
             $settings->company_phone_no = $request->company_phone_no;
             $settings->company_business_license = $request->company_business_license;
             $settings->company_business_address = $request->company_business_address;
@@ -177,6 +207,21 @@ class SettingController extends Controller
             }
 
             $settings->save();
+
+            // Keep the shared company profile visible in superadmin. Authentication,
+            // subscription and platform-controlled fields are intentionally untouched.
+            $centralTenant->company_name = $request->company_name;
+            $centralTenant->phone = $request->company_phone_no;
+            $centralTenant->address = $request->company_business_address;
+            $centralTenant->time_zone = $request->company_timezone;
+            $centralTenant->company_business_license = $request->company_business_license;
+            $centralTenant->company_description = $request->company_description;
+            $centralTenant->support_contact_no = $request->support_contact_no;
+            $centralTenant->support_emergency_no = $request->support_emergency_no;
+            $centralTenant->support_rescue_number = $request->support_rescue_number;
+            $centralTenant->save();
+
+            $this->notifyCompanySettingsChanged($request, 'company_profile');
 
             return response()->json([
                 'success' => 1,
@@ -220,6 +265,8 @@ class SettingController extends Controller
             $data->password = Hash::make($request->new_password);
             $data->save();
 
+            $this->notifyCompanySettingsChanged($request, 'security');
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Password updated successfully'
@@ -248,6 +295,8 @@ class SettingController extends Controller
                 $data->value = $value;
                 $data->save();
             }
+
+            $this->notifyCompanySettingsChanged($request, 'mobile_app');
 
             return response()->json([
                 'success' => 1,
@@ -301,6 +350,8 @@ class SettingController extends Controller
             $settings->waiting_time_charge = isset($request->waiting_time_charge) ? $request->waiting_time_charge : NULL;
             $settings->save();
 
+            $this->notifyCompanySettingsChanged($request, 'commission');
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Commission settings saved successfully'
@@ -329,6 +380,8 @@ class SettingController extends Controller
             $data->package_price = $request->package_price;
             $data->save();
 
+            $this->notifyCompanySettingsChanged($request, 'commission');
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Package Topup saved successfully'
@@ -353,6 +406,8 @@ class SettingController extends Controller
             $data->package_ride_count = $request->package_ride_count;
             $data->package_amount = $request->package_amount;
             $data->save();
+
+            $this->notifyCompanySettingsChanged($request, 'commission');
 
             return response()->json([
                 'success' => 1,
@@ -383,6 +438,8 @@ class SettingController extends Controller
             $data->package_price = $request->package_price;
             $data->save();
 
+            $this->notifyCompanySettingsChanged($request, 'commission');
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Package Topup updated successfully'
@@ -409,6 +466,8 @@ class SettingController extends Controller
             $data->package_ride_count = $request->package_ride_count;
             $data->package_amount = $request->package_amount;
             $data->save();
+
+            $this->notifyCompanySettingsChanged($request, 'commission');
 
             return response()->json([
                 'success' => 1,
@@ -462,6 +521,8 @@ class SettingController extends Controller
                 $packageTopup->delete();
             }
 
+            $this->notifyCompanySettingsChanged($request, 'commission');
+
             return response()->json([
                 'success' => 1,
                 'message' => 'Package popup deleted successfully'
@@ -482,6 +543,8 @@ class SettingController extends Controller
             if (isset($packageTopup) && $packageTopup != NULL) {
                 $packageTopup->delete();
             }
+
+            $this->notifyCompanySettingsChanged($request, 'commission');
 
             return response()->json([
                 'success' => 1,
@@ -605,6 +668,8 @@ class SettingController extends Controller
             $settings->stripe_webhook_secret = $request->stripe_webhook_secret;
             $settings->stripe_country = $request->stripe_country;
             $settings->save();
+
+            $this->notifyCompanySettingsChanged($request, 'billing');
 
             return response()->json([
                 'success' => 1,
@@ -874,6 +939,8 @@ class SettingController extends Controller
             $settings->mail_password = $request->mail_password;
             $settings->mail_port = $request->mail_port;
             $settings->save();
+
+            $this->notifyCompanySettingsChanged($request, 'integrations');
 
             $mapProvider = $this->resolveMapProvider($settings, $request);
 
@@ -1330,10 +1397,7 @@ class SettingController extends Controller
                 $settings->save();
             }
 
-            $tenantId = TenantRequestContext::databaseId($request);
-            if ($tenantId) {
-                $this->notifyDispatchSettingsChanged($request, $tenantId);
-            }
+            $this->notifyCompanySettingsChanged($request, 'dispatch_system');
 
             return response()->json([
                 'success' => 1,
@@ -1348,12 +1412,19 @@ class SettingController extends Controller
         }
     }
 
-    private function notifyDispatchSettingsChanged(Request $request, string $tenantId): void
+    private function notifyCompanySettingsChanged(Request $request, string $section): void
     {
+        $tenantId = TenantRequestContext::databaseId($request);
+        if (!$tenantId) {
+            return;
+        }
+
         try {
             $body = [
                 'client_id' => $tenantId,
+                'section' => $section,
                 'changed_at' => now()->toISOString(),
+                'data' => $this->companySettingsSocketData($section, $request),
             ];
 
             if ($request->filled('exclude_socket_id')) {
@@ -1365,15 +1436,104 @@ class SettingController extends Controller
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
             ])->timeout(5)->post(
-                SocketApiUrlResolver::endpoint($request, 'dispatch-settings-changed'),
+                SocketApiUrlResolver::endpoint($request, 'company-settings-changed'),
                 $body
             );
         } catch (\Throwable $e) {
-            Log::warning('Dispatch settings changed socket call failed', [
+            Log::warning('Company settings changed socket call failed', [
                 'tenant_id' => $tenantId,
+                'section' => $section,
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function companySettingsSocketData(string $section, Request $request): array
+    {
+        $settings = CompanySetting::orderBy('id', 'DESC')->first();
+
+        if ($section === 'company_profile') {
+            $profile = $settings?->only([
+                'id', 'company_name', 'company_email', 'company_phone_no',
+                'company_business_license', 'company_business_address',
+                'company_timezone', 'company_description', 'company_currency',
+                'support_contact_no', 'support_emergency_no', 'support_rescue_number',
+            ]) ?? [];
+            $profile['search_radius'] = CompanySetting::resolveSearchRadiusKm($settings);
+            $profile['dispatch_timeout'] = CompanySetting::resolveDispatchTimeoutSeconds($settings);
+            $profile['driver_job_start_window_minutes'] = CompanySetting::resolveDriverJobStartWindowMinutes($settings);
+
+            return ['success' => 1, 'data' => $profile];
+        }
+
+        if ($section === 'commission') {
+            return [
+                'success' => 1,
+                'data' => [
+                    'main_commission' => [
+                        'package_type' => $settings?->package_type,
+                        'package_days' => $settings?->package_days,
+                        'package_amount' => $settings?->package_amount,
+                        'package_percentage' => $settings?->package_percentage,
+                        'cancellation_per_day' => $settings?->cancellation_per_day,
+                        'waiting_time_charge' => $settings?->waiting_time_charge,
+                    ],
+                    'packageTopups' => PackageSetting::orderBy('id', 'DESC')->get(),
+                    'packageRideCount' => PackageRideCountSetting::orderBy('id', 'DESC')->get(),
+                ],
+            ];
+        }
+
+        if ($section === 'billing') {
+            return [
+                'success' => 1,
+                'settings' => $settings?->only([
+                    'stripe_payment', 'driver_app', 'customer_app', 'stripe_country',
+                ]) ?? [],
+            ];
+        }
+
+        if ($section === 'integrations') {
+            $mapProvider = $this->resolveMapProvider($settings, $request);
+
+            return [
+                'success' => 1,
+                'settings' => $settings?->only([
+                    'map_settings', 'mail_server', 'mail_from', 'mail_user_name', 'mail_port',
+                ]) ?? [],
+                'maps_api' => $mapProvider['maps_api'],
+                'map_type' => $mapProvider['map_type'],
+                'map_provider' => $mapProvider['map_provider'],
+                'uses_google_map' => $mapProvider['uses_google_map'],
+                'uses_mapify' => $mapProvider['uses_mapify'],
+                'google_api_key_configured' => $mapProvider['google_api_key_configured'],
+                'google_api_keys' => $mapProvider['uses_google_map'] ? $mapProvider['google_api_key'] : null,
+                'mapify_tiles_endpoint' => $mapProvider['uses_mapify'] ? url('/api/company/mapify-tiles/bright') : null,
+                'mapify_tiles_url_template' => $mapProvider['uses_mapify'] ? url('/api/company/mapify-tiles/bright/{z}/{x}/{y}.png') : null,
+                'mapify_search_endpoint' => $mapProvider['uses_mapify'] ? url('/api/company/mapify-search') : null,
+                'mapify_geocoding_endpoint' => $mapProvider['uses_mapify'] ? url('/api/company/mapify-geocoding') : null,
+                'mapify_reverse_geocoding_endpoint' => $mapProvider['uses_mapify'] ? url('/api/company/mapify-reverse-geocoding') : null,
+            ];
+        }
+
+        if ($section === 'dispatch_system') {
+            return [
+                'success' => 1,
+                'data' => CompanyDispatchSystem::orderBy('id', 'ASC')->get(),
+                'release_settings' => CompanySetting::resolveReleaseSettings($settings),
+                'driver_job_start_window_minutes' => CompanySetting::resolveDriverJobStartWindowMinutes($settings),
+            ];
+        }
+
+        if ($section === 'mobile_app') {
+            return ['success' => 1, 'setting' => MobileAppSetting::get()];
+        }
+
+        if ($section === 'security') {
+            return ['success' => 1, 'data' => ['password_changed' => true]];
+        }
+
+        return ['success' => 1, 'data' => []];
     }
 
     public function getDispatchSystem(Request $request)

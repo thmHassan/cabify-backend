@@ -32,6 +32,10 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Mail;
 use App\Support\MapsApi;
 use App\Services\CompanyInactiveService;
+use App\Services\TenantMapConfigurationManager;
+use App\Services\SocketApiUrlResolver;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class CompanyController extends Controller
 {
@@ -148,6 +152,7 @@ class CompanyController extends Controller
             // $this->syncTenantData($tenant);
             $tenant->database = 'tenant_' . $tenantId;
             $tenant->save();
+            app(TenantMapConfigurationManager::class)->syncFromCompanyRequest($tenant->id, $request);
 
             // $tenant->database()->manager()->createDatabase($tenant);
             // $tenant->createDatabase();
@@ -504,7 +509,7 @@ class CompanyController extends Controller
             $tenant->email = isset($request->email) ? $request->email : $tenant->email;
             $tenant->contact_person = isset($request->contact_person) ? $request->contact_person : $tenant->contact_person;
             $tenant->phone = isset($request->phone) ? $request->phone : $tenant->phone;
-            $tenant->address = isset($request->address) ? $request->address : $address->address;
+            $tenant->address = isset($request->address) ? $request->address : $tenant->address;
             $tenant->city = isset($request->city) ? $request->city : $tenant->city;
             $tenant->currency = isset($request->currency) ? $request->currency : $tenant->currency;
             $tenant->maps_api = isset($request->maps_api)
@@ -550,6 +555,7 @@ class CompanyController extends Controller
             $tenant->password = (isset($request->password) && $request->password != NULL) ? Hash::make($request->password) : $tenant->password;
             // $this->syncTenantData($tenant);
             $tenant->save();
+            app(TenantMapConfigurationManager::class)->syncFromCompanyRequest($tenant->id, $request);
 
             if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
                 // unlink(public_path('pictures/'.$tenant->picture));
@@ -615,6 +621,8 @@ class CompanyController extends Controller
                 $socketNotify = CompanyInactiveService::handle($tenant->id, $previousStatus);
             }
 
+            $this->notifyCompanyProfileChanged($request, $tenant);
+
             return response()->json([
                 'success' => 1,
                 'message' => "Client {$tenant->id} updated successfully!",
@@ -628,6 +636,43 @@ class CompanyController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    private function notifyCompanyProfileChanged(Request $request, Tenant $tenant): void
+    {
+        try {
+            $profile = [
+                'company_name' => $tenant->company_name,
+                'company_email' => $tenant->email,
+                'company_phone_no' => $tenant->phone,
+                'company_business_address' => $tenant->address,
+                'company_timezone' => $tenant->time_zone,
+                'company_currency' => $tenant->currency,
+                'units' => $tenant->units,
+                'country_of_use' => $tenant->country_of_use,
+                'picture' => $tenant->picture,
+            ];
+
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->timeout(5)->post(
+                SocketApiUrlResolver::endpoint($request, 'company-settings-changed'),
+                [
+                    'client_id' => $tenant->id,
+                    'section' => 'company_profile',
+                    'changed_at' => now()->toISOString(),
+                    'data' => [
+                        'success' => 1,
+                        'data' => $profile,
+                    ],
+                ]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Super Admin company profile socket call failed', [
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -832,6 +877,15 @@ class CompanyController extends Controller
 
             $company = Tenant::where("id", $request->id)->first();
             $company->maps_api = MapsApi::normalize($company->maps_api);
+            $mapConfiguration = \App\Models\TenantMapConfiguration::where('tenant_id', $company->id)->first();
+            if ($mapConfiguration) {
+                $company->map_provider = $mapConfiguration->map_provider;
+                $company->search_provider = $mapConfiguration->search_provider;
+                $company->geocoding_provider = $mapConfiguration->geocoding_provider;
+                $company->routing_provider = $mapConfiguration->routing_provider;
+                $company->credential_source = $mapConfiguration->routing_credential_source;
+                $company->allow_platform_fallback = $mapConfiguration->allow_platform_fallback;
+            }
             $subscription = Subscription::where('id', $company->subscription_type)->first();
             return response()->json([
                 'success' => 1,

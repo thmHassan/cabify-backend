@@ -12,10 +12,11 @@ class CompanyBooking extends Model
 
     protected $table = "bookings";
 
-    protected $appends = ['pre_booking'];
+    protected $appends = ['pre_booking', 'pickup_at_local'];
 
     protected $casts = [
         'is_scheduled' => 'boolean',
+        'pickup_at' => 'datetime',
         'dispatch_released' => 'boolean',
         'dispatch_release_at' => 'datetime',
         'dispatch_release_override' => 'boolean',
@@ -27,6 +28,45 @@ class CompanyBooking extends Model
     public function getPreBookingAttribute(): bool
     {
         return app(PreBookingService::class)->bookingQualifiesAsPreBooking($this);
+    }
+
+    public function getPickupAtAttribute($value): ?\Carbon\Carbon
+    {
+        if ($value) {
+            return \Carbon\Carbon::parse($value, 'UTC')->utc();
+        }
+
+        if (!$this->booking_date || !$this->pickup_time || strtolower((string) $this->pickup_time) === 'asap') {
+            return null;
+        }
+
+        try {
+            $timezone = $this->pickup_timezone ?: app(PreBookingService::class)->companyTimezone();
+
+            return \Carbon\Carbon::parse(
+                $this->booking_date . ' ' . $this->pickup_time,
+                $timezone
+            )->utc();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    public function getPickupAtLocalAttribute(): ?string
+    {
+        $pickupAt = $this->pickup_at;
+
+        if (!$pickupAt) {
+            return null;
+        }
+
+        try {
+            $timezone = $this->pickup_timezone ?: app(PreBookingService::class)->companyTimezone();
+
+            return $pickupAt->copy()->setTimezone($timezone)->toIso8601String();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function userDetail(){

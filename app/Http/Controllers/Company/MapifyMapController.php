@@ -10,6 +10,7 @@ use App\Support\MapifyQueryBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
+use App\Services\TenantMapProviderResolver;
 
 class MapifyMapController extends Controller
 {
@@ -20,10 +21,14 @@ class MapifyMapController extends Controller
     ) {
     }
 
-    private function mapifyBaseRequest()
+    private function mapifyBaseRequest(Request $request, string $capability)
     {
-        $token = config('services.mapify.api_token');
-        $baseUrl = rtrim((string) config('services.mapify.base_url'), '/');
+        $tenantId = (string) $request->header('database');
+        $resolved = $tenantId !== '' ? app(TenantMapProviderResolver::class)->resolve($tenantId) : null;
+        $mapify = $resolved['credentials']['mapify'] ?? [];
+        $source = $resolved['sources'][$capability] ?? 'platform';
+        $token = $mapify['api_token'] ?? ($source === 'platform' ? config('services.mapify.api_token') : null);
+        $baseUrl = rtrim((string) ($mapify['base_url'] ?? ($source === 'platform' ? config('services.mapify.base_url') : '')), '/');
 
         if (!filled($token)) {
             return response()->json([
@@ -43,7 +48,7 @@ class MapifyMapController extends Controller
     public function tiles(Request $request, string $theme = 'bright', ?string $z = null, ?string $x = null, ?string $y = null)
     {
         try {
-            $baseRequest = $this->mapifyBaseRequest();
+            $baseRequest = $this->mapifyBaseRequest($request, 'map');
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
                 return $baseRequest;
             }
@@ -152,7 +157,7 @@ class MapifyMapController extends Controller
                 );
             }
 
-            $baseRequest = $this->mapifyBaseRequest();
+            $baseRequest = $this->mapifyBaseRequest($request, 'search');
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
                 return $baseRequest;
             }
@@ -253,7 +258,7 @@ class MapifyMapController extends Controller
                 );
             }
 
-            $baseRequest = $this->mapifyBaseRequest();
+            $baseRequest = $this->mapifyBaseRequest($request, 'geocoding');
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
                 return $baseRequest;
             }
@@ -298,7 +303,7 @@ class MapifyMapController extends Controller
                 'size' => 'nullable|integer|min:1|max:50',
             ]);
 
-            $baseRequest = $this->mapifyBaseRequest();
+            $baseRequest = $this->mapifyBaseRequest($request, 'geocoding');
             if ($baseRequest instanceof \Illuminate\Http\JsonResponse) {
                 return $baseRequest;
             }

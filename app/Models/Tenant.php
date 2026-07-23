@@ -77,11 +77,15 @@ class Tenant extends BaseTenant implements JWTSubject, TenantWithDatabase, CanRe
 
     public function database(): DatabaseConfig
     {
+        // $prefix = (string) config('tenancy.database.prefix', 'tenant');
+        // $suffix = (string) config('tenancy.database.suffix', '');
+
         return new DatabaseConfig($this, [
             'driver' => 'mysql',
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '3306'),
-            'database' => 'tenant_' . $this->id, 
+            // 'database' => $prefix . $this->id . $suffix,
+            'database' => 'tenant_' . $this->id,
             'username' => env('DB_USERNAME', 'root'),
             'password' => env('DB_PASSWORD', ''),
         ]);

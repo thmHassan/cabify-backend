@@ -26,6 +26,7 @@ use App\Models\MobileAppSetting;
 use App\Models\PackageRideCountSetting;
 use App\Models\CompanyPlot;
 use App\Models\CompanyDispatchSystem;
+use App\Services\DispatchContextService;
 use App\Support\TenantDatabaseConfigurator;
 use Illuminate\Support\Facades\Schema;
 use Stripe\Checkout\Session as CheckoutSession;
@@ -252,21 +253,18 @@ class SettingController extends Controller
             $enable_map = $tenantData->maps_api ?? null;
             $country_of_user = $tenantData->country_of_use ?? null;
             $units = $tenantData->units ?? null;
-            $company_booking_system = $tenantData->uber_plot_hybrid ?? null;
+            $tenantBookingSystem = $tenantData->uber_plot_hybrid ?? null;
             $tenant_google_api_key = $companyData->google_api_key ?? ($tenantData->google_api_key ?? null);
             $google_api_keys = in_array(strtolower((string) $enable_map), ['google', 'both'], true)
                 ? (trim((string) ($google_api_keys ?? '')) ?: $tenant_google_api_key)
                 : null;
 
-            if($company_booking_system == "auto"){
-                $company_booking_system = "auto_dispatch";
-            }
-            elseif($company_booking_system == "both"){
-                $company_booking_system = $setting->company_booking_system;
-            }
-            else{
-                $company_booking_system = "bidding";
-            }
+            $preliminaryDispatchContext = $this->driverDispatchContext();
+            $company_booking_system = $this->resolveCompanyBookingSystem(
+                $tenantBookingSystem,
+                $setting->company_booking_system,
+                $preliminaryDispatchContext['dispatch_system']
+            );
 
             $dispatchContext = $this->driverDispatchContext($company_booking_system);
 
@@ -291,11 +289,12 @@ class SettingController extends Controller
                 'country_of_user' => $country_of_user,
                 'company_booking_system' => $company_booking_system,
                 'dispatch_system' => $dispatchContext['dispatch_system'],
+                'dispatch_context' => $dispatchContext,
                 'supports_rank' => $dispatchContext['supports_rank'],
                 'supports_bidding' => $dispatchContext['supports_bidding'],
                 'fallback_to_bidding' => $dispatchContext['fallback_to_bidding'],
                 'supports_manual_assignment' => $dispatchContext['supports_manual_assignment'],
-                'show_rank' => $dispatchContext['show_rank'],
+                'show_rank' => $dispatchContext['supports_rank'],
                 'socket_url' => $this->clientSocketUrl(),
                 'socket_port' => $this->clientSocketPort(),
             ];
@@ -1330,61 +1329,36 @@ class SettingController extends Controller
 
     private function driverDispatchContext(?string $companyBookingSystem = null): array
     {
-        $enabledSystems = [];
-        $fallbackToBidding = false;
-        if (Schema::connection("tenant")->hasTable("dispatch_system")) {
-            $enabledSystems = CompanyDispatchSystem::where("status", "enable")
-                ->orderByRaw("priority IS NULL, priority ASC")
-                ->orderBy("id", "ASC")
-                ->pluck("dispatch_system")
-                ->values()
-                ->all();
+        return app(DispatchContextService::class)->resolve($companyBookingSystem);
+    }
 
-            $fallbackToBidding = CompanyDispatchSystem::where("status", "enable")
-                ->where("steps", "put_in_bidding_panel")
-                ->when($enabledSystems[0] ?? null, function ($query, $dispatchSystem) {
-                    $query->where("dispatch_system", $dispatchSystem);
-                })
-                ->exists();
+    private function resolveCompanyBookingSystem(
+        mixed $tenantBookingSystem,
+        mixed $storedBookingSystem,
+        ?string $activeDispatchSystem
+    ): string {
+        $tenantBookingSystem = strtolower(trim((string) $tenantBookingSystem));
+        $storedBookingSystem = strtolower(trim((string) $storedBookingSystem));
+
+        if ($tenantBookingSystem === 'auto') {
+            return 'auto_dispatch';
         }
 
-        $dispatchSystem = $enabledSystems[0] ?? null;
-        if (!$dispatchSystem) {
-            $dispatchSystem = $companyBookingSystem === "bidding"
-                ? "bidding"
-                : "auto_dispatch_plot_base";
+        if ($tenantBookingSystem === 'bidding') {
+            return 'bidding';
         }
 
-        $supportsBidding = in_array($dispatchSystem, [
-            "bidding",
-            "bidding_fixed_fare_plot_base",
-            "bidding_fixed_fare_nearest_driver",
-        ], true);
-
-        if (!$supportsBidding && Schema::connection("tenant")->hasTable("dispatch_system")) {
-            $supportsBidding = CompanyDispatchSystem::where("status", "enable")
-                ->where(function ($query) {
-                    $query->whereIn("dispatch_system", [
-                        "bidding",
-                        "bidding_fixed_fare_plot_base",
-                        "bidding_fixed_fare_nearest_driver",
-                    ])->orWhere(function ($query) {
-                        $query->where("dispatch_system", "auto_dispatch_nearest_driver")
-                            ->where("steps", "put_in_bidding_panel");
-                    });
-                })
-                ->exists();
+        if ($tenantBookingSystem === 'both' && in_array($storedBookingSystem, ['auto_dispatch', 'bidding', 'both'], true)) {
+            return $storedBookingSystem;
         }
 
-        return [
-            "dispatch_system" => $dispatchSystem,
-            "company_booking_system" => $companyBookingSystem ?: "auto_dispatch",
-            "supports_rank" => $dispatchSystem === "auto_dispatch_plot_base",
-            "supports_bidding" => $supportsBidding,
-            "fallback_to_bidding" => $fallbackToBidding,
-            "supports_manual_assignment" => true,
-            "show_rank" => $dispatchSystem === "auto_dispatch_plot_base",
-        ];
+        if (in_array($storedBookingSystem, ['auto_dispatch', 'bidding', 'both'], true)) {
+            return $storedBookingSystem;
+        }
+
+        return str_starts_with((string) $activeDispatchSystem, 'bidding')
+            ? 'bidding'
+            : 'auto_dispatch';
     }
 
     private function syncDriverPlotFromCoordinates(?CompanyDriver $driver): ?CompanyDriver
