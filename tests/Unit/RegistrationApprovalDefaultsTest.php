@@ -81,6 +81,35 @@ class RegistrationApprovalDefaultsTest extends TestCase
             'active',
             CompanyRider::where('email', 'customer@example.test')->value('status')
         );
+        $this->assertFalse((bool) CompanyRider::where('email', 'customer@example.test')->value('email_verified'));
+    }
+
+    public function test_unverified_rider_login_requires_otp_without_token(): void
+    {
+        $rider = new CompanyRider();
+        $rider->name = 'Unverified Rider';
+        $rider->email = 'unverified@example.test';
+        $rider->phone_no = '5550003';
+        $rider->country_code = '+1';
+        $rider->password = bcrypt('secret123');
+        $rider->status = 'active';
+        $rider->email_verified = false;
+        $rider->save();
+
+        $request = Request::create('/api/rider/login', 'POST', [
+            'phone' => '5550003',
+            'country_code' => '+1',
+        ]);
+        $request->headers->set('database', 'testcompany');
+
+        $response = (new RiderAuthController())->login($request);
+        $payload = $response->getData(true);
+
+        $this->assertSame(403, $response->getStatusCode(), json_encode($payload));
+        $this->assertSame(1, $payload['error']);
+        $this->assertTrue($payload['requires_otp']);
+        $this->assertArrayNotHasKey('token', $payload);
+        $this->assertNotNull(CompanyRider::where('email', 'unverified@example.test')->value('otp'));
     }
 
     public function test_company_created_customer_account_is_active_by_default(): void
@@ -148,6 +177,8 @@ class RegistrationApprovalDefaultsTest extends TestCase
             $table->string('city')->nullable();
             $table->unsignedBigInteger('dispatcher_id')->nullable();
             $table->string('status')->nullable();
+            $table->boolean('email_verified')->default(false);
+            $table->timestamp('email_verified_at')->nullable();
             $table->string('otp')->nullable();
             $table->timestamp('otp_expires_at')->nullable();
             $table->softDeletes();

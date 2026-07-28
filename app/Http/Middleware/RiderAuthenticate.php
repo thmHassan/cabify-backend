@@ -33,6 +33,15 @@ class RiderAuthenticate
                 return response()->json(['message' => 'Token revoked'], 401);
             }
 
+            if (!(bool) ($rider->email_verified ?? false)) {
+                return response()->json([
+                    'message' => 'Email verification required',
+                    'requiresOtp' => true,
+                    'requires_otp' => true,
+                    'email_verified' => false,
+                ], 403);
+            }
+
             $request->attributes->set('rider', $rider);
 
         } catch (\PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException $e) {

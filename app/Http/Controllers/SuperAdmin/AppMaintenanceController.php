@@ -4,7 +4,10 @@ namespace App\Http\Controllers\SuperAdmin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AppMaintenanceSetting;
+use App\Services\SocketApiUrlResolver;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class AppMaintenanceController extends Controller
 {
@@ -80,6 +83,8 @@ class AppMaintenanceController extends Controller
             $setting->message = $setting->message ?: AppMaintenanceSetting::DEFAULT_MESSAGE;
             $setting->save();
 
+            $this->notifyAppMaintenanceChanged($request, $setting);
+
             return response()->json([
                 'success' => 1,
                 'message' => 'App maintenance settings updated successfully',
@@ -98,6 +103,31 @@ class AppMaintenanceController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function notifyAppMaintenanceChanged(Request $request, AppMaintenanceSetting $setting): void
+    {
+        try {
+            Http::withHeaders([
+                'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
+            ])->timeout(5)->post(
+                SocketApiUrlResolver::endpoint($request, 'app-maintenance-changed'),
+                [
+                    'driver_app' => $setting->driver_app,
+                    'customer_app' => $setting->customer_app,
+                    'message' => $setting->message ?: AppMaintenanceSetting::DEFAULT_MESSAGE,
+                    'starts_at' => $setting->starts_at?->toISOString(),
+                    'ends_at' => $setting->ends_at?->toISOString(),
+                    'driver' => $setting->statusFor('driver'),
+                    'customer' => $setting->statusFor('customer'),
+                    'changed_at' => now()->toISOString(),
+                ]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('App maintenance socket call failed', [
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 }

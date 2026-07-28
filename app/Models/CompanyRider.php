@@ -19,6 +19,18 @@ class CompanyRider extends Authenticatable implements JWTSubject
     protected $table = "users";
     protected $appends = ['rating'];
 
+    protected $hidden = [
+        'password',
+        'remember_token',
+        'otp',
+        'otp_expires_at',
+    ];
+
+    protected $casts = [
+        'email_verified' => 'boolean',
+        'email_verified_at' => 'datetime',
+    ];
+
     public function getJWTIdentifier()
     {
         return $this->getKey();

@@ -6727,6 +6727,60 @@ app.post("/driver-force-logout", async (req, res) => {
     }
 });
 
+app.post("/rider-force-logout", async (req, res) => {
+    try {
+        const { riderId, userId, auth_version, reason = "another_device_login", event, action } = req.body;
+        const effectiveRiderId = riderId || userId;
+
+        if (!effectiveRiderId) {
+            return res.status(400).json({ success: false, message: "Missing riderId" });
+        }
+
+        if (!req.tenantDb) {
+            const dbHeader = req.headers['database'] || req.headers['x-database'];
+            if (dbHeader) {
+                req.tenantDb = toTenantDbName(dbHeader);
+            }
+        }
+
+        if (!req.tenantDb) {
+            return res.status(400).json({ success: false, message: "Missing database header" });
+        }
+
+        const dbName = toTenantSocketName(req.headers['database'] || req.headers['x-database'] || req.tenantDb);
+        const riderIdStr = effectiveRiderId.toString();
+        const riderSocketId = getTenantSocket(userSockets, dbName, riderIdStr);
+
+        if (riderSocketId) {
+            const logoutEvent = event || "rider-forced-offline";
+            const logoutPayload = {
+                rider_id: effectiveRiderId,
+                user_id: effectiveRiderId,
+                message: "You have been logged out.",
+                reason,
+                action: action || "force_logout",
+                token_revoked: true,
+                auth_version,
+            };
+
+            io.to(riderSocketId).emit("rider-forced-offline", logoutPayload);
+            if (logoutEvent && logoutEvent !== "rider-forced-offline") {
+                io.to(riderSocketId).emit(logoutEvent, logoutPayload);
+            }
+
+            const riderSocket = io.sockets.sockets.get(riderSocketId);
+            if (riderSocket) {
+                riderSocket.disconnect(true);
+            }
+        }
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("Rider force logout error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 const normalizeCompanyStatus = (status) => {
     const value = (status ?? "").toString().toLowerCase().trim();
 
@@ -6899,6 +6953,53 @@ app.post("/company-settings-changed", async (req, res) => {
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
+
+const emitAppMaintenanceChanged = async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token || token !== process.env.NODE_INTERNAL_SECRET) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        const validStatuses = ["enable", "disable"];
+        if (!validStatuses.includes(req.body.driver_app) || !validStatuses.includes(req.body.customer_app)) {
+            return res.status(422).json({
+                success: false,
+                message: "driver_app and customer_app must be enable or disable",
+            });
+        }
+
+        const payload = {
+            title: "App maintenance updated",
+            description: "Global mobile app maintenance settings were changed.",
+            message: req.body.message || "Now this app is under maintenance",
+            type: "app_maintenance_changed",
+            source: "super_admin",
+            driver_app: req.body.driver_app,
+            customer_app: req.body.customer_app,
+            starts_at: req.body.starts_at || null,
+            ends_at: req.body.ends_at || null,
+            driver: req.body.driver && typeof req.body.driver === "object" ? req.body.driver : null,
+            customer: req.body.customer && typeof req.body.customer === "object" ? req.body.customer : null,
+            changed_at: req.body.changed_at || new Date().toISOString(),
+        };
+
+        io.emit("app-maintenance-changed", payload);
+
+        return res.json({
+            success: true,
+            event: "app-maintenance-changed",
+            connected_clients: io.engine.clientsCount,
+        });
+    } catch (error) {
+        console.error("App maintenance changed notification error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
+
+app.post("/app-maintenance-changed", emitAppMaintenanceChanged);
+app.post("/socket-api/app-maintenance-changed", emitAppMaintenanceChanged);
 
 app.post("/dispatcher-force-logout-all", async (req, res) => {
     try {
