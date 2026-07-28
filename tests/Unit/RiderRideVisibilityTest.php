@@ -29,6 +29,11 @@ class RiderRideVisibilityTest extends TestCase
             $table->string('pickup_time')->nullable();
             $table->string('pickup_time_type')->nullable();
             $table->date('booking_date')->nullable();
+            $table->string('booking_id')->nullable();
+            $table->string('payment_method')->nullable();
+            $table->string('payment_status')->nullable();
+            $table->string('booking_amount')->nullable();
+            $table->string('currency')->nullable();
         });
     }
 
@@ -77,6 +82,36 @@ class RiderRideVisibilityTest extends TestCase
         $this->assertSame([$activeId], $this->currentIds());
     }
 
+    public function test_completed_ride_with_pending_payment_blocks_a_new_booking(): void
+    {
+        $bookingId = $this->insertBooking([
+            'booking_status' => 'completed',
+            'payment_method' => 'online',
+            'payment_status' => 'pending',
+            'booking_amount' => '125.50',
+            'currency' => 'PKR',
+        ]);
+
+        $booking = $this->unpaidCompletedRide();
+
+        $this->assertSame($bookingId, $booking?->id);
+        $this->assertSame('125.50', $booking?->booking_amount);
+    }
+
+    public function test_paid_and_legacy_null_payment_status_rides_do_not_block_a_new_booking(): void
+    {
+        $this->insertBooking([
+            'booking_status' => 'completed',
+            'payment_status' => 'completed',
+        ]);
+        $this->insertBooking([
+            'booking_status' => 'completed',
+            'payment_status' => null,
+        ]);
+
+        $this->assertNull($this->unpaidCompletedRide());
+    }
+
     private function currentIds(): array
     {
         $query = CompanyBooking::where('user_id', 10);
@@ -100,6 +135,14 @@ class RiderRideVisibilityTest extends TestCase
         $method->invoke(new BookingController(), $query);
     }
 
+    private function unpaidCompletedRide(): ?CompanyBooking
+    {
+        $method = (new ReflectionClass(BookingController::class))->getMethod('unpaidCompletedRide');
+        $method->setAccessible(true);
+
+        return $method->invoke(new BookingController(), 10);
+    }
+
     private function insertBooking(array $overrides): int
     {
         return DB::table('bookings')->insertGetId(array_merge([
@@ -108,6 +151,11 @@ class RiderRideVisibilityTest extends TestCase
             'pickup_time' => 'asap',
             'pickup_time_type' => 'asap',
             'booking_date' => '2026-07-22',
+            'booking_id' => null,
+            'payment_method' => 'cash',
+            'payment_status' => 'pending',
+            'booking_amount' => '100',
+            'currency' => 'PKR',
         ], $overrides));
     }
 }

@@ -61,6 +61,7 @@ const userSockets = new Map();
 const dispatcherSockets = new Map();
 const clientSockets = new Map();
 const adminSockets = new Map();
+const nearbyDriverSubscriptions = new Map();
 
 const formatDateInTimezone = (date = new Date(), timeZone = 'UTC') => {
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -591,6 +592,7 @@ const emitTenantDriverOffline = (database, payload) => {
     io.to(`dispatcher_${dbName}`).emit("driver-offline-event", eventPayload);
     io.to(`admin_${dbName}`).emit("driver-offline-event", eventPayload);
     io.to(`client_${dbName}`).emit("driver-offline-event", eventPayload);
+    removeDriverFromNearbySubscribers(dbName, payload?.driver_id || payload?.id, "offline");
 };
 
 const emitTenantWaitingDriver = (database, payload) => {
@@ -599,6 +601,7 @@ const emitTenantWaitingDriver = (database, payload) => {
     io.to(`dispatcher_${dbName}`).emit("waiting-driver-event", eventPayload);
     io.to(`admin_${dbName}`).emit("waiting-driver-event", eventPayload);
     io.to(`client_${dbName}`).emit("waiting-driver-event", eventPayload);
+    broadcastNearbyDriverUpdate(dbName, eventPayload);
 };
 
 const emitTenantOnJobDriver = (database, payload) => {
@@ -607,6 +610,7 @@ const emitTenantOnJobDriver = (database, payload) => {
     io.to(`dispatcher_${dbName}`).emit("on-job-driver-event", eventPayload);
     io.to(`admin_${dbName}`).emit("on-job-driver-event", eventPayload);
     io.to(`client_${dbName}`).emit("on-job-driver-event", eventPayload);
+    removeDriverFromNearbySubscribers(dbName, payload?.driver_id || payload?.id, "busy");
 };
 
 const emitTenantRooms = (database, event, payload) => {
@@ -634,6 +638,7 @@ const flushLiveGpsBroadcasts = (database) => {
     pendingLiveGpsBroadcasts.delete(dbName);
     for (const payload of pending.values()) {
         emitTenantRooms(dbName, "driver-location-update", payload);
+        broadcastNearbyDriverUpdate(dbName, payload);
         liveGpsBroadcastStats.flushed += 1;
     }
 };
@@ -772,6 +777,135 @@ const distanceMeters = (from, to) => {
     const a = Math.sin(dLat / 2) ** 2
         + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
     return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const nearbyDriverMarkerPayload = (driver, distanceKm) => ({
+    driver_id: Number(driver.driver_id || driver.id),
+    latitude: Number(driver.latitude),
+    longitude: Number(driver.longitude),
+    vehicle_id: driver.assigned_vehicle !== null && driver.assigned_vehicle !== undefined
+        ? Number(driver.assigned_vehicle)
+        : null,
+    distance_km: Number(distanceKm.toFixed(3)),
+});
+
+const removeDriverFromNearbySubscribers = (database, driverId, reason = "unavailable") => {
+    const dbName = toTenantSocketName(database);
+    const driverKey = String(driverId || "");
+    if (!dbName || !driverKey) return;
+
+    for (const subscription of nearbyDriverSubscriptions.values()) {
+        if (subscription.database !== dbName || !subscription.visibleDriverIds.has(driverKey)) continue;
+
+        subscription.visibleDriverIds.delete(driverKey);
+        io.to(subscription.socketId).emit("nearby-driver-removed", {
+            driver_id: Number(driverId),
+            reason,
+            database: dbName,
+        });
+    }
+};
+
+const broadcastNearbyDriverUpdate = (database, driver) => {
+    const dbName = toTenantSocketName(database);
+    const driverId = driver?.driver_id || driver?.id;
+    const latitude = parseCoordinate(driver?.latitude);
+    const longitude = parseCoordinate(driver?.longitude);
+    if (!dbName || !driverId) return;
+
+    const driverKey = String(driverId);
+    const onlineStatus = String(driver?.online_status || "").toLowerCase();
+    const drivingStatus = String(driver?.driving_status || driver?.status || "").toLowerCase();
+
+    for (const subscription of nearbyDriverSubscriptions.values()) {
+        if (subscription.database !== dbName) continue;
+
+        const wasVisible = subscription.visibleDriverIds.has(driverKey);
+        const driverVehicleId = driver?.assigned_vehicle;
+        const vehicleMismatch = subscription.vehicleId
+            && driverVehicleId !== null
+            && driverVehicleId !== undefined
+            && String(driverVehicleId) !== String(subscription.vehicleId);
+        const available = onlineStatus === "online"
+            && drivingStatus === "idle"
+            && isValidCoordinatePair(latitude, longitude)
+            && !vehicleMismatch;
+
+        const distanceKm = available
+            ? distanceMeters(
+                { latitude: subscription.latitude, longitude: subscription.longitude },
+                { latitude, longitude }
+            ) / 1000
+            : Number.POSITIVE_INFINITY;
+        const isVisible = available && distanceKm <= subscription.radiusKm;
+
+        if (isVisible) {
+            subscription.visibleDriverIds.add(driverKey);
+            io.to(subscription.socketId).emit("nearby-driver-location-update", {
+                ...nearbyDriverMarkerPayload(driver, distanceKm),
+                database: dbName,
+            });
+        } else if (wasVisible) {
+            subscription.visibleDriverIds.delete(driverKey);
+            io.to(subscription.socketId).emit("nearby-driver-removed", {
+                driver_id: Number(driverId),
+                reason: available ? "outside_radius" : "unavailable",
+                database: dbName,
+            });
+        }
+    }
+};
+
+const fetchNearbyDriversSnapshot = async ({
+    db,
+    latitude,
+    longitude,
+    radiusKm,
+    vehicleId,
+}) => {
+    const latitudeDelta = radiusKm / 111.045;
+    const longitudeScale = Math.max(Math.abs(Math.cos(latitude * Math.PI / 180)), 0.01);
+    const longitudeDelta = radiusKm / (111.045 * longitudeScale);
+    const params = [
+        latitude,
+        longitude,
+        latitude,
+        latitude - latitudeDelta,
+        latitude + latitudeDelta,
+        longitude - longitudeDelta,
+        longitude + longitudeDelta,
+    ];
+    const vehicleSql = vehicleId ? "AND d.assigned_vehicle = ?" : "";
+    if (vehicleId) params.push(vehicleId);
+    params.push(radiusKm);
+
+    const [drivers] = await db.query(`
+        SELECT d.id, d.latitude, d.longitude, d.assigned_vehicle,
+            (6371 * ACOS(LEAST(1, GREATEST(-1,
+                COS(RADIANS(?)) * COS(RADIANS(d.latitude))
+                * COS(RADIANS(d.longitude) - RADIANS(?))
+                + SIN(RADIANS(?)) * SIN(RADIANS(d.latitude))
+            )))) AS distance_km
+        FROM drivers d
+        WHERE d.online_status = 'online'
+          AND d.driving_status = 'idle'
+          AND d.deleted_at IS NULL
+          AND d.latitude IS NOT NULL
+          AND d.longitude IS NOT NULL
+          AND d.latitude BETWEEN ? AND ?
+          AND d.longitude BETWEEN ? AND ?
+          ${vehicleSql}
+          AND NOT EXISTS (
+              SELECT 1 FROM bookings b
+              WHERE (b.driver = d.id OR b.pending_driver_id = d.id)
+                AND b.booking_status IN ('pending_acceptance', 'arrived', 'started', 'ongoing')
+          )
+        HAVING distance_km <= ?
+        ORDER BY distance_km ASC
+        LIMIT 100
+    `, params);
+
+    return drivers.map((driver) => nearbyDriverMarkerPayload(driver, Number(driver.distance_km)));
 };
 
 const isActiveRideStatus = (status) => {
@@ -2759,9 +2893,12 @@ io.on("connection", (socket) => {
                 const db = getConnection(tenantDb);
 
                 const [rows] = await db.query(
-                    `SELECT d.id, d.name, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude, p.name AS plot_name
+                    `SELECT d.id, d.name, d.phone_no, d.driving_status, d.online_status, d.plot_id, d.latitude, d.longitude,
+                            d.assigned_vehicle, d.vehicle_name, d.vehicle_type, d.vehicle_service, d.plate_no,
+                            p.name AS plot_name, vt.vehicle_type_name, vt.vehicle_type_service
                  FROM drivers d
                  LEFT JOIN plots p ON d.plot_id = p.id
+                 LEFT JOIN vehicle_types vt ON vt.id = d.assigned_vehicle
                  WHERE d.id = ? AND d.deleted_at IS NULL LIMIT 1`,
                 [driverId]
             );
@@ -2839,6 +2976,78 @@ io.on("connection", (socket) => {
             }
         })();
     }
+
+    socket.on("subscribe-nearby-drivers", async (data = {}) => {
+        try {
+            if (!["user", "customer"].includes(String(role || "").toLowerCase()) || !userId) {
+                socket.emit("nearby-drivers-error", {
+                    message: "Only authenticated riders can subscribe to nearby drivers.",
+                });
+                return;
+            }
+
+            const payload = typeof data === "string" ? JSON.parse(data) : (data || {});
+            const latitude = parseCoordinate(payload.latitude ?? payload.lat);
+            const longitude = parseCoordinate(payload.longitude ?? payload.lng);
+            const requestedRadius = Number.parseFloat(payload.radius ?? payload.radius_km ?? 2);
+            const radiusKm = Number.isFinite(requestedRadius)
+                ? Math.min(Math.max(requestedRadius, 0.1), 5)
+                : 2;
+            const vehicleId = payload.vehicle_id ? String(payload.vehicle_id) : null;
+
+            if (!isValidCoordinatePair(latitude, longitude)) {
+                socket.emit("nearby-drivers-error", {
+                    message: "A valid latitude and longitude are required.",
+                });
+                return;
+            }
+
+            const dbContext = await resolveEventDb(payload.database || rawDatabase);
+            if (!dbContext.tenantDbName || !dbContext.socketDbName) {
+                socket.emit("nearby-drivers-error", {
+                    message: "Unable to resolve the tenant database.",
+                });
+                return;
+            }
+
+            const db = getConnection(dbContext.tenantDbName);
+            const drivers = await fetchNearbyDriversSnapshot({
+                db,
+                latitude,
+                longitude,
+                radiusKm,
+                vehicleId,
+            });
+
+            nearbyDriverSubscriptions.set(socket.id, {
+                socketId: socket.id,
+                database: dbContext.socketDbName,
+                userId: String(userId),
+                latitude,
+                longitude,
+                radiusKm,
+                vehicleId,
+                visibleDriverIds: new Set(drivers.map((driver) => String(driver.driver_id))),
+            });
+
+            socket.emit("nearby-drivers-snapshot", {
+                success: true,
+                database: dbContext.socketDbName,
+                radius_km: radiusKm,
+                count: drivers.length,
+                drivers,
+            });
+        } catch (err) {
+            console.error("[subscribe-nearby-drivers] Error:", err.message);
+            socket.emit("nearby-drivers-error", {
+                message: "Unable to load nearby drivers.",
+            });
+        }
+    });
+
+    socket.on("unsubscribe-nearby-drivers", () => {
+        nearbyDriverSubscriptions.delete(socket.id);
+    });
 
     socket.on("driver-location", async (data) => {
         try {
@@ -3221,6 +3430,7 @@ io.on("connection", (socket) => {
         const userId = socket.handshake.query.user_id;
         const clientId = socket.handshake.query.client_id;
         const adminId = socket.handshake.query.admin_id;
+        nearbyDriverSubscriptions.delete(socket.id);
 
         if (role === "dispatcher" && dispatcherId) {
             deleteTenantSocket(dispatcherSockets, database, dispatcherId);

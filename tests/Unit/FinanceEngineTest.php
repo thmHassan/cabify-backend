@@ -15,6 +15,8 @@ use App\Models\FinanceSetting;
 use App\Models\WalletTransaction;
 use App\Http\Controllers\Company\FinanceController;
 use App\Services\FinanceEngine;
+use App\Services\CashRideCommissionService;
+use App\Services\CashRideCommissionReservationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -132,6 +134,228 @@ class FinanceEngineTest extends TestCase
         $this->assertSame(100.0, $online['company_collected']);
         $this->assertSame(90.0, $online['company_owes_driver']);
         $this->assertSame(0.0, $online['driver_owes_company']);
+    }
+
+    public function test_cash_ride_commission_is_deducted_even_when_wallet_becomes_negative(): void
+    {
+        FinanceSetting::query()->update(['default_driver_commission_percent' => 12]);
+
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Cash Driver', 'wallet_balance' => '5'])->save();
+        $booking = $this->booking([
+            'driver' => (string) $driver->id,
+            'payment_method' => 'cash',
+            'booking_amount' => '100',
+        ]);
+
+        $service = app(CashRideCommissionService::class);
+        $first = $service->deduct($booking);
+        $second = $service->deduct($booking->fresh());
+
+        $this->assertTrue($first['deducted']);
+        $this->assertSame(-7.0, $first['wallet_balance']);
+        $this->assertFalse($second['deducted']);
+        $this->assertSame('already_deducted', $second['status']);
+        $this->assertSame(-7.0, (float) $driver->fresh()->wallet_balance);
+        $this->assertSame(1, WalletTransaction::where('payment_provider', 'cash_ride_commission')->count());
+
+        $finance = app(FinanceEngine::class)->rideFinance(
+            $booking->fresh(['accountDetail', 'driverDetail'])
+        );
+        $this->assertSame(12.0, $finance['commission_amount']);
+        $this->assertSame('wallet', $finance['commission_collection_method']);
+        $this->assertSame(0.0, $finance['driver_owes_company']);
+        $this->assertFalse($finance['is_settleable']);
+    }
+
+    public function test_online_ride_does_not_deduct_driver_wallet_commission(): void
+    {
+        FinanceSetting::query()->update(['default_driver_commission_percent' => 10]);
+
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Online Driver', 'wallet_balance' => '50'])->save();
+        $booking = $this->booking([
+            'driver' => (string) $driver->id,
+            'payment_method' => 'online',
+            'payment_status' => 'completed',
+            'booking_amount' => '100',
+        ]);
+
+        $result = app(CashRideCommissionService::class)->deduct($booking);
+
+        $this->assertFalse($result['deducted']);
+        $this->assertSame('not_cash', $result['status']);
+        $this->assertSame(50.0, (float) $driver->fresh()->wallet_balance);
+        $this->assertSame(0, WalletTransaction::count());
+    }
+
+    public function test_cash_ride_commission_is_reserved_without_immediate_wallet_deduction(): void
+    {
+        FinanceSetting::query()->update(['default_driver_commission_percent' => 12]);
+
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Reservation Driver', 'wallet_balance' => '20'])->save();
+        $package = DriverPackage::create([
+            'driver_id' => (string) $driver->id,
+            'package_type' => 'packages_postpaid',
+            'start_date' => '2026-07-01',
+            'expire_date' => '2026-07-31',
+            'commission_type' => 'percentage',
+            'commission_value' => 12,
+        ]);
+        $booking = $this->booking([
+            'driver' => null,
+            'booking_status' => 'pending',
+            'payment_method' => 'cash',
+            'booking_amount' => '100',
+        ]);
+
+        $reservation = app(CashRideCommissionReservationService::class)
+            ->reserve($booking, (int) $driver->id, 100);
+
+        $this->assertTrue($reservation['allowed']);
+        $this->assertTrue($reservation['created']);
+        $this->assertSame(12.0, $reservation['required_commission']);
+        $this->assertSame(8.0, $reservation['available_wallet_balance']);
+        $this->assertSame(20.0, (float) $driver->fresh()->wallet_balance);
+        $this->assertSame('reserved', $booking->fresh()->commission_reservation_status);
+        $this->assertSame($package->id, $booking->fresh()->commission_reserved_package_id);
+    }
+
+    public function test_existing_reservation_reduces_available_balance_and_release_restores_it(): void
+    {
+        FinanceSetting::query()->update(['default_driver_commission_percent' => 12]);
+
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Reserved Balance Driver', 'wallet_balance' => '20'])->save();
+        $firstBooking = $this->booking([
+            'booking_status' => 'pending',
+            'payment_method' => 'cash',
+            'booking_amount' => '100',
+        ]);
+        $secondBooking = $this->booking([
+            'booking_status' => 'pending',
+            'payment_method' => 'cash',
+            'booking_amount' => '100',
+        ]);
+        $service = app(CashRideCommissionReservationService::class);
+
+        $this->assertTrue($service->reserve($firstBooking, (int) $driver->id)['allowed']);
+        $blocked = $service->reserve($secondBooking, (int) $driver->id);
+
+        $this->assertFalse($blocked['allowed']);
+        $this->assertSame(8.0, $blocked['available_wallet_balance']);
+        $this->assertSame(4.0, $blocked['recharge_amount']);
+
+        $this->assertTrue($service->release($firstBooking));
+        $this->assertTrue($service->reserve($secondBooking, (int) $driver->id)['allowed']);
+        $this->assertSame('released', $firstBooking->fresh()->commission_reservation_status);
+    }
+
+    public function test_reserved_percentage_commission_uses_final_fare_and_settles_on_completion(): void
+    {
+        FinanceSetting::query()->update(['default_driver_commission_percent' => 10]);
+
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Final Fare Driver', 'wallet_balance' => '20'])->save();
+        $booking = $this->booking([
+            'driver' => (string) $driver->id,
+            'booking_status' => 'pending',
+            'payment_method' => 'cash',
+            'booking_amount' => '100',
+        ]);
+
+        $reserved = app(CashRideCommissionReservationService::class)
+            ->reserve($booking, (int) $driver->id, 100);
+        $this->assertSame(10.0, $reserved['required_commission']);
+
+        $booking->booking_amount = 150;
+        $booking->booking_status = 'completed';
+        $booking->save();
+        $deduction = app(CashRideCommissionService::class)->deduct($booking->fresh());
+
+        $this->assertTrue($deduction['deducted']);
+        $this->assertSame(15.0, $deduction['commission_amount']);
+        $this->assertSame(10.0, $deduction['reserved_commission']);
+        $this->assertSame(5.0, (float) $driver->fresh()->wallet_balance);
+        $this->assertSame('settled', $booking->fresh()->commission_reservation_status);
+    }
+
+    public function test_online_ride_does_not_create_commission_reservation(): void
+    {
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Online Reservation Driver', 'wallet_balance' => '0'])->save();
+        $booking = $this->booking([
+            'booking_status' => 'pending',
+            'payment_method' => 'online',
+            'booking_amount' => '100',
+        ]);
+
+        $reservation = app(CashRideCommissionReservationService::class)
+            ->reserve($booking, (int) $driver->id);
+
+        $this->assertTrue($reservation['allowed']);
+        $this->assertSame('not_required', $reservation['status']);
+        $this->assertNull($booking->fresh()->commission_reservation_status);
+    }
+
+    public function test_package_commission_is_snapshotted_and_does_not_change_with_later_package_edits(): void
+    {
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Package Driver'])->save();
+        $package = DriverPackage::create([
+            'driver_id' => (string) $driver->id,
+            'package_type' => 'packages_postpaid',
+            'start_date' => '2026-07-01',
+            'expire_date' => '2026-07-31',
+            'commission_type' => 'fixed',
+            'commission_value' => 15,
+        ]);
+        $booking = $this->booking([
+            'driver' => (string) $driver->id,
+            'payment_method' => 'online',
+            'payment_status' => 'completed',
+            'booking_amount' => '100',
+        ]);
+
+        $engine = app(FinanceEngine::class);
+        $first = $engine->rideFinance($booking->fresh(['accountDetail', 'driverDetail']));
+        $package->update(['commission_value' => 90]);
+        $second = $engine->rideFinance($booking->fresh(['accountDetail', 'driverDetail']));
+
+        $this->assertSame(15.0, $first['commission_amount']);
+        $this->assertSame(85.0, $first['company_owes_driver']);
+        $this->assertSame('fixed', $first['commission_type']);
+        $this->assertSame(15.0, $first['commission_rate']);
+        $this->assertSame($package->id, $first['driver_package_id']);
+        $this->assertSame(15.0, $second['commission_amount']);
+        $this->assertNotNull($booking->fresh()->commission_snapshot_at);
+    }
+
+    public function test_percentage_package_commission_is_calculated_from_the_ride_fare(): void
+    {
+        $driver = new CompanyDriver();
+        $driver->forceFill(['name' => 'Percentage Driver'])->save();
+        DriverPackage::create([
+            'driver_id' => (string) $driver->id,
+            'package_type' => 'packages_postpaid',
+            'start_date' => '2026-07-01',
+            'expire_date' => '2026-07-31',
+            'commission_type' => 'percentage',
+            'commission_value' => 12.5,
+        ]);
+        $booking = $this->booking([
+            'driver' => (string) $driver->id,
+            'booking_amount' => '200',
+        ]);
+
+        $finance = app(FinanceEngine::class)->rideFinance(
+            $booking->fresh(['accountDetail', 'driverDetail'])
+        );
+
+        $this->assertSame(25.0, $finance['commission_amount']);
+        $this->assertSame(25.0, $finance['driver_owes_company']);
+        $this->assertSame(175.0, $finance['driver_net_amount']);
     }
 
     public function test_old_ride_amounts_use_fare_fallback_order(): void
@@ -1402,6 +1626,23 @@ class FinanceEngineTest extends TestCase
             $table->string('account')->nullable();
             $table->string('driver')->nullable();
             $table->string('distance')->nullable();
+            $table->unsignedBigInteger('driver_package_id')->nullable();
+            $table->string('commission_type')->nullable();
+            $table->decimal('commission_rate', 12, 2)->nullable();
+            $table->decimal('commission_amount', 12, 2)->nullable();
+            $table->decimal('driver_net_amount', 12, 2)->nullable();
+            $table->timestamp('commission_snapshot_at')->nullable();
+            $table->unsignedBigInteger('commission_wallet_transaction_id')->nullable();
+            $table->timestamp('commission_wallet_debited_at')->nullable();
+            $table->unsignedBigInteger('commission_reservation_driver_id')->nullable();
+            $table->unsignedBigInteger('commission_reserved_package_id')->nullable();
+            $table->string('commission_reserved_type')->nullable();
+            $table->decimal('commission_reserved_rate', 12, 2)->nullable();
+            $table->decimal('commission_reserved_fixed_amount', 12, 2)->default(0);
+            $table->decimal('commission_reserved_amount', 12, 2)->default(0);
+            $table->string('commission_reservation_status')->nullable();
+            $table->timestamp('commission_reserved_at')->nullable();
+            $table->timestamp('commission_reservation_released_at')->nullable();
             $table->timestamps();
         });
 
@@ -1521,6 +1762,8 @@ class FinanceEngineTest extends TestCase
             $table->string('post_paid_amount')->nullable();
             $table->string('pending_rides')->nullable();
             $table->string('commission_per')->nullable();
+            $table->string('commission_type')->nullable();
+            $table->decimal('commission_value', 12, 2)->nullable();
             $table->date('start_date')->nullable();
             $table->date('expire_date')->nullable();
             $table->timestamps();
@@ -1533,6 +1776,9 @@ class FinanceEngineTest extends TestCase
             $table->string('type')->nullable();
             $table->string('amount')->nullable();
             $table->string('comment')->nullable();
+            $table->string('payment_provider')->nullable();
+            $table->string('payment_reference')->nullable();
+            $table->unique(['payment_provider', 'payment_reference']);
             $table->timestamps();
         });
 

@@ -311,6 +311,9 @@ class FinanceEngine
     public function rideFinance($booking): array
     {
         $fare = $this->effectiveFare($booking);
+        if ($this->isFinancialBooking($booking) && !$booking->commission_snapshot_at) {
+            $booking = app(RideCommissionSnapshotService::class)->snapshot($booking, $fare);
+        }
         $channel = $this->paymentChannel($booking);
         $paid = $this->historicalPaidAmount($booking, $channel);
         $statement = $this->statementStatus((int) $booking->id);
@@ -326,7 +329,7 @@ class FinanceEngine
         if ($completed) {
             if ($channel === 'cash') {
                 $driverCashCollected = $fare;
-                $driverOwesCompany = $commission;
+                $driverOwesCompany = $booking->commission_wallet_debited_at ? 0 : $commission;
             } elseif ($channel === 'online') {
                 $companyCollected = $fare;
                 $companyOwesDriver = max($fare - $commission, 0);
@@ -356,6 +359,18 @@ class FinanceEngine
             'driver_name' => $booking->driverDetail?->name,
             'fare_amount' => round($fare, 2),
             'commission_amount' => round($commission, 2),
+            'commission_collection_method' => $booking->commission_wallet_debited_at ? 'wallet' : null,
+            'commission_wallet_debited_at' => $booking->commission_wallet_debited_at?->toIso8601String(),
+            'commission_reserved_amount' => round((float) ($booking->commission_reserved_amount ?? 0), 2),
+            'commission_reservation_status' => $booking->commission_reservation_status,
+            'commission_type' => $booking->commission_type,
+            'commission_rate' => $booking->commission_rate !== null
+                ? round((float) $booking->commission_rate, 2)
+                : null,
+            'driver_package_id' => $booking->driver_package_id,
+            'driver_net_amount' => $booking->driver_net_amount !== null
+                ? round((float) $booking->driver_net_amount, 2)
+                : round(max($fare - $commission, 0), 2),
             'paid_amount' => round($paid, 2),
             'account_receivable' => round($accountReceivable, 2),
             'company_collected' => round($companyCollected, 2),
@@ -397,6 +412,7 @@ class FinanceEngine
 
         return [
             'booking_id' => $booking->id,
+            'driver_package_id' => $finance['driver_package_id'],
             'item_date' => $booking->booking_date,
             'item_type' => 'ride',
             'gross_amount' => $finance['fare_amount'],
@@ -765,6 +781,10 @@ class FinanceEngine
 
     private function commissionAmount($booking, float $fare): float
     {
+        if ($booking->commission_amount !== null) {
+            return round((float) $booking->commission_amount, 2);
+        }
+
         $driverPackage = !empty($booking->driver)
             ? DriverPackage::where('driver_id', $booking->driver)->orderBy('id', 'DESC')->first()
             : null;

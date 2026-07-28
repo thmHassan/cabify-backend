@@ -27,6 +27,8 @@ class DocumentTypeController extends Controller
             $document->profile_photo = $request->profile_photo;
             $document->has_issue_date = $request->has_issue_date;
             $document->has_expiry_date = $request->has_expiry_date;
+            $document->expiry_requirement_enabled_at = $request->has_expiry_date === 'yes' ? now() : null;
+            $document->expiry_grace_days = 7;
             $document->has_number_field = $request->has_number_field;
             $document->save();
 
@@ -57,12 +59,19 @@ class DocumentTypeController extends Controller
             ]);
 
             $document = CompanyDocumentType::where("id", $request->id)->first();
+            $expiryWasEnabled = $document->has_expiry_date === 'yes';
             $document->document_name = $request->document_name;
             $document->front_photo = $request->front_photo;
             $document->back_photo = $request->back_photo;
             $document->profile_photo = $request->profile_photo;
             $document->has_issue_date = $request->has_issue_date;
             $document->has_expiry_date = $request->has_expiry_date;
+            if (!$expiryWasEnabled && $request->has_expiry_date === 'yes') {
+                $document->expiry_requirement_enabled_at = now();
+                $document->expiry_grace_days = 7;
+            } elseif ($request->has_expiry_date !== 'yes') {
+                $document->expiry_requirement_enabled_at = null;
+            }
             $document->has_number_field = $request->has_number_field;
             $document->save();
 

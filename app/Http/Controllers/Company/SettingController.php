@@ -372,12 +372,20 @@ class SettingController extends Controller
                 'package_type' => 'required',
                 'package_duration' => 'required',
                 'package_price' => 'required',
+                'commission_type' => 'nullable|in:percentage,fixed',
+                'commission_value' => $request->commission_type === 'percentage'
+                    ? 'nullable|numeric|min:0|max:100'
+                    : 'nullable|numeric|min:0',
             ]);
             $data = new PackageSetting;
             $data->package_name = $request->package_name;
             $data->package_type = $request->package_type;
             $data->package_duration = $request->package_duration;
             $data->package_price = $request->package_price;
+            $data->commission_type = $request->commission_type ?: null;
+            $data->commission_value = $request->filled('commission_value')
+                ? $request->commission_value
+                : null;
             $data->save();
 
             $this->notifyCompanySettingsChanged($request, 'commission');
@@ -430,12 +438,20 @@ class SettingController extends Controller
                 'package_type' => 'required',
                 'package_duration' => 'required',
                 'package_price' => 'required',
+                'commission_type' => 'nullable|in:percentage,fixed',
+                'commission_value' => $request->commission_type === 'percentage'
+                    ? 'nullable|numeric|min:0|max:100'
+                    : 'nullable|numeric|min:0',
             ]);
             $data = PackageSetting::where("id", $request->id)->first();
             $data->package_name = $request->package_name;
             $data->package_type = $request->package_type;
             $data->package_duration = $request->package_duration;
             $data->package_price = $request->package_price;
+            $data->commission_type = $request->commission_type ?: null;
+            $data->commission_value = $request->filled('commission_value')
+                ? $request->commission_value
+                : null;
             $data->save();
 
             $this->notifyCompanySettingsChanged($request, 'commission');

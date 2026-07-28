@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
+use App\Models\AppMaintenanceSetting;
 use App\Models\CompanySetting;
 
 class CheckAppAvailibility
@@ -18,11 +19,16 @@ class CheckAppAvailibility
     {
         $setting = CompanySetting::orderBy("id", "DESC")->first();
 
-        if (!$setting) {
-            return $next($request);
-        }
-
         if (auth("driver")->check()) {
+            $globalStatus = AppMaintenanceSetting::current()->statusFor('driver');
+            if ($globalStatus['maintenance']) {
+                return response()->json([
+                    'error' => 1,
+                    'maintenance' => true,
+                    'message' => $globalStatus['message'],
+                ], 503);
+            }
+
             $driver = auth("driver")->user();
             $status = strtolower((string) ($driver->status ?? 'pending'));
             $approvedStatuses = ['accepted', 'approved', 'active'];
@@ -33,13 +39,33 @@ class CheckAppAvailibility
                     'message' => 'Driver is not approved by Company Admin'
                 ], 400);
             }
+
+            if ($setting && $setting->driver_app == "disable") {
+                return response()->json([
+                    'error' => 1,
+                    'maintenance' => true,
+                    'message' => AppMaintenanceSetting::DEFAULT_MESSAGE
+                ], 503);
+            }
         }
 
-        if(auth("rider")->check() && $setting->customer_app == "disable"){
-            return response()->json([
-                'error' => 1,
-                'message' => 'Rider is not approved by Company Admin'
-            ], 400);
+        if (auth("rider")->check()) {
+            $globalStatus = AppMaintenanceSetting::current()->statusFor('customer');
+            if ($globalStatus['maintenance']) {
+                return response()->json([
+                    'error' => 1,
+                    'maintenance' => true,
+                    'message' => $globalStatus['message'],
+                ], 503);
+            }
+
+            if ($setting && $setting->customer_app == "disable") {
+                return response()->json([
+                    'error' => 1,
+                    'maintenance' => true,
+                    'message' => AppMaintenanceSetting::DEFAULT_MESSAGE
+                ], 503);
+            }
         }
         return $next($request);
     }

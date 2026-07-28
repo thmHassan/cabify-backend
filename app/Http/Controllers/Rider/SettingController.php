@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\DB;
 use App\Models\Setting;
 use App\Models\TenantUser;
 use App\Models\MobileAppSetting;
+use Stripe\Checkout\Session as CheckoutSession;
+use Stripe\Stripe;
 
 class SettingController extends Controller
 {
@@ -182,6 +184,228 @@ class SettingController extends Controller
                 'error' => 1,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function walletBalance(Request $request)
+    {
+        try {
+            $userId = auth('rider')->user()->id;
+            $user = CompanyRider::where("id", $userId)->first();
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+
+            $recentTransactions = WalletTransaction::where("user_id", $userId)
+                ->where("user_type", "user")
+                ->orderBy("id", "DESC")
+                ->limit(5)
+                ->get();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Wallet balance fetched successfully',
+                'data' => [
+                    'rider_id' => $userId,
+                    'wallet_balance' => round((float) ($user->wallet_balance ?? 0), 2),
+                    'currency' => strtoupper((string) ($setting->company_currency ?? 'USD')),
+                    'recent_transactions' => $recentTransactions,
+                ],
+            ]);
+        }
+        catch(\Exception $e){
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function createWalletStripePaymentUrl(Request $request)
+    {
+        try {
+            $request->validate([
+                'amount' => 'required|numeric|min:1',
+                'success_url' => 'nullable|string',
+                'cancel_url' => 'nullable|string',
+            ]);
+
+            $setting = CompanySetting::orderBy('id', 'DESC')->first();
+
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.',
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.',
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $amount = round((float) $request->amount, 2);
+            $currency = strtolower((string) ($setting->company_currency ?: 'usd'));
+            $successUrl = $request->success_url
+                ?: rtrim(config('app.url'), '/') . '/api/rider/stripe-wallet-success?session_id={CHECKOUT_SESSION_ID}';
+            $cancelUrl = $request->cancel_url
+                ?: rtrim(config('app.url'), '/') . '/api/rider/stripe-wallet-cancel';
+
+            $session = CheckoutSession::create([
+                'payment_method_types' => ['card'],
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => $currency,
+                        'product_data' => [
+                            'name' => 'Rider wallet top-up',
+                        ],
+                        'unit_amount' => (int) round($amount * 100),
+                    ],
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment',
+                'success_url' => $successUrl,
+                'cancel_url' => $cancelUrl,
+                'metadata' => [
+                    'payment_for' => 'rider_wallet_topup',
+                    'rider_id' => (string) auth('rider')->user()->id,
+                    'amount' => (string) $amount,
+                    'currency' => strtoupper($currency),
+                ],
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe wallet payment URL created successfully',
+                'checkout_url' => $session->url,
+                'session_id' => $session->id,
+                'publishable_key' => $setting->stripe_key,
+                'amount' => $amount,
+                'currency' => strtoupper($currency),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function confirmWalletStripePayment(Request $request)
+    {
+        try {
+            $request->validate([
+                'session_id' => 'required|string',
+            ]);
+
+            $setting = CompanySetting::orderBy('id', 'DESC')->first();
+
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.',
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.',
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+            $session = CheckoutSession::retrieve($request->session_id);
+
+            if (($session->payment_status ?? null) !== 'paid') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe wallet payment is not completed yet.',
+                    'payment_status' => $session->payment_status ?? null,
+                ], 422);
+            }
+
+            $metadata = $session->metadata;
+            $riderId = (string) auth('rider')->user()->id;
+
+            if (($metadata->payment_for ?? null) !== 'rider_wallet_topup') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session is not a rider wallet top-up payment.',
+                ], 400);
+            }
+
+            if (($metadata->rider_id ?? null) !== $riderId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session does not belong to this rider.',
+                ], 403);
+            }
+
+            $amount = round((float) ($metadata->amount ?? 0), 2);
+            if ($amount <= 0) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe wallet top-up amount is invalid.',
+                ], 422);
+            }
+
+            $result = DB::transaction(function () use ($riderId, $amount, $session) {
+                $rider = CompanyRider::where('id', $riderId)->lockForUpdate()->firstOrFail();
+                $transaction = WalletTransaction::where('user_type', 'user')
+                    ->where('user_id', $riderId)
+                    ->where('payment_provider', 'stripe')
+                    ->where('payment_reference', $session->id)
+                    ->first();
+
+                if ($transaction) {
+                    return [
+                        'already_confirmed' => true,
+                        'wallet_balance' => round((float) $rider->wallet_balance, 2),
+                        'transaction' => $transaction,
+                    ];
+                }
+
+                $rider->wallet_balance = round((float) ($rider->wallet_balance ?? 0) + $amount, 2);
+                $rider->save();
+
+                $transaction = new WalletTransaction;
+                $transaction->user_type = 'user';
+                $transaction->user_id = $riderId;
+                $transaction->type = 'add';
+                $transaction->amount = $amount;
+                $transaction->comment = 'Stripe wallet top-up';
+                $transaction->payment_provider = 'stripe';
+                $transaction->payment_reference = $session->id;
+                $transaction->save();
+
+                return [
+                    'already_confirmed' => false,
+                    'wallet_balance' => round((float) $rider->wallet_balance, 2),
+                    'transaction' => $transaction,
+                ];
+            });
+
+            return response()->json([
+                'success' => 1,
+                'message' => $result['already_confirmed']
+                    ? 'Stripe wallet payment already confirmed'
+                    : 'Wallet amount added successfully through Stripe',
+                'data' => [
+                    'amount_added' => $amount,
+                    'wallet_balance' => $result['wallet_balance'],
+                    'currency' => strtoupper((string) ($setting->company_currency ?: 'USD')),
+                    'already_confirmed' => $result['already_confirmed'],
+                    'transaction' => $result['transaction'],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 

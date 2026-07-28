@@ -23,6 +23,16 @@ class CompanyBooking extends Model
         'reminder_minutes' => 'integer',
         'reminder_sent_at' => 'datetime',
         'bidding_fallback' => 'boolean',
+        'commission_rate' => 'decimal:2',
+        'commission_amount' => 'decimal:2',
+        'driver_net_amount' => 'decimal:2',
+        'commission_snapshot_at' => 'datetime',
+        'commission_wallet_debited_at' => 'datetime',
+        'commission_reserved_rate' => 'decimal:2',
+        'commission_reserved_fixed_amount' => 'decimal:2',
+        'commission_reserved_amount' => 'decimal:2',
+        'commission_reserved_at' => 'datetime',
+        'commission_reservation_released_at' => 'datetime',
     ];
 
     public function getPreBookingAttribute(): bool

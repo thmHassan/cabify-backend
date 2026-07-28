@@ -45,6 +45,11 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
+    'exchange_rate' => [
+        'api_key' => env('EXCHANGE_RATE_API_KEY'),
+        'base_url' => env('EXCHANGE_RATE_API_BASE_URL', 'https://v6.exchangerate-api.com/v6'),
+    ],
+
     'mapify' => [
         'base_url' => env('MAPIFY_BASE_URL', 'https://client.mapifyit.com'),
         'api_token' => env('MAPIFY_API_TOKEN'),

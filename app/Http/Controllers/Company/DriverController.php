@@ -23,6 +23,7 @@ use App\Support\TenantRequestContext;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Carbon\Carbon;
 use Hash;
 
 class DriverController extends Controller
@@ -549,6 +550,28 @@ class DriverController extends Controller
                 return response()->json(['error' => 1, 'message' => "Expiry date is required for {$documentKey}."], 422);
             }
 
+            $parsedIssueDate = $this->parseDriverDocumentDate($issueDate);
+            if (filled($issueDate) && !$parsedIssueDate) {
+                return response()->json(['error' => 1, 'message' => "Issue date for {$documentKey} must be a valid date."], 422);
+            }
+
+            $parsedExpiryDate = $this->parseDriverDocumentDate($expiryDate);
+            if (filled($expiryDate) && !$parsedExpiryDate) {
+                return response()->json(['error' => 1, 'message' => "Expiry date for {$documentKey} must be a valid date."], 422);
+            }
+
+            if ($parsedIssueDate && $parsedIssueDate->isAfter(today())) {
+                return response()->json(['error' => 1, 'message' => "Issue date for {$documentKey} cannot be in the future."], 422);
+            }
+
+            if ($parsedExpiryDate && $parsedExpiryDate->isBefore(today())) {
+                return response()->json(['error' => 1, 'message' => "Expiry date for {$documentKey} cannot be in the past."], 422);
+            }
+
+            if ($parsedIssueDate && $parsedExpiryDate && !$parsedExpiryDate->isAfter($parsedIssueDate)) {
+                return response()->json(['error' => 1, 'message' => "Expiry date for {$documentKey} must be after the issue date."], 422);
+            }
+
             if ($documentType->front_photo === 'yes' && !$frontPhoto && !($genericFile && $documentType->back_photo !== 'yes' && $documentType->profile_photo !== 'yes')) {
                 return response()->json(['error' => 1, 'message' => "Front photo is required for {$documentKey}."], 422);
             }
@@ -567,6 +590,21 @@ class DriverController extends Controller
         }
 
         return null;
+    }
+
+    private function parseDriverDocumentDate($value): ?Carbon
+    {
+        if (!filled($value)) {
+            return null;
+        }
+
+        try {
+            $date = Carbon::createFromFormat('!Y-m-d', (string) $value);
+
+            return $date->toDateString() === (string) $value ? $date : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function storeCreateDriverDocuments(Request $request, CompanyDriver $driver, array $documentKeys, $requirementsByKey, array $issueDates, array $expiryDates, array $numbers): void
@@ -592,12 +630,12 @@ class DriverController extends Controller
 
             $issueDate = $this->documentValueForKey($issueDates, $documentKey, $index);
             if (filled($issueDate)) {
-                $driverDocument->has_issue_date = date('Y-m-d', strtotime((string) $issueDate));
+                $driverDocument->has_issue_date = $this->parseDriverDocumentDate($issueDate)?->toDateString();
             }
 
             $expiryDate = $this->documentValueForKey($expiryDates, $documentKey, $index);
             if (filled($expiryDate)) {
-                $driverDocument->has_expiry_date = date('Y-m-d', strtotime((string) $expiryDate));
+                $driverDocument->has_expiry_date = $this->parseDriverDocumentDate($expiryDate)?->toDateString();
             }
 
             $frontPhoto = $this->documentFileForKey($request, ['documentFrontPhotos', 'document_front_photos'], $documentKey, $index);

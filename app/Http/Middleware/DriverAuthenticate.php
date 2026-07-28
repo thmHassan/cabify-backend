@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\DriverDocumentExpiryService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -35,6 +36,14 @@ class DriverAuthenticate
 
             $request->attributes->set('driver', $driver);
 
+            $expiredDocuments = app(DriverDocumentExpiryService::class)->syncRestriction($driver);
+            if ($expiredDocuments->isNotEmpty() && !$this->isExpiryRestrictionAllowedRoute($request)) {
+                return response()->json(
+                    app(DriverDocumentExpiryService::class)->restrictionPayload($expiredDocuments),
+                    403
+                );
+            }
+
         } catch (\PHPOpenSourceSaver\JWTAuth\Exceptions\TokenExpiredException $e) {
             return response()->json(['message' => 'Token expired'], 401);
         } catch (\PHPOpenSourceSaver\JWTAuth\Exceptions\TokenInvalidException $e) {
@@ -44,5 +53,29 @@ class DriverAuthenticate
         }
 
         return $next($request);
+    }
+
+    private function isExpiryRestrictionAllowedRoute(Request $request): bool
+    {
+        return $request->is([
+            'api/driver/document-list',
+            'api/driver/document-upload',
+            'api/driver/get-profile',
+            'api/driver/update-profile',
+            'api/driver/store-token',
+            'api/driver/logout',
+            'api/driver/get-mobile-setting',
+            'api/driver/policies',
+            'api/driver/faqs',
+            'driver/document-list',
+            'driver/document-upload',
+            'driver/get-profile',
+            'driver/update-profile',
+            'driver/store-token',
+            'driver/logout',
+            'driver/get-mobile-setting',
+            'driver/policies',
+            'driver/faqs',
+        ]);
     }
 }

@@ -9,6 +9,7 @@ use App\Http\Controllers\SuperAdmin\DocumentController;
 use App\Http\Controllers\SuperAdmin\VehicleTypeController;
 use App\Http\Controllers\SuperAdmin\TenantMapConfigurationController;
 use App\Http\Controllers\SuperAdmin\HomeController;
+use App\Http\Controllers\SuperAdmin\AppMaintenanceController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
 use App\Http\Controllers\SuperAdmin\PlotController;
@@ -41,6 +42,7 @@ use App\Http\Controllers\Rider\EmergencyContactController as RiderEmergencyConta
 use App\Http\Controllers\Rider\SettingController as RiderSettingController;
 use App\Http\Controllers\Rider\TicketController as RiderTicketController;
 use App\Http\Controllers\Rider\BookingController as RiderBookingController;
+use App\Http\Controllers\Rider\NearbyDriverController as RiderNearbyDriverController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Broadcast;
 
@@ -64,9 +66,10 @@ Broadcast::routes([
 ]);
 
 Route::get('/test', function () {
-    return response()->json(['message' => 'Hello World']);
+    return response()->json(['message' => 'Health Check OK', 'status' => 200]);
 });
 
+Route::get('/app/maintenance-status', [AppMaintenanceController::class, 'publicStatus']);
 Route::get('/test-notification', [CompanyController::class, 'sendNotification']);
 Route::post('/super-admin/stripe-webhook', [CompanyController::class, 'stripeWebhook']);
 Route::post('/super-admin/subscription-update-webhook', [CompanyController::class, 'subscriptionUpdateWebhook']);
@@ -79,6 +82,7 @@ Route::post('/company/forgot-password', [CompanyController::class, 'forgotPasswo
 Route::post('/company/reset-password', [CompanyController::class, 'resetPassword']);
 Route::post('/driver/stripe-package-webhook/{tenant}', [DriverSettingController::class, 'stripePackageWebhook']);
 Route::post('/driver/stripe-wallet-webhook/{tenant}', [DriverSettingController::class, 'stripePackageWebhook']);
+Route::post('/rider/stripe-wallet-webhook/{tenant}', [DriverSettingController::class, 'stripePackageWebhook']);
 Route::get('/driver/verify-company-code', [DriverAuthController::class, 'verifyCompanyCode']);
 
 Route::group(['middleware' => ['tenant.db']], function () {
@@ -97,6 +101,9 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/usage-monitoring', [HomeController::class, 'usageMonitoring']);
         Route::get('/super-admin/api-keys', [HomeController::class, 'getAPIKeys']);
         Route::post('/super-admin/api-keys', [HomeController::class, 'storeAPIKeys']);
+        Route::get('/super-admin/app-maintenance', [AppMaintenanceController::class, 'show']);
+        Route::post('/super-admin/app-maintenance', [AppMaintenanceController::class, 'update']);
+        Route::get('/super-admin/currency-conversion-rate', [HomeController::class, 'currencyConversionRate']);
         Route::get('/super-admin/payment-reminder-list', [HomeController::class, 'paymentReminderList']);
         Route::post('/super-admin/send-reminder', [HomeController::class, 'sendReminder']);
 
@@ -464,13 +471,17 @@ Route::group(['middleware' => ['tenant.db']], function () {
         Route::get('/rider/faqs', [RiderSettingController::class, 'faqs']);
         Route::get('/rider/get-api-keys', [RiderSettingController::class, 'getApiKeys']);
         Route::post('/rider/add-wallet-amount', [RiderSettingController::class, 'addWalletAmount']);
+        Route::get('/rider/wallet-balance', [RiderSettingController::class, 'walletBalance']);
         Route::get('/rider/balance-transaction', [RiderSettingController::class, 'balanceTransaction']);
+        Route::post('/rider/create-wallet-stripe-payment-url', [RiderSettingController::class, 'createWalletStripePaymentUrl']);
+        Route::post('/rider/confirm-wallet-stripe-payment', [RiderSettingController::class, 'confirmWalletStripePayment']);
         Route::get('/rider/vehicle-list', [RiderSettingController::class, 'vehicleList']);
         Route::post('/rider/send-message', [RiderSettingController::class, 'sendMessage']);
         Route::get('/rider/message-list', [RiderSettingController::class, 'messageList']);
         Route::get('/rider/message-history', [RiderSettingController::class, 'messageHistory']);
         Route::get('/rider/notification-list', [RiderSettingController::class, 'notificationList']);
         Route::get('/rider/get-mobile-setting', [RiderSettingController::class, 'getMobileSetting']);
+        Route::get('/rider/nearby-drivers', [RiderNearbyDriverController::class, 'index']);
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
@@ -483,6 +494,9 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::get('/rider/completed-ride', [RiderBookingController::class, 'completedRide']);
         Route::get('/rider/change-booking-payment-status', [RiderBookingController::class, 'changeBookingPaymentStatus']);
+        Route::post('/rider/pay-ride-from-wallet', [RiderBookingController::class, 'payRideFromWallet']);
+        Route::post('/rider/create-ride-stripe-payment-url', [RiderBookingController::class, 'createRideStripePaymentUrl']);
+        Route::post('/rider/confirm-ride-stripe-payment', [RiderBookingController::class, 'confirmRideStripePayment']);
         Route::get('/rider/cancelled-ride', [RiderBookingController::class, 'cancelledRide']);
         Route::get('/rider/upcoming-ride', [RiderBookingController::class, 'upcomingRide']);
         Route::get('/rider/current-ride', [RiderBookingController::class, 'currentRide']);

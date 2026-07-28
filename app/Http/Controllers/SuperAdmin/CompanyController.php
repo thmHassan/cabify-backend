@@ -407,9 +407,34 @@ class CompanyController extends Controller
                 'city' => 'max:255',
                 'maps_api' => ['nullable', Rule::in(MapsApi::allowedInputValues())],
                 'billing_mode' => 'nullable|in:one_time,auto_renew',
+                'convert_wallet_balances' => 'nullable|boolean',
+                'wallet_conversion_rate' => 'nullable|numeric|min:0.000001',
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
+            $oldCurrency = strtoupper((string) ($tenant->currency ?? ''));
+            $newCurrency = $request->filled('currency') ? strtoupper((string) $request->currency) : $oldCurrency;
+            $currencyWillChange = $oldCurrency !== '' && $newCurrency !== '' && $oldCurrency !== $newCurrency;
+            $walletConversionSummary = null;
+
+            if ($currencyWillChange) {
+                $hasWalletBalances = $this->tenantHasWalletBalances($tenant);
+
+                if ($hasWalletBalances && !$request->boolean('convert_wallet_balances')) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => "Wallet balances exist in {$oldCurrency}. Send convert_wallet_balances=true and wallet_conversion_rate to change currency to {$newCurrency}.",
+                    ], 422);
+                }
+
+                if ($request->boolean('convert_wallet_balances') && !$request->filled('wallet_conversion_rate')) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'wallet_conversion_rate is required when converting wallet balances.',
+                    ], 422);
+                }
+            }
+
             $previousStatus = CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
             $newSubscriptionCreate = 0;
 
@@ -555,6 +580,16 @@ class CompanyController extends Controller
             $tenant->password = (isset($request->password) && $request->password != NULL) ? Hash::make($request->password) : $tenant->password;
             // $this->syncTenantData($tenant);
             $tenant->save();
+
+            if ($currencyWillChange && $request->boolean('convert_wallet_balances')) {
+                $walletConversionSummary = $this->convertTenantWalletBalances(
+                    $tenant,
+                    $oldCurrency,
+                    $newCurrency,
+                    (float) $request->wallet_conversion_rate
+                );
+            }
+
             app(TenantMapConfigurationManager::class)->syncFromCompanyRequest($tenant->id, $request);
 
             if(isset($request->picture) && $request->picture != NULL && $tenant->picture && file_exists($tenant->picture)) {
@@ -621,7 +656,7 @@ class CompanyController extends Controller
                 $socketNotify = CompanyInactiveService::handle($tenant->id, $previousStatus);
             }
 
-            $this->notifyCompanyProfileChanged($request, $tenant);
+            $this->notifyCompanyProfileChanged($request, $tenant, $walletConversionSummary);
 
             return response()->json([
                 'success' => 1,
@@ -629,6 +664,7 @@ class CompanyController extends Controller
                 'tenant' => $tenant,
                 'newSubscriptionCreate' => $newSubscriptionCreate,
                 'socket_notify' => $socketNotify,
+                'wallet_conversion' => $walletConversionSummary,
             ]);
         }
         catch(\Exception $e){
@@ -639,7 +675,7 @@ class CompanyController extends Controller
         }
     }
 
-    private function notifyCompanyProfileChanged(Request $request, Tenant $tenant): void
+    private function notifyCompanyProfileChanged(Request $request, Tenant $tenant, ?array $walletConversion = null): void
     {
         try {
             $profile = [
@@ -665,6 +701,7 @@ class CompanyController extends Controller
                     'data' => [
                         'success' => 1,
                         'data' => $profile,
+                        'wallet_conversion' => $walletConversion,
                     ],
                 ]
             );
@@ -674,6 +711,142 @@ class CompanyController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function tenantHasWalletBalances(Tenant $tenant): bool
+    {
+        return (bool) $tenant->run(function () {
+            $hasDriverBalance = false;
+            $hasRiderBalance = false;
+
+            if (\Schema::hasTable('drivers') && \Schema::hasColumn('drivers', 'wallet_balance')) {
+                $hasDriverBalance = \DB::table('drivers')
+                    ->whereRaw("CAST(COALESCE(NULLIF(wallet_balance, ''), '0') AS DECIMAL(16,4)) != 0")
+                    ->exists();
+            }
+
+            if (\Schema::hasTable('users') && \Schema::hasColumn('users', 'wallet_balance')) {
+                $hasRiderBalance = \DB::table('users')
+                    ->whereRaw("CAST(COALESCE(NULLIF(wallet_balance, ''), '0') AS DECIMAL(16,4)) != 0")
+                    ->exists();
+            }
+
+            return $hasDriverBalance || $hasRiderBalance;
+        });
+    }
+
+    private function convertTenantWalletBalances(Tenant $tenant, string $oldCurrency, string $newCurrency, float $rate): array
+    {
+        if ($rate <= 0) {
+            throw new \InvalidArgumentException('Wallet conversion rate must be greater than zero.');
+        }
+
+        return $tenant->run(function () use ($tenant, $oldCurrency, $newCurrency, $rate) {
+            return \DB::transaction(function () use ($tenant, $oldCurrency, $newCurrency, $rate) {
+                $summary = [
+                    'old_currency' => $oldCurrency,
+                    'new_currency' => $newCurrency,
+                    'rate' => $rate,
+                    'drivers_converted' => 0,
+                    'riders_converted' => 0,
+                ];
+
+                $summary['drivers_converted'] = $this->convertWalletTable(
+                    'drivers',
+                    'driver',
+                    $tenant->id,
+                    $oldCurrency,
+                    $newCurrency,
+                    $rate
+                );
+
+                $summary['riders_converted'] = $this->convertWalletTable(
+                    'users',
+                    'user',
+                    $tenant->id,
+                    $oldCurrency,
+                    $newCurrency,
+                    $rate
+                );
+
+                return $summary;
+            });
+        });
+    }
+
+    private function convertWalletTable(string $table, string $userType, string $tenantId, string $oldCurrency, string $newCurrency, float $rate): int
+    {
+        if (!\Schema::hasTable($table) || !\Schema::hasColumn($table, 'wallet_balance')) {
+            return 0;
+        }
+
+        $rows = \DB::table($table)
+            ->select('id', 'wallet_balance')
+            ->whereRaw("CAST(COALESCE(NULLIF(wallet_balance, ''), '0') AS DECIMAL(16,4)) != 0")
+            ->lockForUpdate()
+            ->get();
+
+        $converted = 0;
+        foreach ($rows as $row) {
+            $oldBalance = (float) ($row->wallet_balance ?? 0);
+            $newBalance = round($oldBalance * $rate, 2);
+
+            \DB::table($table)->where('id', $row->id)->update([
+                'wallet_balance' => $newBalance,
+                'updated_at' => now(),
+            ]);
+
+            $this->createWalletCurrencyConversionLog(
+                $userType,
+                (int) $row->id,
+                $tenantId,
+                $oldCurrency,
+                $newCurrency,
+                $rate,
+                $oldBalance,
+                $newBalance
+            );
+
+            $converted++;
+        }
+
+        return $converted;
+    }
+
+    private function createWalletCurrencyConversionLog(
+        string $userType,
+        int $userId,
+        string $tenantId,
+        string $oldCurrency,
+        string $newCurrency,
+        float $rate,
+        float $oldBalance,
+        float $newBalance
+    ): void {
+        if (!\Schema::hasTable('wallet_transactions')) {
+            return;
+        }
+
+        $columns = \Schema::getColumnListing('wallet_transactions');
+        $payload = [
+            'user_type' => $userType,
+            'user_id' => $userId,
+            'type' => $newBalance >= $oldBalance ? 'add' : 'deduct',
+            'amount' => abs($newBalance - $oldBalance),
+            'comment' => "Wallet currency converted from {$oldBalance} {$oldCurrency} to {$newBalance} {$newCurrency} at rate {$rate}.",
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        if (in_array('payment_provider', $columns, true)) {
+            $payload['payment_provider'] = 'currency_conversion';
+        }
+
+        if (in_array('payment_reference', $columns, true)) {
+            $payload['payment_reference'] = 'currency:' . $tenantId . ':' . $userType . ':' . $userId . ':' . $oldCurrency . ':' . $newCurrency . ':' . now()->format('YmdHisv');
+        }
+
+        \DB::table('wallet_transactions')->insert(array_intersect_key($payload, array_flip($columns)));
     }
 
     // private function syncTenantData(Tenant $tenant): void

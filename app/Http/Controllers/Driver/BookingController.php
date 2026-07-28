@@ -26,6 +26,9 @@ use App\Models\WalletTransaction;
 use App\Models\CompanySendNewRide;
 use App\Models\BookingDispatchCycle;
 use App\Services\SocketApiUrlResolver;
+use App\Services\RideCommissionSnapshotService;
+use App\Services\CashRideCommissionService;
+use App\Services\CashRideCommissionReservationService;
 use App\Support\TenantDatabaseConfigurator;
 use App\Support\NearestDispatch;
 use App\Support\PlotDispatch;
@@ -247,19 +250,50 @@ class BookingController extends Controller
     {
         try {
             $request->validate([
-                'booking_id' => 'required',
-                'rating' => 'required'
+                'booking_id' => 'required|integer',
+                'rating' => 'required|numeric|between:1,5',
+                'note' => 'nullable|string|max:1000',
+                'comment' => 'nullable|string|max:1000',
             ]);
 
-            $rating = new CompanyRating;
-            $rating->booking_id = $request->booking_id;
-            $rating->user_type = "driver";
+            $booking = CompanyBooking::where('id', $request->booking_id)
+                ->where('driver', auth('driver')->user()->id)
+                ->first();
+
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Completed ride not found',
+                ], 404);
+            }
+
+            if ($booking->booking_status !== 'completed') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'The rider can only be rated after the ride is completed',
+                ], 422);
+            }
+
+            if (!$booking->user_id) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This ride does not have a rider to rate',
+                ], 422);
+            }
+
+            $rating = CompanyRating::firstOrNew([
+                'booking_id' => $booking->id,
+                'user_type' => 'user',
+            ]);
+            $rating->user_id = $booking->user_id;
             $rating->rating = $request->rating;
+            $rating->comment = $request->input('note', $request->input('comment'));
             $rating->save();
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Customer ratings given successfully'
+                'message' => 'Rider rating saved successfully',
+                'rating' => $rating,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -490,6 +524,7 @@ class BookingController extends Controller
                 $booking->cancel_reason = $request->cancel_reason;
                 $booking->cancelled_by = 'driver';
                 $booking->save();
+                app(CashRideCommissionReservationService::class)->release($booking);
 
                 Http::withHeaders([
                     'Authorization' => 'Bearer ' . config('services.node_socket.internal_secret'),
@@ -583,6 +618,10 @@ class BookingController extends Controller
 
     public function acceptRide(Request $request)
     {
+        $booking = null;
+        $commissionReservation = null;
+        $rideClaimed = false;
+
         try {
             $booking = CompanyBooking::where("id", $request->ride_id)->with('userDetail')->first();
 
@@ -659,6 +698,15 @@ class BookingController extends Controller
                 : $booking->booking_amount;
 
             $newStatus = $this->resolveStatusAfterDriverAccept($booking, $isNearestDispatchOffer);
+
+            $commissionReservation = app(CashRideCommissionReservationService::class)
+                ->reserve($booking, (int) $driverId, (float) $bookingAmount);
+            if (!$commissionReservation['allowed']) {
+                return response()->json(
+                    app(CashRideCommissionReservationService::class)->failure($commissionReservation),
+                    422
+                );
+            }
 
             $claimed = DB::transaction(function () use ($request, $booking, $driverId, $bookingAmount, $newStatus, $isNearestDispatchOffer, $isPlotDispatchOffer, $isPlotBiddingFallback) {
                 if ($isPlotDispatchOffer) {
@@ -752,6 +800,10 @@ class BookingController extends Controller
             });
 
             if (!$claimed) {
+                if ($commissionReservation['created']) {
+                    app(CashRideCommissionReservationService::class)->release($booking);
+                }
+
                 return response()->json([
                     'error' => 1,
                     'message' => ($isPlotDispatchOffer || $isPlotBiddingFallback)
@@ -759,6 +811,8 @@ class BookingController extends Controller
                         : 'Ride already accepted by another driver',
                 ], 409);
             }
+
+            $rideClaimed = true;
 
             $booking->refresh();
             $driver = CompanyDriver::where("id", $driverId)->first();
@@ -859,8 +913,13 @@ class BookingController extends Controller
                 'success' => 1,
                 'message' => 'Ride accepted successfully',
                 'booking_status' => $booking->booking_status,
+                'commission_reservation' => $commissionReservation,
             ]);
         } catch (\Exception $e) {
+            if (!$rideClaimed && $booking && ($commissionReservation['created'] ?? false)) {
+                app(CashRideCommissionReservationService::class)->release($booking);
+            }
+
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -1569,6 +1628,8 @@ class BookingController extends Controller
             $booking->booking_status = "completed";
             $booking->driver_dropoff_time = now()->format('Y-m-d H:i:s');
             $booking->save();
+            $booking = app(RideCommissionSnapshotService::class)->snapshot($booking);
+            $commissionWallet = app(CashRideCommissionService::class)->deduct($booking);
 
             $driverId = $booking->driver ?: auth('driver')->user()->id;
 
@@ -1725,7 +1786,12 @@ class BookingController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Ride completed successfully'
+                'message' => 'Ride completed successfully',
+                'data' => [
+                    'booking_id' => $booking->id,
+                    'payment_method' => $booking->payment_method,
+                    'commission' => $commissionWallet,
+                ],
             ]);
         } catch (\Exception $e) {
             return response()->json([

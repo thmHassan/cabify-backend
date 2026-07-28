@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Rider;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\CompanyRider;
+use App\Models\CompanyBooking;
 use Carbon\Carbon;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use App\Models\CompanyToken;
@@ -460,6 +461,9 @@ class AuthController extends Controller
     public function getProfile(Request $request){
         try{
             $user = auth("rider")->user();
+            $user->total_completed_trips = CompanyBooking::where("user_id", $user->id)
+                ->where("booking_status", "completed")
+                ->count();
 
             return response()->json([
                 'success' => 1,

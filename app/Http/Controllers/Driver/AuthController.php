@@ -18,6 +18,7 @@ use App\Models\CompanyDocumentType;
 use App\Models\CompanyVehicleType;
 use App\Models\DriverDocument;
 use App\Services\DriverSessionService;
+use App\Services\DriverDocumentExpiryService;
 use App\Services\FCMService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
@@ -368,6 +369,8 @@ class AuthController extends Controller
             return $this->sendOtpRequiredResponse($user, $request);
         }
 
+        $expiryService = app(DriverDocumentExpiryService::class);
+        $expiredDocuments = $expiryService->syncRestriction($user);
         $token = $this->issueSingleSessionToken($user);
         $currentAuthVersion = (int) ($user->fresh()?->auth_version ?? $user->auth_version ?? 0);
 
@@ -388,13 +391,26 @@ class AuthController extends Controller
 
         $profileData = $this->formatDriverProfileData($user);
 
-        return response()->json([
+        $response = [
             'success' => 1,
-            'message' => 'Login successful',
+            'message' => $expiredDocuments->isEmpty()
+                ? 'Login successful'
+                : 'Login successful, but your account is restricted until your expired document is renewed and approved.',
             'token' => $token,
             'data' => $profileData,
             'user' => $profileData,
-        ]);
+            'account_restricted' => $expiredDocuments->isNotEmpty(),
+        ];
+
+        if ($expiredDocuments->isNotEmpty()) {
+            $response = array_merge($response, $expiryService->restrictionPayload($expiredDocuments));
+            $response['success'] = 1;
+            $response['token'] = $token;
+            $response['data'] = $profileData;
+            $response['user'] = $profileData;
+        }
+
+        return response()->json($response);
     }
 
     private function issueSingleSessionToken(CompanyDriver $user): string

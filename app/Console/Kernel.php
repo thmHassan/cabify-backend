@@ -24,6 +24,10 @@ class Kernel extends ConsoleKernel
         $schedule->command('app:make-cancel-ride-zero')
                  ->daily()
                  ->withoutOverlapping();
+
+        $schedule->command('app:process-driver-document-expiries')
+                 ->dailyAt('08:00')
+                 ->withoutOverlapping();
     }
 
     /**

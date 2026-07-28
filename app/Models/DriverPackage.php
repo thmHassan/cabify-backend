@@ -18,6 +18,8 @@ class DriverPackage extends Model
         'start_date',
         'expire_date',
         'commission_per',
+        'commission_type',
+        'commission_value',
         'post_paid_amount',
         'package_top_up_id',
         'package_top_up_name',

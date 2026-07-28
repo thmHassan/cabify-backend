@@ -13,6 +13,7 @@ use App\Models\CompanyFAQ;
 use App\Models\CompanyChat;
 use App\Models\CompanyBooking;
 use App\Models\CompanyUser;
+use App\Models\CompanyRider;
 use App\Models\TenantUser;
 use App\Models\CompanyNotification;
 use App\Models\PackageSetting;
@@ -492,24 +493,29 @@ class SettingController extends Controller
                 ]);
             }
             else{
-                if($user->wallet_balance < $request->post_paid_amount){
+                $packageSetting = PackageSetting::findOrFail($request->package_top_up_id);
+                $packageAmount = (float) $packageSetting->package_price;
+
+                if($user->wallet_balance < $packageAmount){
                     return response()->json([
                         'error' => 1,
                         'message' => 'Your wallet balance is not sufficient' 
                     ], 400);
                 }
-                $user->wallet_balance -= $request->post_paid_amount;
+                $user->wallet_balance -= $packageAmount;
                 $user->save();
 
-                $add = $request->days;
-                if($request->package_duration == "day"){
-                    $add = $request->days;
+                $days = (int) $packageSetting->package_type;
+                $duration = $packageSetting->package_duration;
+                $add = $days;
+                if($duration == "day"){
+                    $add = $days;
                 }
-                elseif($request->package_duration == "week"){
-                    $add = $request->days * 7;
+                elseif($duration == "week"){
+                    $add = $days * 7;
                 }
-                elseif($request->package_duration == "month"){
-                    $add = $request->days * 30;
+                elseif($duration == "month"){
+                    $add = $days * 30;
                 }
     
                 DriverPackage::create([
@@ -517,9 +523,14 @@ class SettingController extends Controller
                     'package_type' => 'packages_postpaid',
                     'start_date' => now()->toDateString(),
                     'expire_date' => now()->addDays($add)->toDateString(),
-                    'post_paid_amount' => $request->post_paid_amount,
+                    'post_paid_amount' => $packageAmount,
                     'package_top_up_id' => $request->package_top_up_id,
-                    'package_top_up_name' => $request->package_top_up_name,
+                    'package_top_up_name' => $packageSetting->package_name,
+                    'commission_type' => $packageSetting->commission_type,
+                    'commission_value' => $packageSetting->commission_value,
+                    'commission_per' => $packageSetting->commission_type === 'percentage'
+                        ? $packageSetting->commission_value
+                        : null,
                 ]);
             }
 
@@ -527,7 +538,7 @@ class SettingController extends Controller
             $wallet->user_type = "driver";
             $wallet->user_id = $driverId;
             $wallet->type = 'deduct';
-            $wallet->amount = $request->package_type == "ride_count_price" ? $packageData->package_amount : $request->post_paid_amount;
+            $wallet->amount = $request->package_type == "ride_count_price" ? $packageData->package_amount : $packageAmount;
             $wallet->comment = "Package purchase";
             $wallet->save();
 
@@ -619,6 +630,8 @@ class SettingController extends Controller
                     'amount' => (string) $package['amount'],
                     'days' => (string) ($package['days'] ?? ''),
                     'package_duration' => (string) ($package['package_duration'] ?? ''),
+                    'commission_type' => (string) ($package['commission_type'] ?? ''),
+                    'commission_value' => (string) ($package['commission_value'] ?? ''),
                 ],
             ]);
 
@@ -773,6 +786,10 @@ class SettingController extends Controller
                 'amount' => (float) ($metadata->amount ?? 0),
                 'days' => $metadata->days !== '' ? (int) $metadata->days : null,
                 'package_duration' => $metadata->package_duration ?: null,
+                'commission_type' => ($metadata->commission_type ?? '') ?: null,
+                'commission_value' => ($metadata->commission_value ?? '') !== ''
+                    ? (float) $metadata->commission_value
+                    : null,
             ];
 
             $this->activateStripeDriverPackage($driverId, $package, $session->id);
@@ -902,6 +919,28 @@ class SettingController extends Controller
             }
 
             $metadata = $session->metadata;
+
+            if (($metadata->payment_for ?? null) === 'rider_wallet_topup') {
+                $riderId = (string) ($metadata->rider_id ?? '');
+                if ($riderId === '') {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Stripe session is missing rider metadata.',
+                    ], 400);
+                }
+
+                $this->activateStripeRiderWalletTopUp(
+                    $riderId,
+                    (float) ($metadata->amount ?? 0),
+                    $session->id
+                );
+
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Stripe rider wallet webhook processed successfully.',
+                ]);
+            }
+
             $driverId = (string) ($metadata->driver_id ?? '');
 
             if ($driverId === '') {
@@ -934,6 +973,10 @@ class SettingController extends Controller
                     'amount' => (float) ($metadata->amount ?? 0),
                     'days' => ($metadata->days ?? '') !== '' ? (int) $metadata->days : null,
                     'package_duration' => ($metadata->package_duration ?? '') ?: null,
+                    'commission_type' => ($metadata->commission_type ?? '') ?: null,
+                    'commission_value' => ($metadata->commission_value ?? '') !== ''
+                        ? (float) $metadata->commission_value
+                        : null,
                 ];
 
                 $this->activateStripeDriverPackage($driverId, $package, $session->id);
@@ -981,14 +1024,18 @@ class SettingController extends Controller
             ];
         }
 
+        $packageData = PackageSetting::where('id', $request->package_top_up_id)->firstOrFail();
+
         return [
             'package_type' => 'packages_postpaid',
-            'package_top_up_id' => $request->package_top_up_id,
-            'package_top_up_name' => $request->package_top_up_name,
-            'amount' => (float) $request->post_paid_amount,
-            'days' => (int) $request->days,
-            'package_duration' => $request->package_duration,
-            'name' => $request->package_top_up_name,
+            'package_top_up_id' => $packageData->id,
+            'package_top_up_name' => $packageData->package_name,
+            'amount' => (float) $packageData->package_price,
+            'days' => (int) $packageData->package_type,
+            'package_duration' => $packageData->package_duration,
+            'name' => $packageData->package_name,
+            'commission_type' => $packageData->commission_type,
+            'commission_value' => $packageData->commission_value,
         ];
     }
 
@@ -1013,6 +1060,12 @@ class SettingController extends Controller
                     'package_top_up_id' => $package['package_top_up_id'],
                 ]);
             } else {
+                if (!array_key_exists('commission_value', $package) || $package['commission_value'] === null) {
+                    $packageSetting = PackageSetting::find($package['package_top_up_id']);
+                    $package['commission_type'] = $packageSetting?->commission_type;
+                    $package['commission_value'] = $packageSetting?->commission_value;
+                }
+
                 $add = $package['days'];
                 if ($package['package_duration'] == "week") {
                     $add = $package['days'] * 7;
@@ -1028,6 +1081,11 @@ class SettingController extends Controller
                     'post_paid_amount' => $package['amount'],
                     'package_top_up_id' => $package['package_top_up_id'],
                     'package_top_up_name' => $package['package_top_up_name'],
+                    'commission_type' => $package['commission_type'] ?? null,
+                    'commission_value' => $package['commission_value'] ?? null,
+                    'commission_per' => ($package['commission_type'] ?? null) === 'percentage'
+                        ? ($package['commission_value'] ?? null)
+                        : null,
                 ]);
             }
 
@@ -1104,6 +1162,39 @@ class SettingController extends Controller
                 'amount' => (string) $amount,
             ]
         );
+    }
+
+    private function activateStripeRiderWalletTopUp(string $riderId, float $amount, string $sessionId): void
+    {
+        if ($amount <= 0) {
+            throw new \RuntimeException('Stripe rider wallet top-up amount is invalid.');
+        }
+
+        DB::transaction(function () use ($riderId, $amount, $sessionId) {
+            $rider = CompanyRider::where('id', $riderId)->lockForUpdate()->firstOrFail();
+            $alreadyProcessed = WalletTransaction::where('user_type', 'user')
+                ->where('user_id', $riderId)
+                ->where('payment_provider', 'stripe')
+                ->where('payment_reference', $sessionId)
+                ->exists();
+
+            if ($alreadyProcessed) {
+                return;
+            }
+
+            $rider->wallet_balance = round((float) ($rider->wallet_balance ?? 0) + $amount, 2);
+            $rider->save();
+
+            $wallet = new WalletTransaction;
+            $wallet->user_type = 'user';
+            $wallet->user_id = $riderId;
+            $wallet->type = 'add';
+            $wallet->amount = $amount;
+            $wallet->comment = 'Stripe wallet top-up';
+            $wallet->payment_provider = 'stripe';
+            $wallet->payment_reference = $sessionId;
+            $wallet->save();
+        });
     }
 
     private function stripePaymentExists(string $driverId, string $sessionId, string $legacyDescription): bool

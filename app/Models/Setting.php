@@ -44,4 +44,11 @@ class Setting extends Model
 
         return $setting?->stripe_webhook_secret ?: config('services.stripe.webhook_secret');
     }
+
+    public static function exchangeRateApiKey(): ?string
+    {
+        $setting = static::orderBy('id', 'DESC')->first();
+
+        return $setting?->exchange_rate_api_key ?: config('services.exchange_rate.api_key');
+    }
 }

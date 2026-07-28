@@ -287,6 +287,7 @@ class HomeController extends Controller
             $settingKeys->stripe_secret = $request->stripe_secret;
             $settingKeys->stripe_key = $request->stripe_key;
             $settingKeys->stripe_webhook_secret = $request->stripe_webhook_secret;
+            $settingKeys->exchange_rate_api_key = $request->exchange_rate_api_key;
             $settingKeys->barikoi_key = $request->barikoi_key;
             $settingKeys->google_map_key = $request->google_map_key;
             $settingKeys->firebase_key = $request->firebase_key;
@@ -307,6 +308,75 @@ class HomeController extends Controller
             ], 500);
         }
     }
+
+    public function currencyConversionRate(Request $request)
+    {
+        try {
+            $request->validate([
+                'from' => 'required|string|size:3',
+                'to' => 'required|string|size:3',
+            ]);
+
+            $from = strtoupper($request->from);
+            $to = strtoupper($request->to);
+
+            if ($from === $to) {
+                return response()->json([
+                    'success' => 1,
+                    'from' => $from,
+                    'to' => $to,
+                    'rate' => 1,
+                    'message' => "1 {$from} = 1 {$to}",
+                ]);
+            }
+
+            $apiKey = Setting::exchangeRateApiKey();
+            if (!$apiKey) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'ExchangeRate API key is not configured. Add it in Super Admin API Key Management or EXCHANGE_RATE_API_KEY env.',
+                ], 500);
+            }
+
+            $baseUrl = rtrim((string) config('services.exchange_rate.base_url'), '/');
+            $response = Http::timeout(15)->get("{$baseUrl}/{$apiKey}/pair/{$from}/{$to}");
+
+            if (!$response->ok()) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Unable to fetch currency conversion rate.',
+                    'provider_status' => $response->status(),
+                ], 502);
+            }
+
+            $payload = $response->json();
+            if (($payload['result'] ?? null) !== 'success' || !isset($payload['conversion_rate'])) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => $payload['error-type'] ?? 'Currency conversion provider returned an invalid response.',
+                ], 502);
+            }
+
+            $rate = (float) $payload['conversion_rate'];
+
+            return response()->json([
+                'success' => 1,
+                'from' => $from,
+                'to' => $to,
+                'rate' => $rate,
+                'message' => "1 {$from} = {$rate} {$to}",
+                'provider' => 'exchangerate-api',
+                'time_last_update_utc' => $payload['time_last_update_utc'] ?? null,
+                'time_next_update_utc' => $payload['time_next_update_utc'] ?? null,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function paymentReminderList()
     {
         try {

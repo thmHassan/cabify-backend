@@ -13,6 +13,7 @@ use App\Models\CompanyPlot;
 use App\Models\CompanyToken;
 use App\Models\CompanyNotification;
 use App\Models\CompanySendNewRide;
+use App\Models\CompanyRider;
 use App\Services\FCMService;
 use App\Models\CompanyDriver;
 use App\Models\CompanyDispatchSystem;
@@ -21,6 +22,7 @@ use App\Jobs\SendBiddingFixedFareNotificationJob;
 use App\Jobs\AutoDispatchNearestDriverJob;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 use App\Services\AutoDispatchPlotSocketService;
 use App\Models\TenantUser;
 use App\Models\WalletTransaction;
@@ -32,7 +34,10 @@ use App\Services\SocketApiUrlResolver;
 use App\Support\MapsApi;
 use App\Support\VehicleDispatchFilter;
 use App\Services\TenantMapProviderResolver;
+use App\Services\CashRideCommissionReservationService;
 use Carbon\Carbon;
+use Stripe\Checkout\Session as CheckoutSession;
+use Stripe\Stripe;
 
 class BookingController extends Controller
 {
@@ -81,19 +86,50 @@ class BookingController extends Controller
     public function rateRide(Request $request){
         try{
             $request->validate([
-                'booking_id' => 'required',
-                'rating' => 'required'
+                'booking_id' => 'required|integer',
+                'rating' => 'required|numeric|between:1,5',
+                'note' => 'nullable|string|max:1000',
+                'comment' => 'nullable|string|max:1000',
             ]);
 
-            $rating = new CompanyRating;
-            $rating->booking_id = $request->booking_id;
-            $rating->user_type = "user";
+            $booking = CompanyBooking::where('id', $request->booking_id)
+                ->where('user_id', auth('rider')->user()->id)
+                ->first();
+
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Completed ride not found',
+                ], 404);
+            }
+
+            if ($booking->booking_status !== 'completed') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'The driver can only be rated after the ride is completed',
+                ], 422);
+            }
+
+            if (!$booking->driver) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This ride does not have a driver to rate',
+                ], 422);
+            }
+
+            $rating = CompanyRating::firstOrNew([
+                'booking_id' => $booking->id,
+                'user_type' => 'driver',
+            ]);
+            $rating->user_id = $booking->driver;
             $rating->rating = $request->rating;
+            $rating->comment = $request->input('note', $request->input('comment'));
             $rating->save();
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Driver ratings given successfully'
+                'message' => 'Driver rating saved successfully',
+                'rating' => $rating,
             ]);
         }
         catch(\Exception $e){
@@ -496,6 +532,7 @@ class BookingController extends Controller
                 'recommended_amount' => 'required',
                 'distance' => 'required',
                 'payment_method' => 'required',
+                'currency' => 'required|string|size:3',
                 'pickup_time_type' => 'nullable|in:asap,time',
                 'booking_date' => 'nullable|date_format:Y-m-d',
                 'pickup_time' => 'nullable|string',
@@ -507,10 +544,46 @@ class BookingController extends Controller
                 'dispatch_release_mode' => 'nullable|in:auto_dispatch,bidding,auto_then_bidding,manual_review',
             ]);
 
+            $unpaidRide = $this->unpaidCompletedRide((int) auth('rider')->user()->id);
+            if ($unpaidRide) {
+                $isCash = strtolower((string) $unpaidRide->payment_method) === 'cash';
+
+                return response()->json([
+                    'error' => 1,
+                    'message' => $isCash
+                        ? 'Your previous cash ride is awaiting payment confirmation.'
+                        : 'Please complete payment for your previous ride before booking another ride.',
+                    'payment_required' => true,
+                    'payment_action' => $isCash ? 'confirm_cash_with_driver' : 'pay_outstanding_ride',
+                    'data' => [
+                        'booking_id' => $unpaidRide->id,
+                        'public_booking_id' => $unpaidRide->booking_id,
+                        'amount_due' => $this->riderRideFare($unpaidRide),
+                        'currency' => $this->riderRideCurrency($unpaidRide),
+                        'payment_method' => $unpaidRide->payment_method,
+                        'payment_status' => $unpaidRide->payment_status,
+                    ],
+                ], 422);
+            }
+
 
             app(BookingLocationResolver::class)->resolveFromRequest($request);
 
             $distance = $request->distance;
+            $companyCurrency = CompanySetting::orderBy('id', 'DESC')->value('company_currency');
+            if (!$companyCurrency) {
+                $tenant = DB::connection('central')
+                    ->table('tenants')
+                    ->where('id', $request->header('database'))
+                    ->first();
+                $tenantData = json_decode($tenant->data ?? '{}');
+                $companyCurrency = $tenantData->currency ?? null;
+            }
+            $currency = $this->validateRiderBookingCurrency(
+                (string) $request->input('currency'),
+                $companyCurrency
+            );
+
             $preBookingService = app(PreBookingService::class);
             $pickupTimeType = $preBookingService->resolvePickupTimeType($request);
             $isScheduled = $pickupTimeType === 'time';
@@ -605,6 +678,7 @@ class BookingController extends Controller
             $newBooking->offered_amount = $request->offered_amount;
             $newBooking->recommended_amount = $request->recommended_amount;
             $newBooking->booking_amount = $request->offered_amount;
+            $newBooking->currency = $currency;
             $newBooking->note = $request->note;
             $newBooking->payment_method = $request->payment_method;
             $newBooking->otp = rand(1000,9999);
@@ -677,6 +751,29 @@ class BookingController extends Controller
         return $prefix . ' No driver selected - dispatching now.';
     }
 
+    private function validateRiderBookingCurrency(string $currency, ?string $companyCurrency): string
+    {
+        $currency = strtoupper(trim($currency));
+        $companyCurrency = strtoupper(trim((string) $companyCurrency));
+
+        if ($companyCurrency !== '' && $currency !== $companyCurrency) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'currency' => "Currency must match the company currency ({$companyCurrency}).",
+            ]);
+        }
+
+        return $currency;
+    }
+
+    private function unpaidCompletedRide(int $riderId): ?CompanyBooking
+    {
+        return CompanyBooking::where('user_id', $riderId)
+            ->where('booking_status', 'completed')
+            ->where('payment_status', 'pending')
+            ->orderByDesc('id')
+            ->first();
+    }
+
     public function listBids(Request $request){
         try{
             $listBid = CompanyBid::where("booking_id", $request->booking_id)->orderBy("id", "DESC")->get();
@@ -695,6 +792,10 @@ class BookingController extends Controller
     }
 
     public function changeBidStatus(Request $request){
+        $booking = null;
+        $commissionReservation = null;
+        $bidAccepted = false;
+
         try{
             $request->validate([
                 'bid_id' => 'required',
@@ -703,6 +804,39 @@ class BookingController extends Controller
 
             $bid = CompanyBid::where("id", $request->bid_id)->first();
             $booking = CompanyBooking::where("id", $bid->booking_id)->first();
+
+            $driver = null;
+            $companySetting = null;
+            if ($request->status === 'accepted') {
+                $driver = CompanyDriver::where('id', $bid->driver_id)->first();
+                $companySetting = CompanySetting::orderBy('id', 'DESC')->first();
+
+                if ($companySetting->package_type === 'ride_count_price' && $driver->ride_count_price <= 0) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Driver does not have sufficient ride count to accept this ride',
+                    ], 400);
+                }
+
+                if (
+                    $companySetting->package_type === 'per_ride_commission_topup'
+                    && $driver->wallet_balance < $companySetting->package_amount
+                ) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Driver does not have sufficient balance to accept this ride',
+                    ], 400);
+                }
+
+                $commissionReservation = app(CashRideCommissionReservationService::class)
+                    ->reserve($booking, (int) $driver->id, (float) $bid->amount);
+                if (!$commissionReservation['allowed']) {
+                    return response()->json(
+                        app(CashRideCommissionReservationService::class)->failure($commissionReservation),
+                        422
+                    );
+                }
+            }
 
             $bid->status = $request->status;
             $bid->save();
@@ -713,10 +847,9 @@ class BookingController extends Controller
                 $booking->booking_status = "ongoing";
                 $booking->driver = $bid->driver_id;
                 $booking->save();
+                $bidAccepted = true;
                 $message = "Bid accepted successfully";
 
-                $driver = CompanyDriver::where("id", $bid->driver_id)->first();
-                $companySetting = CompanySetting::orderBy("id", "DESC")->first();
                 if ($companySetting->package_type == "ride_count_price") {
                     if($driver->ride_count_price <= 0){
                         return response()->json([
@@ -807,10 +940,15 @@ class BookingController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => $message
+                'message' => $message,
+                'commission_reservation' => $commissionReservation,
             ]);
         }
         catch(\Exception $e){
+            if (!$bidAccepted && $booking && ($commissionReservation['created'] ?? false)) {
+                app(CashRideCommissionReservationService::class)->release($booking);
+            }
+
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
@@ -853,6 +991,7 @@ class BookingController extends Controller
             if(isset($booking) && $booking != NULL){
                 $booking->booking_status = "cancelled";
                 $booking->save();
+                app(CashRideCommissionReservationService::class)->release($booking);
             }
 
             $driversList = CompanySendNewRide::where("booking_id", $booking->id)->groupBy("driver_id")->pluck("driver_id");
@@ -902,6 +1041,7 @@ class BookingController extends Controller
                 $booking->cancel_reason = $request->cancel_reason;
                 $booking->cancelled_by = 'user';
                 $booking->save();
+                app(CashRideCommissionReservationService::class)->release($booking);
 
                 $driver = $booking->driver
                     ? CompanyDriver::where("id", $booking->driver)->first()
@@ -1015,6 +1155,255 @@ class BookingController extends Controller
         }
     }
 
+    public function payRideFromWallet(Request $request)
+    {
+        try {
+            $request->validate([
+                'booking_id' => 'required',
+            ]);
+
+            $booking = $this->findRiderBooking($request->booking_id);
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Ride not found for this rider.',
+                ], 404);
+            }
+
+            $result = $this->deductRiderRideFare($booking, null);
+            $status = ($result['error'] ?? 0) ? 422 : 200;
+
+            return response()->json($result, $status);
+        } catch(\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function createRideStripePaymentUrl(Request $request)
+    {
+        try {
+            $request->validate([
+                'booking_id' => 'required',
+                'amount' => 'nullable|numeric|min:1',
+                'success_url' => 'nullable|string',
+                'cancel_url' => 'nullable|string',
+            ]);
+
+            $booking = $this->findRiderBooking($request->booking_id);
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Ride not found for this rider.',
+                ], 404);
+            }
+
+            $payableError = $this->validateRiderRidePayable($booking);
+            if ($payableError) {
+                return $payableError;
+            }
+
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.'
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.'
+                ], 422);
+            }
+
+            $rider = CompanyRider::where('id', auth('rider')->user()->id)->first();
+            $fareAmount = $this->riderRideFare($booking);
+            $walletBalance = (float) ($rider->wallet_balance ?? 0);
+            $shortfallAmount = round(max(0, $fareAmount - $walletBalance), 2);
+
+            if ($shortfallAmount <= 0) {
+                return response()->json([
+                    'success' => 1,
+                    'message' => 'Wallet balance is sufficient for this ride. Call /api/rider/pay-ride-from-wallet.',
+                    'requires_topup' => false,
+                    'fare_amount' => $fareAmount,
+                    'wallet_balance' => round($walletBalance, 2),
+                    'currency' => $this->riderRideCurrency($booking, $setting),
+                ]);
+            }
+
+            $amount = $request->filled('amount') ? (float) $request->amount : $shortfallAmount;
+            if ($amount < $shortfallAmount) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Amount must be equal to or greater than the wallet shortfall.',
+                    'shortfall_amount' => $shortfallAmount,
+                    'wallet_balance' => round($walletBalance, 2),
+                    'fare_amount' => $fareAmount,
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+
+            $successUrl = $request->success_url
+                ?: rtrim(config('app.url'), '/') . '/api/rider/stripe-ride-success?session_id={CHECKOUT_SESSION_ID}';
+            $cancelUrl = $request->cancel_url
+                ?: rtrim(config('app.url'), '/') . '/api/rider/stripe-ride-cancel';
+            $currency = $this->riderRideCurrency($booking, $setting);
+
+            $session = CheckoutSession::create([
+                'payment_method_types' => ['card'],
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => strtolower($currency),
+                        'product_data' => [
+                            'name' => 'Ride payment ' . ($booking->booking_id ?: $booking->id),
+                        ],
+                        'unit_amount' => (int) round($amount * 100),
+                    ],
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment',
+                'success_url' => $successUrl,
+                'cancel_url' => $cancelUrl,
+                'metadata' => [
+                    'payment_for' => 'rider_ride_payment',
+                    'rider_id' => (string) auth('rider')->user()->id,
+                    'booking_id' => (string) $booking->id,
+                    'public_booking_id' => (string) ($booking->booking_id ?? ''),
+                    'amount' => (string) $amount,
+                    'fare_amount' => (string) $fareAmount,
+                    'currency' => $currency,
+                ],
+            ]);
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Stripe ride payment URL created successfully',
+                'checkout_url' => $session->url,
+                'session_id' => $session->id,
+                'publishable_key' => $setting->stripe_key,
+                'amount' => round($amount, 2),
+                'shortfall_amount' => $shortfallAmount,
+                'fare_amount' => $fareAmount,
+                'wallet_balance' => round($walletBalance, 2),
+                'currency' => $currency,
+            ]);
+        } catch(\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function confirmRideStripePayment(Request $request)
+    {
+        try {
+            $request->validate([
+                'session_id' => 'required|string',
+            ]);
+
+            $setting = CompanySetting::orderBy("id", "DESC")->first();
+            if (!$setting || !$setting->stripe_secret_key) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe secret key is not configured for this company.'
+                ], 500);
+            }
+
+            if (!str_starts_with((string) $setting->stripe_secret_key, 'sk_')) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe secret key configured for this company. Secret key must start with sk_test_ or sk_live_.'
+                ], 422);
+            }
+
+            Stripe::setApiKey($setting->stripe_secret_key);
+            $session = CheckoutSession::retrieve($request->session_id);
+
+            if (($session->payment_status ?? null) !== 'paid') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe ride payment is not completed yet.',
+                    'payment_status' => $session->payment_status ?? null,
+                ], 422);
+            }
+
+            $metadata = $session->metadata;
+            $riderId = (string) auth('rider')->user()->id;
+
+            if (($metadata->payment_for ?? null) !== 'rider_ride_payment' || ($metadata->rider_id ?? null) !== $riderId) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Stripe session does not belong to this rider ride payment.'
+                ], 403);
+            }
+
+            $booking = $this->findRiderBooking($metadata->booking_id ?? null);
+            if (!$booking) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Ride not found for this rider.',
+                ], 404);
+            }
+
+            $topupAmount = (float) ($metadata->amount ?? 0);
+            if ($topupAmount <= 0) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Invalid Stripe payment amount.',
+                ], 422);
+            }
+
+            $result = DB::transaction(function () use ($booking, $session, $topupAmount) {
+                $lockedBooking = CompanyBooking::where('id', $booking->id)
+                    ->where('user_id', auth('rider')->user()->id)
+                    ->lockForUpdate()
+                    ->first();
+                $rider = CompanyRider::where('id', auth('rider')->user()->id)->lockForUpdate()->first();
+
+                if (!$lockedBooking || !$rider) {
+                    throw new \Exception('Ride or rider not found.');
+                }
+
+                $existingTopup = WalletTransaction::where('user_type', 'user')
+                    ->where('user_id', $rider->id)
+                    ->where('payment_provider', 'stripe')
+                    ->where('payment_reference', $session->id)
+                    ->exists();
+
+                if (!$existingTopup) {
+                    $rider->wallet_balance = (float) ($rider->wallet_balance ?? 0) + $topupAmount;
+                    $rider->save();
+
+                    $wallet = new WalletTransaction;
+                    $wallet->user_type = 'user';
+                    $wallet->user_id = $rider->id;
+                    $wallet->type = 'add';
+                    $wallet->amount = $topupAmount;
+                    $wallet->comment = 'Stripe ride payment top-up';
+                    $wallet->payment_provider = 'stripe';
+                    $wallet->payment_reference = $session->id;
+                    $wallet->save();
+                }
+
+                return $this->deductRiderRideFareLocked($lockedBooking, $rider, $session->id);
+            });
+
+            return response()->json($result, ($result['error'] ?? 0) ? 422 : 200);
+        } catch(\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function upcomingRide(Request $request){
         try{
             $query = CompanyBooking::where("booking_status", "pending")->where("user_id", auth('rider')->user()->id);
@@ -1063,6 +1452,144 @@ class BookingController extends Controller
             $timeQuery->whereNull('pickup_time')
                 ->orWhereRaw('LOWER(TRIM(pickup_time)) != ?', ['asap']);
         });
+    }
+
+    private function findRiderBooking($bookingId): ?CompanyBooking
+    {
+        if (!$bookingId) {
+            return null;
+        }
+
+        return CompanyBooking::where('user_id', auth('rider')->user()->id)
+            ->where(function ($query) use ($bookingId) {
+                $query->where('id', $bookingId)
+                    ->orWhere('booking_id', $bookingId);
+            })
+            ->first();
+    }
+
+    private function validateRiderRidePayable(CompanyBooking $booking)
+    {
+        if ($booking->booking_status !== 'completed') {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Ride payment can be completed after the ride is completed.',
+                'booking_status' => $booking->booking_status,
+            ], 422);
+        }
+
+        if ($booking->payment_status === 'completed') {
+            return response()->json([
+                'success' => 1,
+                'message' => 'Ride payment is already completed.',
+                'payment_status' => 'completed',
+                'booking_id' => $booking->id,
+                'public_booking_id' => $booking->booking_id,
+            ]);
+        }
+
+        if ($this->riderRideFare($booking) <= 0) {
+            return response()->json([
+                'error' => 1,
+                'message' => 'Ride fare amount is invalid.',
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function riderRideFare(CompanyBooking $booking): float
+    {
+        return round((float) ($booking->booking_amount ?? 0), 2);
+    }
+
+    private function riderRideCurrency(CompanyBooking $booking, ?CompanySetting $setting = null): string
+    {
+        return strtoupper((string) ($booking->currency ?: ($setting?->company_currency ?: 'USD')));
+    }
+
+    private function deductRiderRideFare(CompanyBooking $booking, ?string $paymentReference): array
+    {
+        return DB::transaction(function () use ($booking, $paymentReference) {
+            $lockedBooking = CompanyBooking::where('id', $booking->id)
+                ->where('user_id', auth('rider')->user()->id)
+                ->lockForUpdate()
+                ->first();
+            $rider = CompanyRider::where('id', auth('rider')->user()->id)->lockForUpdate()->first();
+
+            if (!$lockedBooking || !$rider) {
+                throw new \Exception('Ride or rider not found.');
+            }
+
+            return $this->deductRiderRideFareLocked($lockedBooking, $rider, $paymentReference);
+        });
+    }
+
+    private function deductRiderRideFareLocked(CompanyBooking $booking, CompanyRider $rider, ?string $paymentReference): array
+    {
+        $payableError = $this->validateRiderRidePayable($booking);
+        if ($payableError) {
+            $payload = $payableError->getData(true);
+            if (($payload['payment_status'] ?? null) === 'completed') {
+                $payload['wallet_balance'] = round((float) ($rider->wallet_balance ?? 0), 2);
+            }
+
+            return $payload;
+        }
+
+        $setting = CompanySetting::orderBy("id", "DESC")->first();
+        $fareAmount = $this->riderRideFare($booking);
+        $walletBalance = (float) ($rider->wallet_balance ?? 0);
+
+        if ($walletBalance < $fareAmount) {
+            return [
+                'error' => 1,
+                'message' => 'Rider wallet balance is insufficient for this ride.',
+                'requires_topup' => true,
+                'shortfall_amount' => round($fareAmount - $walletBalance, 2),
+                'wallet_balance' => round($walletBalance, 2),
+                'fare_amount' => $fareAmount,
+                'currency' => $this->riderRideCurrency($booking, $setting),
+            ];
+        }
+
+        $deductionReference = 'ride:' . $booking->id;
+        $existingDeduction = WalletTransaction::where('user_type', 'user')
+            ->where('user_id', $rider->id)
+            ->where('payment_provider', 'wallet')
+            ->where('payment_reference', $deductionReference)
+            ->exists();
+
+        if (!$existingDeduction) {
+            $rider->wallet_balance = $walletBalance - $fareAmount;
+            $rider->save();
+
+            $wallet = new WalletTransaction;
+            $wallet->user_type = 'user';
+            $wallet->user_id = $rider->id;
+            $wallet->type = 'deduct';
+            $wallet->amount = $fareAmount;
+            $wallet->comment = $paymentReference ? 'Ride fare deduction after Stripe top-up' : 'Ride fare deduction';
+            $wallet->payment_provider = 'wallet';
+            $wallet->payment_reference = $deductionReference;
+            $wallet->save();
+        }
+
+        $booking->payment_status = 'completed';
+        $booking->payment_method = 'online';
+        $booking->save();
+
+        return [
+            'success' => 1,
+            'message' => 'Ride payment completed successfully.',
+            'booking_id' => $booking->id,
+            'public_booking_id' => $booking->booking_id,
+            'payment_status' => 'completed',
+            'payment_method' => 'online',
+            'fare_amount' => $fareAmount,
+            'wallet_balance' => round((float) ($rider->wallet_balance ?? 0), 2),
+            'currency' => $this->riderRideCurrency($booking, $setting),
+        ];
     }
 
     public function rideDetail(Request $request){

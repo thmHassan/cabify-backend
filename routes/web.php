@@ -16,3 +16,6 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return 'Hello World';
 });
+
+Route::view('/super-admin/app-maintenance-ui', 'super-admin.app-maintenance')
+    ->name('super-admin.app-maintenance-ui');
