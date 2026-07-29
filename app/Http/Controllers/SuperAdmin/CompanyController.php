@@ -462,68 +462,13 @@ class CompanyController extends Controller
                             $tenant->stripe_subscription_id,
                             ['cancel_at_period_end' => true]
                         );
-
-                        $currentSubscription = \Stripe\Subscription::retrieve(
-                            $tenant->stripe_subscription_id
-                        );
-
-                        $products = Product::all(['limit' => 100]);
-                        $existing = collect($products->data)->firstWhere('name', $newSubscription->id);
-
-                        if($existing){
-                            $productId = $existing->id;
-                        }
-                        else{
-                            $product = Product::create([
-                                'name' => $newSubscription->id,
-                                'description' => $newSubscription->plan_name . ", ". $newSubscription->billing_cycle. ", ". $newSubscription->amount .", ". $newSubscription->features,
-                            ]);
-                            $productId = $product->id;
-                        }
-
-                        $existingPrice = Price::all([
-                            'limit' => 100,
-                            'product' => $productId,
-                        ]);
-
-                        $interval = "month";
-                        if($newSubscription->billing_cycle == "monthly"){
-                            $interval = "month";
-                        }
-                        elseif($newSubscription->billing_cycle == "yearly"){
-                            $interval = "year";
-                        }
-
-                        $matching = collect($existingPrice->data)->firstWhere(fn($p) =>
-                            $p->unit_amount == ($newSubscription->amount * 100) && $p->recurring->interval == $interval
-                        );
-
-                        if ($matching) {
-                            $priceId = $matching->id;
-                        } else {
-                            $price = Price::create([
-                                'unit_amount' => ($newSubscription->amount * 100),
-                                'currency' => 'usd',
-                                'recurring' => ['interval' => $interval],
-                                'product' => $productId,
-                            ]);
-                            $priceId = $price->id;
-                        }
-
-                        $newStripeSubscription = \Stripe\Subscription::create([
-                            'customer' => $tenant->stripe_customer_id,
-                            'items' => [
-                                ['price' => $priceId],
-                            ],
-                            'trial_end' => $currentSubscription->current_period_end,
-                        ]);
-
-                        $tenant->stripe_subscription_id = $newStripeSubscription->id;
-                        $tenant->save();
                     }
-                    elseif($existingSubscription->deduct_type == "cash" || !$hasStripeSubscription){
-                        $newSubscriptionCreate = 1;                        
-                    }
+
+                    // Every card-plan change must go through an explicit Checkout
+                    // payment. This also covers card-to-card upgrades.
+                    $newSubscriptionCreate = 1;
+                    $tenant->payment_status = 'pending';
+                    $tenant->payment_amount = $newSubscription->amount;
                 }
             }
 
@@ -661,6 +606,7 @@ class CompanyController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => "Client {$tenant->id} updated successfully!",
+                'tenant_id' => (string) $tenant->getKey(),
                 'tenant' => $tenant,
                 'newSubscriptionCreate' => $newSubscriptionCreate,
                 'socket_notify' => $socketNotify,
@@ -944,9 +890,12 @@ class CompanyController extends Controller
         try{
             $totalCompanies = Tenant::count();
             $activeCompanies = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
-            $monthlyRevenue = Tenant::where('data->subscription_start_date', '>=', Carbon::now()->startOfMonth())
-                ->get()
-                ->sum(fn ($tenant) => (float) data_get($tenant->data, 'payment_amount', 0));
+            $monthlyRevenue = Transaction::where('status', 'paid')
+                ->whereBetween('created_at', [
+                    Carbon::now()->startOfMonth(),
+                    Carbon::now()->endOfMonth(),
+                ])
+                ->sum('amount');
 
             return response()->json([
                 'success' => 1,
@@ -1005,26 +954,19 @@ class CompanyController extends Controller
             }
             $data = $tenants->paginate($perPage);
 
-            $data->getCollection()->transform(function ($tenant) {
-                // $this->hydrateTenantDataForFrontend($tenant);
+            $monthlyRevenueByTenant = Transaction::query()
+                ->select('user_id', DB::raw('SUM(amount) as total'))
+                ->where('status', 'paid')
+                ->whereBetween('created_at', [
+                    Carbon::now()->startOfMonth(),
+                    Carbon::now()->endOfMonth(),
+                ])
+                ->whereIn('user_id', $data->getCollection()->pluck('id'))
+                ->groupBy('user_id')
+                ->pluck('total', 'user_id');
 
-                $monthlyAmount = 0;
-                try {
-                    tenancy()->initialize($tenant);
-                    $monthlyAmount = DB::table('wallet_transactions')
-                        ->whereMonth('created_at', Carbon::now()->month)
-                        ->whereYear('created_at', Carbon::now()->year)
-                        ->sum('amount');
-                } catch (\Throwable $e) {
-                    \Log::warning('Company list tenant revenue lookup failed', [
-                        'tenant' => $tenant->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                } finally {
-                    tenancy()->end();
-                }
-
-                $tenant->monthly_revenue = $monthlyAmount ?? 0;
+            $data->getCollection()->transform(function ($tenant) use ($monthlyRevenueByTenant) {
+                $tenant->monthly_revenue = (float) ($monthlyRevenueByTenant[$tenant->id] ?? 0);
 
                 return $tenant;
             });
