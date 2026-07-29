@@ -478,6 +478,30 @@ class CompanyController extends Controller
                 }
             }
 
+            // Legacy companies may be marked "active" without any recorded
+            // subscription payment. Treat them as unpaid when they are edited so
+            // the appropriate Cash/Online Payment action is shown after submit.
+            if ($paymentRequired === 0) {
+                $requestedSubscription = Subscription::where("id", $request->subscription_type)->first();
+                $paymentStatus = strtolower(trim((string) ($tenant->payment_status ?? '')));
+                $hasRecordedPayment = in_array($paymentStatus, ['success', 'paid'], true)
+                    && (float) ($tenant->payment_amount ?? 0) > 0;
+
+                if (
+                    $requestedSubscription &&
+                    in_array(strtolower((string) $requestedSubscription->deduct_type), ['cash', 'card'], true) &&
+                    !$hasRecordedPayment
+                ) {
+                    $paymentRequired = 1;
+                    $tenant->payment_status = 'pending';
+                    $tenant->payment_amount = $requestedSubscription->amount;
+
+                    if (strtolower((string) $requestedSubscription->deduct_type) === 'card') {
+                        $newSubscriptionCreate = 1;
+                    }
+                }
+            }
+
             $tenant->company_name = isset($request->company_name) ? $request->company_name : $tenant->company_name;
             $tenant->company_admin_name = isset($request->company_admin_name) ? $request->company_admin_name : $tenant->company_admin_name;
             $tenant->user_name = isset($request->user_name) ? $request->user_name : $tenant->user_name;
@@ -619,6 +643,20 @@ class CompanyController extends Controller
                 'socket_notify' => $socketNotify,
                 'wallet_conversion' => $walletConversionSummary,
             ]);
+        }
+        catch(\Illuminate\Validation\ValidationException $e){
+            throw $e;
+        }
+        catch(\Stripe\Exception\ApiConnectionException $e){
+            Log::error('Stripe connection failed during company update', [
+                'tenant_id' => $request->input('id'),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 1,
+                'message' => 'Stripe is unreachable from the backend server. Check server DNS and outbound HTTPS access to api.stripe.com, then try again.',
+            ], 503);
         }
         catch(\Exception $e){
             return response()->json([
@@ -1268,6 +1306,17 @@ class CompanyController extends Controller
                 'billing_mode' => $billingMode,
             ]);
 
+        }
+        catch(\Stripe\Exception\ApiConnectionException $e){
+            Log::error('Stripe Checkout connection failed', [
+                'tenant_id' => $request->input('id'),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 1,
+                'message' => 'Stripe is unreachable from the backend server. Check server DNS and outbound HTTPS access to api.stripe.com, then try again.',
+            ], 503);
         }
         catch(\Exception $e){
             return response()->json([
