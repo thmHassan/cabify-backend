@@ -437,6 +437,7 @@ class CompanyController extends Controller
 
             $previousStatus = CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
             $newSubscriptionCreate = 0;
+            $paymentRequired = 0;
 
             if($tenant->subscription_type != $request->subscription_type){
                 $existingSubscription = Subscription::where("id", $tenant->subscription_type)->first();
@@ -453,6 +454,10 @@ class CompanyController extends Controller
                             ['cancel_at_period_end' => true]
                         );
                     }
+
+                    $paymentRequired = 1;
+                    $tenant->payment_status = 'pending';
+                    $tenant->payment_amount = $newSubscription->amount;
                 }
                 elseif($newSubscription->deduct_type == "card"){
                     if($existingSubscription->deduct_type == "card" && $hasStripeSubscription){
@@ -467,6 +472,7 @@ class CompanyController extends Controller
                     // Every card-plan change must go through an explicit Checkout
                     // payment. This also covers card-to-card upgrades.
                     $newSubscriptionCreate = 1;
+                    $paymentRequired = 1;
                     $tenant->payment_status = 'pending';
                     $tenant->payment_amount = $newSubscription->amount;
                 }
@@ -609,6 +615,7 @@ class CompanyController extends Controller
                 'tenant_id' => (string) $tenant->getKey(),
                 'tenant' => $tenant,
                 'newSubscriptionCreate' => $newSubscriptionCreate,
+                'paymentRequired' => $paymentRequired,
                 'socket_notify' => $socketNotify,
                 'wallet_conversion' => $walletConversionSummary,
             ]);
@@ -1089,16 +1096,34 @@ class CompanyController extends Controller
     public function cashPayment(Request $request){
         try{
             $request->validate([
-                'id' => 'required'
+                'id' => 'required|string'
             ]);
 
-            $user = Tenant::where("id", $request->id)->first();
+            $companyIdentifier = trim((string) $request->id);
+            $user = Tenant::where("id", $companyIdentifier)->first();
+            if (!$user) {
+                $user = Tenant::where('data->company_id', $companyIdentifier)->first();
+            }
+            if (!$user) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Company not found.',
+                ], 404);
+            }
+
+            $subscription = Subscription::where("id", $user->subscription_type)->first();
+            if (!$subscription) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Subscription plan not found.',
+                ], 404);
+            }
+
             $user->payment_status = "success";
             $user->payment_method = "cash";
             // $this->syncTenantData($user);
             $user->save();
 
-            $subscription = Subscription::where("id", $user->subscription_type)->first();
             if($subscription->billing_cycle == "monthly"){
                 $user->expiry_date = date('Y-m-d', strtotime('+1 month'));
             }
@@ -1114,7 +1139,7 @@ class CompanyController extends Controller
             $user->save();
 
             $payment = new Transaction;
-            $payment->user_id = $request->id;
+            $payment->user_id = $user->getKey();
             $payment->amount = $subscription->amount;
             $payment->status = 'paid';
             $payment->method = 'cash';
@@ -1185,7 +1210,7 @@ class CompanyController extends Controller
             }
 
             Stripe::setApiKey($stripeSecret);
-            $YOUR_DOMAIN = env('FRONTEND_URL');
+            $frontendUrl = $this->stripeFrontendUrl($request);
             
             $tenantId = $request->id;
             $tenant = Tenant::where("id", $tenantId)->first();
@@ -1217,8 +1242,8 @@ class CompanyController extends Controller
                 'line_items' => [
                     $this->stripeCheckoutLineItem($subscription, $amount, $interval, $billingMode),
                 ],
-                'success_url' => $YOUR_DOMAIN . 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
-                'cancel_url' => $YOUR_DOMAIN . 'payment-failed',
+                'success_url' => $frontendUrl . '/subscription-success?session_id={CHECKOUT_SESSION_ID}',
+                'cancel_url' => $frontendUrl . '/payment-failed',
                 'metadata' => [
                     'user_id' => $tenantId,
                     'subscription_id' => $subscription->id,
@@ -1250,6 +1275,35 @@ class CompanyController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function stripeFrontendUrl(Request $request): string
+    {
+        $frontendUrl = trim((string) config('app.frontend_url'));
+
+        if ($frontendUrl === '') {
+            $frontendUrl = trim((string) $request->headers->get('Origin', ''));
+        }
+
+        if ($frontendUrl === '') {
+            throw new \RuntimeException('FRONTEND_URL is not configured.');
+        }
+
+        if (!preg_match('#^https?://#i', $frontendUrl)) {
+            $scheme = app()->environment('local') ? 'http://' : 'https://';
+            $frontendUrl = $scheme . ltrim($frontendUrl, '/');
+        }
+
+        $parts = parse_url($frontendUrl);
+        if (
+            !filter_var($frontendUrl, FILTER_VALIDATE_URL) ||
+            !in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true) ||
+            empty($parts['host'])
+        ) {
+            throw new \RuntimeException('FRONTEND_URL must be a valid http:// or https:// URL.');
+        }
+
+        return rtrim($frontendUrl, '/');
     }
 
     private function stripeCheckoutLineItem(Subscription $subscription, int $amount, string $interval, string $billingMode): array
