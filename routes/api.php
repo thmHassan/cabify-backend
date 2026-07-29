@@ -455,6 +455,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
 Route::group(['middleware' => ['tenant.db']], function () {
     Route::post('/rider/login', [RiderAuthController::class, 'login']);
     Route::post('/rider/register', [RiderAuthController::class, 'register']);
+    Route::post('/rider/resend-otp', [RiderAuthController::class, 'resendOtp']);
     Route::post('/rider/verify-otp', [RiderAuthController::class, 'verifyOTP']);
     Route::post('/rider/set-password', [RiderAuthController::class, 'setPassword']);
     Route::post('/rider/verify-password', [RiderAuthController::class, 'verifyPassword']);

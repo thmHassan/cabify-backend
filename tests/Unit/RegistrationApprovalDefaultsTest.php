@@ -112,6 +112,35 @@ class RegistrationApprovalDefaultsTest extends TestCase
         $this->assertNotNull(CompanyRider::where('email', 'unverified@example.test')->value('otp'));
     }
 
+    public function test_unverified_rider_can_resend_otp(): void
+    {
+        $rider = new CompanyRider();
+        $rider->name = 'Resend Rider';
+        $rider->email = 'resend@example.test';
+        $rider->phone_no = '5550004';
+        $rider->country_code = '+1';
+        $rider->password = bcrypt('secret123');
+        $rider->status = 'active';
+        $rider->email_verified = false;
+        $rider->save();
+
+        $request = Request::create('/api/rider/resend-otp', 'POST', [
+            'phone' => '5550004',
+            'country_code' => '+1',
+            'email' => 'resend@example.test',
+        ]);
+        $request->headers->set('database', 'testcompany');
+
+        $response = (new RiderAuthController())->resendOtp($request);
+        $payload = $response->getData(true);
+
+        $this->assertSame(200, $response->getStatusCode(), json_encode($payload));
+        $this->assertSame(1, $payload['success']);
+        $this->assertTrue($payload['requires_otp']);
+        $this->assertFalse($payload['email_verified']);
+        $this->assertNotNull(CompanyRider::where('email', 'resend@example.test')->value('otp'));
+    }
+
     public function test_company_created_customer_account_is_active_by_default(): void
     {
         $request = Request::create('/api/company/create-user', 'POST', [

@@ -265,6 +265,63 @@ class AuthController extends Controller
         }
     }
 
+    public function resendOtp(Request $request)
+    {
+        try {
+            $request->validate([
+                'phone' => 'required',
+                'country_code' => 'required',
+                'email' => 'nullable|email',
+            ]);
+
+            $query = CompanyRider::where('phone_no', $request->phone)
+                ->where('country_code', $request->country_code);
+
+            if ($request->filled('email')) {
+                $query->where('email', $request->email);
+            }
+
+            $user = $query->first();
+
+            if (!$user) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'User does not exist',
+                ], 404);
+            }
+
+            if (!filled($user->email)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Email address is required to send OTP.',
+                ], 400);
+            }
+
+            if ($this->riderEmailVerified($user)) {
+                return response()->json([
+                    'success' => 1,
+                    'email_verified' => true,
+                    'message' => 'Email already verified',
+                ], 200);
+            }
+
+            $this->createAndSendEmailOtp($user, $request);
+
+            return response()->json([
+                'success' => 1,
+                'requiresOtp' => true,
+                'requires_otp' => true,
+                'email_verified' => false,
+                'message' => 'OTP resent successfully',
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
     private function issueSingleSessionToken(CompanyRider $user): string
     {
         $user->auth_version = (int) ($user->auth_version ?? 0) + 1;
