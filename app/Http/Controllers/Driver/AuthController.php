@@ -20,6 +20,7 @@ use App\Models\DriverDocument;
 use App\Services\DriverSessionService;
 use App\Services\DriverDocumentExpiryService;
 use App\Services\FCMService;
+use App\Services\WalletPresentationService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
@@ -1502,7 +1503,8 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'message' => 'Driver profile update successfully'
+                'message' => 'Driver profile update successfully',
+                'data' => $this->formatDriverProfileData($user->fresh()),
             ]);
         }
         catch(\Exception $e){
@@ -1809,6 +1811,10 @@ class AuthController extends Controller
         $data['email_verified_at'] = $user->email_verified_at;
         $data['vehicle'] = $vehicle;
         $data['document'] = $document;
+        $data = array_merge($data, app(WalletPresentationService::class)->fields(
+            $user->wallet_balance,
+            (string) request()->header('database')
+        ));
 
         return $data;
     }

@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Setting;
 use App\Models\Notification;
+use App\Models\Currency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -319,6 +320,19 @@ class HomeController extends Controller
 
             $from = strtoupper($request->from);
             $to = strtoupper($request->to);
+
+            $exchangeDisabled = Currency::query()
+                ->whereIn('code', [$from, $to])
+                ->where('exchange_enabled', false)
+                ->pluck('code')
+                ->all();
+
+            if ($exchangeDisabled !== []) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Exchange conversion is disabled for: '.implode(', ', $exchangeDisabled),
+                ], 422);
+            }
 
             if ($from === $to) {
                 return response()->json([

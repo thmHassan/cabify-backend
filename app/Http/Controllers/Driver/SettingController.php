@@ -28,6 +28,7 @@ use App\Models\PackageRideCountSetting;
 use App\Models\CompanyPlot;
 use App\Models\CompanyDispatchSystem;
 use App\Services\DispatchContextService;
+use App\Services\WalletPresentationService;
 use App\Support\TenantDatabaseConfigurator;
 use Illuminate\Support\Facades\Schema;
 use Stripe\Checkout\Session as CheckoutSession;
@@ -126,6 +127,37 @@ class SettingController extends Controller
             return response()->json([
                 'error' => 1,
                 'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function walletBalance(Request $request, WalletPresentationService $walletPresentation)
+    {
+        try {
+            $userId = auth('driver')->user()->id;
+            $user = CompanyDriver::where('id', $userId)->first();
+
+            $recentTransactions = WalletTransaction::where('user_id', $userId)
+                ->where('user_type', 'driver')
+                ->orderByDesc('id')
+                ->limit(5)
+                ->get();
+
+            return response()->json([
+                'success' => 1,
+                'message' => 'Wallet balance fetched successfully',
+                'data' => array_merge([
+                    'driver_id' => $userId,
+                    'recent_transactions' => $recentTransactions,
+                ], $walletPresentation->fields(
+                    $user->wallet_balance,
+                    (string) $request->header('database')
+                )),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 1,
+                'message' => $e->getMessage(),
             ]);
         }
     }

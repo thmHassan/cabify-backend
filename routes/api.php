@@ -10,6 +10,7 @@ use App\Http\Controllers\SuperAdmin\VehicleTypeController;
 use App\Http\Controllers\SuperAdmin\TenantMapConfigurationController;
 use App\Http\Controllers\SuperAdmin\HomeController;
 use App\Http\Controllers\SuperAdmin\AppMaintenanceController;
+use App\Http\Controllers\SuperAdmin\CurrencyController;
 use App\Http\Controllers\SuperAdmin\SubscriptionController;
 use App\Http\Controllers\SuperAdmin\SubadminController;
 use App\Http\Controllers\SuperAdmin\PlotController;
@@ -104,6 +105,11 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::get('/super-admin/app-maintenance', [AppMaintenanceController::class, 'show']);
         Route::post('/super-admin/app-maintenance', [AppMaintenanceController::class, 'update']);
         Route::get('/super-admin/currency-conversion-rate', [HomeController::class, 'currencyConversionRate']);
+        Route::get('/super-admin/currencies/active', [CurrencyController::class, 'active']);
+        Route::get('/super-admin/currencies', [CurrencyController::class, 'index']);
+        Route::post('/super-admin/currencies', [CurrencyController::class, 'store']);
+        Route::put('/super-admin/currencies/{currency}', [CurrencyController::class, 'update']);
+        Route::patch('/super-admin/currencies/{currency}/status', [CurrencyController::class, 'updateStatus']);
         Route::get('/super-admin/payment-reminder-list', [HomeController::class, 'paymentReminderList']);
         Route::post('/super-admin/send-reminder', [HomeController::class, 'sendReminder']);
 
@@ -385,6 +391,7 @@ Route::group(['middleware' => ['tenant.db']], function () {
     Route::group(['middleware' => ['auth.driver.jwt']], function () {
         Route::get('/driver/get-profile', [DriverAuthController::class, 'getProfile']);
         Route::post('/driver/update-profile', [DriverAuthController::class, 'updateProfile']);
+        Route::get('/driver/wallet-balance', [DriverSettingController::class, 'walletBalance']);
 
         Route::get('/driver/faqs', [DriverSettingController::class, 'faqs']);
         Route::get('/driver/get-api-keys', [DriverSettingController::class, 'getApiKeys']);

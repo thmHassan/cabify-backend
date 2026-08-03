@@ -14,6 +14,7 @@ use App\Models\TenantUser;
 use Illuminate\Support\Facades\Hash;
 use App\Jobs\SendRiderRegistrationOtpJob;
 use App\Services\FCMService;
+use App\Services\WalletPresentationService;
 use App\Support\TenantRequestContext;
 
 class AuthController extends Controller
@@ -761,7 +762,7 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => 1,
-                'data' => $user
+                'data' => $this->formatRiderProfileData($user),
             ]);
         }
         catch(\Exception $e){
@@ -810,6 +811,7 @@ class AuthController extends Controller
                 'email_verified' => !$emailChanged,
                 'requiresOtp' => $emailChanged,
                 'requires_otp' => $emailChanged,
+                'data' => $this->formatRiderProfileData($user->fresh()),
             ]);
         }
         catch(\Exception $e){
@@ -818,6 +820,17 @@ class AuthController extends Controller
                 'message' => $e->getMessage()
             ]);
         }
+    }
+
+    private function formatRiderProfileData(CompanyRider $user): array
+    {
+        return array_merge(
+            $user->toArray(),
+            app(WalletPresentationService::class)->fields(
+                $user->wallet_balance,
+                (string) request()->header('database')
+            )
+        );
     }
 
     public function storeToken(Request $request){

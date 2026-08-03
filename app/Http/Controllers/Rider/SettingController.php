@@ -16,6 +16,7 @@ use App\Models\WalletTransaction;
 use App\Models\CompanyVehicleType;
 use App\Services\TenantMapProviderResolver;
 use App\Services\DispatchContextService;
+use App\Services\WalletPresentationService;
 use App\Models\CompanyDispatchSystem;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -187,12 +188,11 @@ class SettingController extends Controller
         }
     }
 
-    public function walletBalance(Request $request)
+    public function walletBalance(Request $request, WalletPresentationService $walletPresentation)
     {
         try {
             $userId = auth('rider')->user()->id;
             $user = CompanyRider::where("id", $userId)->first();
-            $setting = CompanySetting::orderBy("id", "DESC")->first();
 
             $recentTransactions = WalletTransaction::where("user_id", $userId)
                 ->where("user_type", "user")
@@ -203,12 +203,13 @@ class SettingController extends Controller
             return response()->json([
                 'success' => 1,
                 'message' => 'Wallet balance fetched successfully',
-                'data' => [
+                'data' => array_merge([
                     'rider_id' => $userId,
-                    'wallet_balance' => round((float) ($user->wallet_balance ?? 0), 2),
-                    'currency' => strtoupper((string) ($setting->company_currency ?? 'USD')),
                     'recent_transactions' => $recentTransactions,
-                ],
+                ], $walletPresentation->fields(
+                    $user->wallet_balance,
+                    (string) $request->header('database')
+                )),
             ]);
         }
         catch(\Exception $e){

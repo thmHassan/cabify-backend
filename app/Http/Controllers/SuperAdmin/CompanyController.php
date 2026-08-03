@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Tenant; 
 use App\Models\Setting; 
+use App\Models\Currency;
 use Illuminate\Support\Facades\Artisan;
 use DB;
 use Illuminate\Support\Facades\Hash;
@@ -34,6 +35,7 @@ use App\Support\MapsApi;
 use App\Services\CompanyInactiveService;
 use App\Services\TenantMapConfigurationManager;
 use App\Services\SocketApiUrlResolver;
+use App\Services\RevenueService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -51,7 +53,16 @@ class CompanyController extends Controller
                 'phone' => 'required',
                 'address' => 'required|max:255',
                 'city' => 'required|max:255',
-                'currency' => 'required',
+                'currency' => [
+                    'required',
+                    'string',
+                    'size:3',
+                    function ($attribute, $value, $fail) {
+                        if (! Currency::query()->active()->where('code', strtoupper((string) $value))->exists()) {
+                            $fail('The selected currency is not active.');
+                        }
+                    },
+                ],
                 'maps_api' => ['required', Rule::in(MapsApi::allowedInputValues())],
                 'search_api' => 'required',
                 'log_map_search_result' => 'required',
@@ -106,7 +117,7 @@ class CompanyController extends Controller
             $tenant->phone = $request->phone;
             $tenant->address = $request->address;
             $tenant->city = $request->city;
-            $tenant->currency = $request->currency;
+            $tenant->currency = strtoupper((string) $request->currency);
             $tenant->maps_api = MapsApi::normalize($request->maps_api);
             $tenant->search_api = $request->search_api;
             $tenant->log_map_search_result = $request->log_map_search_result;
@@ -382,6 +393,9 @@ class CompanyController extends Controller
                 'tenant' => $tenant
             ]);
         }
+        catch(\Illuminate\Validation\ValidationException $e){
+            throw $e;
+        }
         catch(\Exception $e){
             return response()->json([
                 'error' => 1,
@@ -405,6 +419,17 @@ class CompanyController extends Controller
                 'contact_person' => 'max:255',
                 'address' => 'max:255',
                 'city' => 'max:255',
+                'currency' => [
+                    'nullable',
+                    'string',
+                    'size:3',
+                    function ($attribute, $value, $fail) use ($request) {
+                        $currentCurrency = strtoupper((string) Tenant::where('id', $request->id)->value('currency'));
+                        if (strtoupper((string) $value) !== $currentCurrency && ! Currency::query()->active()->where('code', strtoupper((string) $value))->exists()) {
+                            $fail('The selected currency is not active.');
+                        }
+                    },
+                ],
                 'maps_api' => ['nullable', Rule::in(MapsApi::allowedInputValues())],
                 'billing_mode' => 'nullable|in:one_time,auto_renew',
                 'convert_wallet_balances' => 'nullable|boolean',
@@ -511,7 +536,7 @@ class CompanyController extends Controller
             $tenant->phone = isset($request->phone) ? $request->phone : $tenant->phone;
             $tenant->address = isset($request->address) ? $request->address : $tenant->address;
             $tenant->city = isset($request->city) ? $request->city : $tenant->city;
-            $tenant->currency = isset($request->currency) ? $request->currency : $tenant->currency;
+            $tenant->currency = isset($request->currency) ? strtoupper((string) $request->currency) : $tenant->currency;
             $tenant->maps_api = isset($request->maps_api)
                 ? MapsApi::normalize($request->maps_api)
                 : MapsApi::normalize($tenant->maps_api);
@@ -931,23 +956,22 @@ class CompanyController extends Controller
     //     ];
     // }
 
-    public function companyCards(){
+    public function companyCards(RevenueService $revenueService){
         try{
             $totalCompanies = Tenant::count();
             $activeCompanies = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->count();
-            $monthlyRevenue = Transaction::where('status', 'paid')
-                ->whereBetween('created_at', [
-                    Carbon::now()->startOfMonth(),
-                    Carbon::now()->endOfMonth(),
-                ])
-                ->sum('amount');
+            $monthlyRevenue = $revenueService->monthlySummary()['total'];
 
             return response()->json([
                 'success' => 1,
                 'message' => 'Data fetched successfully',
                 'total_companies' => $totalCompanies,
                 'active_companies' => $activeCompanies,
-                'monthly_revenue' => $monthlyRevenue 
+                'monthly_revenue' => $monthlyRevenue['base_amount'],
+                'monthly_revenue_base_amount' => $monthlyRevenue['base_amount'],
+                'monthly_revenue_base_currency' => $monthlyRevenue['base_currency'],
+                'monthly_revenue_breakdown' => $monthlyRevenue['breakdown'],
+                'monthly_revenue_complete' => $monthlyRevenue['complete'],
             ]);
         }
         catch(\Exception $e){
@@ -958,7 +982,7 @@ class CompanyController extends Controller
         }
     }
 
-    public function companyList(Request $request){
+    public function companyList(Request $request, RevenueService $revenueService){
         try{
             $perPage = 10;
             if(isset($request->perPage) && $request->perPage != NULL){
@@ -999,19 +1023,22 @@ class CompanyController extends Controller
             }
             $data = $tenants->paginate($perPage);
 
-            $monthlyRevenueByTenant = Transaction::query()
-                ->select('user_id', DB::raw('SUM(amount) as total'))
-                ->where('status', 'paid')
-                ->whereBetween('created_at', [
-                    Carbon::now()->startOfMonth(),
-                    Carbon::now()->endOfMonth(),
-                ])
-                ->whereIn('user_id', $data->getCollection()->pluck('id'))
-                ->groupBy('user_id')
-                ->pluck('total', 'user_id');
+            $monthlyRevenueByTenant = $revenueService
+                ->monthlySummary($data->getCollection()->pluck('id'))['by_tenant'];
 
             $data->getCollection()->transform(function ($tenant) use ($monthlyRevenueByTenant) {
-                $tenant->monthly_revenue = (float) ($monthlyRevenueByTenant[$tenant->id] ?? 0);
+                $summary = $monthlyRevenueByTenant[$tenant->id] ?? [
+                    'base_amount' => 0,
+                    'base_currency' => RevenueService::BASE_CURRENCY,
+                    'breakdown' => [],
+                    'complete' => true,
+                ];
+
+                $tenant->monthly_revenue = $summary['base_amount'];
+                $tenant->monthly_revenue_base_amount = $summary['base_amount'];
+                $tenant->monthly_revenue_base_currency = $summary['base_currency'];
+                $tenant->monthly_revenue_breakdown = $summary['breakdown'];
+                $tenant->monthly_revenue_complete = $summary['complete'];
 
                 return $tenant;
             });
@@ -1131,7 +1158,7 @@ class CompanyController extends Controller
         }
     }
 
-    public function cashPayment(Request $request){
+    public function cashPayment(Request $request, RevenueService $revenueService){
         try{
             $request->validate([
                 'id' => 'required|string'
@@ -1176,12 +1203,12 @@ class CompanyController extends Controller
             // $this->syncTenantData($user);
             $user->save();
 
-            $payment = new Transaction;
-            $payment->user_id = $user->getKey();
-            $payment->amount = $subscription->amount;
-            $payment->status = 'paid';
-            $payment->method = 'cash';
-            $payment->save();
+            $revenueService->record(
+                (string) $user->getKey(),
+                (float) $subscription->amount,
+                (string) ($user->currency ?: RevenueService::BASE_CURRENCY),
+                'cash'
+            );
 
             $userSubscription = new UserSubscription;
             $userSubscription->subscription_id = $subscription->id;
@@ -1544,21 +1571,7 @@ class CompanyController extends Controller
             $userSubscription->save();
         }
 
-        $existingPayment = Transaction::where('user_id', $tenant->id)
-            ->where('amount', $subscription->amount)
-            ->where('status', 'paid')
-            ->where('method', 'card')
-            ->whereDate('created_at', now()->toDateString())
-            ->first();
-
-        if (!$existingPayment) {
-            $payment = new Transaction;
-            $payment->user_id = $tenant->id;
-            $payment->amount = $subscription->amount;
-            $payment->status = 'paid';
-            $payment->method = 'card';
-            $payment->save();
-        }
+        $this->recordStripeRevenue($session, $tenant, $subscription);
 
         return [
             'tenant_id' => $tenant->id,
@@ -1568,6 +1581,50 @@ class CompanyController extends Controller
             'billing_mode' => $tenant->billing_mode,
             'expiry_date' => $tenant->expiry_date,
         ];
+    }
+
+    private function recordStripeRevenue($stripeObject, Tenant $tenant, Subscription $subscription): Transaction
+    {
+        $amountInMinorUnit = $stripeObject->amount_paid
+            ?? $stripeObject->amount_total
+            ?? null;
+        $amount = is_numeric($amountInMinorUnit)
+            ? ((float) $amountInMinorUnit / 100)
+            : (float) $subscription->amount;
+        $currency = strtoupper((string) ($stripeObject->currency ?? RevenueService::BASE_CURRENCY));
+
+        $stripeId = (string) ($stripeObject->id ?? '');
+        $invoice = $stripeObject->invoice ?? null;
+        if (is_object($invoice)) {
+            $invoice = $invoice->id ?? null;
+        }
+        $paymentIntent = $stripeObject->payment_intent ?? null;
+        if (is_object($paymentIntent)) {
+            $paymentIntent = $paymentIntent->id ?? null;
+        }
+
+        if (str_starts_with($stripeId, 'in_')) {
+            $externalReference = "stripe_invoice:{$stripeId}";
+        } elseif ($invoice) {
+            $externalReference = "stripe_invoice:{$invoice}";
+        } elseif ($paymentIntent) {
+            $externalReference = "stripe_payment_intent:{$paymentIntent}";
+        } else {
+            $externalReference = $stripeId !== '' ? "stripe_checkout:{$stripeId}" : null;
+        }
+
+        $paidAt = isset($stripeObject->created)
+            ? Carbon::createFromTimestamp((int) $stripeObject->created)
+            : now();
+
+        return app(RevenueService::class)->record(
+            (string) $tenant->getKey(),
+            $amount,
+            $currency,
+            'card',
+            $externalReference,
+            $paidAt
+        );
     }
 
     public function stripeWebhook(Request $request){
@@ -1640,12 +1697,7 @@ class CompanyController extends Controller
                     }
                     $userSubscription->save();
 
-                    $payment = new Transaction;
-                    $payment->user_id = $userId;
-                    $payment->amount = $subscription->amount;
-                    $payment->status = 'paid';
-                    $payment->method = 'card';
-                    $payment->save();
+                    $this->recordStripeRevenue($session, $tenant, $subscription);
 
                     $paymentMethodId = null;
 
@@ -1732,12 +1784,7 @@ class CompanyController extends Controller
                     }
                     $userSubscription->save();
 
-                    $payment = new Transaction;
-                    $payment->user_id = $userId;
-                    $payment->amount = $subscription->amount;
-                    $payment->status = 'paid';
-                    $payment->method = 'card';
-                    $payment->save();
+                    $this->recordStripeRevenue($session, $tenant, $subscription);
                     break;
 
                 // case 'invoice.payment_failed':
@@ -2241,12 +2288,7 @@ class CompanyController extends Controller
                     }
                     $userSubscription->save();
 
-                    $payment = new Transaction;
-                    $payment->user_id = $userId;
-                    $payment->amount = $subscription->amount;
-                    $payment->status = 'paid';
-                    $payment->method = 'card';
-                    $payment->save();
+                    $this->recordStripeRevenue($session, $tenant, $subscription);
 
                     $paymentMethodId = null;
 
