@@ -414,6 +414,8 @@ class CompanyController extends Controller
                     'email',
                     Rule::unique('tenants', 'data->email')->ignore($request->id, 'id'),
                 ],
+                'subscription_type' => ['required', Rule::exists('subscriptions', 'id')],
+                'force_subscription_renewal' => 'nullable|boolean',
                 'password' => 'nullable|string|min:6',
                 'company_admin_name' => 'max:255',
                 'contact_person' => 'max:255',
@@ -424,7 +426,12 @@ class CompanyController extends Controller
                     'string',
                     'size:3',
                     function ($attribute, $value, $fail) use ($request) {
-                        $currentCurrency = strtoupper((string) Tenant::where('id', $request->id)->value('currency'));
+                        // Tenant custom fields (including currency) live inside
+                        // the tenants.data JSON column, not physical columns.
+                        // Hydrate the tenant model so Stancl's data accessor can
+                        // resolve the currency without selecting a missing column.
+                        $currentTenant = Tenant::find($request->id);
+                        $currentCurrency = strtoupper((string) ($currentTenant?->currency ?? ''));
                         if (strtoupper((string) $value) !== $currentCurrency && ! Currency::query()->active()->where('code', strtoupper((string) $value))->exists()) {
                             $fail('The selected currency is not active.');
                         }
@@ -437,6 +444,13 @@ class CompanyController extends Controller
             ]);
 
             $tenant = Tenant::where("id", $request->id)->first();
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'Company not found.',
+                ], 404);
+            }
+
             $oldCurrency = strtoupper((string) ($tenant->currency ?? ''));
             $newCurrency = $request->filled('currency') ? strtoupper((string) $request->currency) : $oldCurrency;
             $currencyWillChange = $oldCurrency !== '' && $newCurrency !== '' && $oldCurrency !== $newCurrency;
@@ -463,51 +477,57 @@ class CompanyController extends Controller
             $previousStatus = CompanyInactiveService::normalizeStatus($tenant->status ?? 'active');
             $newSubscriptionCreate = 0;
             $paymentRequired = 0;
+            $forceSubscriptionRenewal = $request->boolean('force_subscription_renewal');
+            $requestedSubscriptionId = (string) $request->subscription_type;
+            $requestedSubscription = Subscription::where("id", $requestedSubscriptionId)->first();
+            $subscriptionHasExpired = false;
 
-            if($tenant->subscription_type != $request->subscription_type){
-                $existingSubscription = Subscription::where("id", $tenant->subscription_type)->first();
-                $newSubscription = SUbscription::where("id", $request->subscription_type)->first();
-                $hasStripeSubscription = !empty($tenant->stripe_subscription_id)
-                    && str_starts_with((string) $tenant->stripe_subscription_id, 'sub_');
-
-                if($newSubscription->deduct_type == "cash"){
-                    if($existingSubscription->deduct_type == "card" && $hasStripeSubscription){
-                        Stripe::setApiKey(Setting::stripeSecret());
-
-                        StripeSubscription::update(
-                            $tenant->stripe_subscription_id,
-                            ['cancel_at_period_end' => true]
-                        );
-                    }
-
-                    $paymentRequired = 1;
-                    $tenant->payment_status = 'pending';
-                    $tenant->payment_amount = $newSubscription->amount;
+            if (!empty($tenant->expiry_date)) {
+                try {
+                    $expiryDate = Carbon::parse($tenant->expiry_date);
+                    // The plan is still valid for the whole expiry date. Renewal
+                    // becomes automatic on the following day.
+                    $subscriptionHasExpired = Carbon::today()->gt($expiryDate->startOfDay());
+                } catch (\Throwable $e) {
+                    $subscriptionHasExpired = false;
                 }
-                elseif($newSubscription->deduct_type == "card"){
-                    if($existingSubscription->deduct_type == "card" && $hasStripeSubscription){
-                        Stripe::setApiKey(Setting::stripeSecret());
+            }
 
-                        StripeSubscription::update(
-                            $tenant->stripe_subscription_id,
-                            ['cancel_at_period_end' => true]
-                        );
-                    }
+            $packageChanged = (string) ($tenant->subscription_type ?? '') !== $requestedSubscriptionId;
+            $renewalReason = null;
 
-                    // Every card-plan change must go through an explicit Checkout
-                    // payment. This also covers card-to-card upgrades.
-                    $newSubscriptionCreate = 1;
-                    $paymentRequired = 1;
-                    $tenant->payment_status = 'pending';
-                    $tenant->payment_amount = $newSubscription->amount;
+            if ($packageChanged) {
+                $renewalReason = 'package_changed';
+            } elseif ($forceSubscriptionRenewal) {
+                $renewalReason = 'manual_renewal';
+            } elseif ($subscriptionHasExpired) {
+                $renewalReason = 'expired';
+            }
+
+            if ($renewalReason !== null) {
+                $deductType = strtolower(trim((string) $requestedSubscription->deduct_type));
+
+                if (!in_array($deductType, ['cash', 'card'], true)) {
+                    return response()->json([
+                        'error' => 1,
+                        'message' => 'Selected subscription has an unsupported payment type.',
+                    ], 422);
                 }
+
+                // Editing only creates a pending payment. The existing Stripe
+                // subscription must remain untouched until the replacement
+                // payment succeeds, otherwise an abandoned Checkout could cancel
+                // a company's working subscription.
+                $paymentRequired = 1;
+                $newSubscriptionCreate = $deductType === 'card' ? 1 : 0;
+                $tenant->payment_status = 'pending';
+                $tenant->payment_amount = $requestedSubscription->amount;
             }
 
             // Legacy companies may be marked "active" without any recorded
             // subscription payment. Treat them as unpaid when they are edited so
             // the appropriate Cash/Online Payment action is shown after submit.
             if ($paymentRequired === 0) {
-                $requestedSubscription = Subscription::where("id", $request->subscription_type)->first();
                 $paymentStatus = strtolower(trim((string) ($tenant->payment_status ?? '')));
                 $hasRecordedPayment = in_array($paymentStatus, ['success', 'paid'], true)
                     && (float) ($tenant->payment_amount ?? 0) > 0;
@@ -665,6 +685,7 @@ class CompanyController extends Controller
                 'tenant' => $tenant,
                 'newSubscriptionCreate' => $newSubscriptionCreate,
                 'paymentRequired' => $paymentRequired,
+                'subscriptionRenewalReason' => $renewalReason,
                 'socket_notify' => $socketNotify,
                 'wallet_conversion' => $walletConversionSummary,
             ]);
@@ -1184,24 +1205,33 @@ class CompanyController extends Controller
                 ], 404);
             }
 
+            if (strtolower(trim((string) $subscription->deduct_type)) !== 'cash') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This subscription requires online card payment.',
+                ], 422);
+            }
+
+            if (in_array(strtolower(trim((string) ($user->payment_status ?? ''))), ['success', 'paid'], true)) {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This payment has already been completed. Start a new renewal before recording another cash payment.',
+                ], 409);
+            }
+
+            $previousStripeSubscriptionId = (string) ($user->stripe_subscription_id ?? '');
+            $expiryDate = $this->subscriptionExpiryDate($user->expiry_date, $subscription->billing_cycle);
+
             $user->payment_status = "success";
             $user->payment_method = "cash";
-            // $this->syncTenantData($user);
-            $user->save();
-
-            if($subscription->billing_cycle == "monthly"){
-                $user->expiry_date = date('Y-m-d', strtotime('+1 month'));
-            }
-            elseif($subscription->billing_cycle == "quarterly"){
-                $user->expiry_date = date('Y-m-d', strtotime('+3 months'));
-            }
-            elseif($subscription->billing_cycle == "yearly"){
-                $user->expiry_date = date('Y-m-d', strtotime('+1 year'));
-            }
+            $user->stripe_subscription_id = '';
+            $user->billing_mode = 'one_time';
+            $user->expiry_date = $expiryDate;
             $user->subscription_start_date = date('Y-m-d');
             $user->payment_amount = $subscription->amount;
-            // $this->syncTenantData($user);
             $user->save();
+
+            $this->cancelPreviousStripeSubscription($previousStripeSubscriptionId);
 
             $revenueService->record(
                 (string) $user->getKey(),
@@ -1218,15 +1248,7 @@ class CompanyController extends Controller
             $userSubscription->amount = $subscription->amount;
             $userSubscription->features = $subscription->features;
             $userSubscription->status = 'active';
-            if($subscription->billing_cycle == "monthly"){
-                $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
-            }
-            elseif($subscription->billing_cycle == "quarterly"){
-                $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
-            }
-            elseif($subscription->billing_cycle == "yearly"){
-                $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
-            }
+            $userSubscription->expire_at = $expiryDate;
             $userSubscription->save();
 
             return response()->json([
@@ -1292,6 +1314,13 @@ class CompanyController extends Controller
                     'error' => 1,
                     'message' => 'Subscription plan not found.',
                 ], 404);
+            }
+
+            if (strtolower(trim((string) $subscription->deduct_type)) !== 'card') {
+                return response()->json([
+                    'error' => 1,
+                    'message' => 'This subscription requires cash payment.',
+                ], 422);
             }
 
             $billingMode = $request->input('billing_mode', 'one_time');
@@ -1462,6 +1491,33 @@ class CompanyController extends Controller
         };
     }
 
+    private function cancelPreviousStripeSubscription(?string $subscriptionId, ?string $replacementId = null): void
+    {
+        $subscriptionId = trim((string) $subscriptionId);
+        $replacementId = trim((string) $replacementId);
+
+        if (
+            $subscriptionId === '' ||
+            !str_starts_with($subscriptionId, 'sub_') ||
+            ($replacementId !== '' && $subscriptionId === $replacementId)
+        ) {
+            return;
+        }
+
+        try {
+            Stripe::setApiKey(Setting::stripeSecret());
+            StripeSubscription::update($subscriptionId, ['cancel_at_period_end' => true]);
+        } catch (\Throwable $exception) {
+            // Payment has already succeeded, so a Stripe cleanup failure must not
+            // roll back or duplicate the local payment. Keep an actionable log.
+            Log::error('Previous Stripe subscription could not be cancelled', [
+                'stripe_subscription_id' => $subscriptionId,
+                'replacement_subscription_id' => $replacementId ?: null,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
     public function confirmStripeSession(Request $request)
     {
         try {
@@ -1535,6 +1591,20 @@ class CompanyController extends Controller
             throw new \RuntimeException('Tenant or subscription not found for Stripe session.');
         }
 
+        $externalReference = $this->stripeRevenueExternalReference($session);
+        if ($externalReference && Transaction::where('external_reference', $externalReference)->exists()) {
+            return [
+                'tenant_id' => $tenant->id,
+                'payment_status' => $tenant->payment_status,
+                'payment_method' => $tenant->payment_method,
+                'payment_amount' => $tenant->payment_amount,
+                'billing_mode' => $tenant->billing_mode,
+                'expiry_date' => $tenant->expiry_date,
+                'already_processed' => true,
+            ];
+        }
+
+        $previousStripeSubscriptionId = (string) ($tenant->stripe_subscription_id ?? '');
         $stripeSubscriptionId = $session->subscription;
         $stripeCustomerId = $session->customer;
 
@@ -1549,6 +1619,11 @@ class CompanyController extends Controller
         $tenant->subscription_start_date = date('Y-m-d');
         // $this->syncTenantData($tenant);
         $tenant->save();
+
+        $this->cancelPreviousStripeSubscription(
+            $previousStripeSubscriptionId,
+            (string) ($stripeSubscriptionId ?? '')
+        );
 
         $existingUserSubscription = UserSubscription::where('user_id', $tenant->id)
             ->where('subscription_id', $subscription->id)
@@ -1593,6 +1668,24 @@ class CompanyController extends Controller
             : (float) $subscription->amount;
         $currency = strtoupper((string) ($stripeObject->currency ?? RevenueService::BASE_CURRENCY));
 
+        $externalReference = $this->stripeRevenueExternalReference($stripeObject);
+        $stripeId = (string) ($stripeObject->id ?? '');
+        $paidAt = isset($stripeObject->created)
+            ? Carbon::createFromTimestamp((int) $stripeObject->created)
+            : now();
+
+        return app(RevenueService::class)->record(
+            (string) $tenant->getKey(),
+            $amount,
+            $currency,
+            'card',
+            $externalReference,
+            $paidAt
+        );
+    }
+
+    private function stripeRevenueExternalReference($stripeObject): ?string
+    {
         $stripeId = (string) ($stripeObject->id ?? '');
         $invoice = $stripeObject->invoice ?? null;
         if (is_object($invoice)) {
@@ -1613,18 +1706,7 @@ class CompanyController extends Controller
             $externalReference = $stripeId !== '' ? "stripe_checkout:{$stripeId}" : null;
         }
 
-        $paidAt = isset($stripeObject->created)
-            ? Carbon::createFromTimestamp((int) $stripeObject->created)
-            : now();
-
-        return app(RevenueService::class)->record(
-            (string) $tenant->getKey(),
-            $amount,
-            $currency,
-            'card',
-            $externalReference,
-            $paidAt
-        );
+        return $externalReference;
     }
 
     public function stripeWebhook(Request $request){
@@ -1647,57 +1729,7 @@ class CompanyController extends Controller
                 case 'checkout.session.completed':
 
                     $session = $event->data->object;
-                    $userId = $session->metadata->user_id ?? null;
-                    $subscriptionId = $session->metadata->subscription_id ?? null;
-                    $billingMode = $session->metadata->billing_mode ?? (!empty($session->subscription) ? 'auto_renew' : 'one_time');
-                    $stripeSubscriptionId = $session->subscription;
-                    $stripeCustomerId = $session->customer;
-                    
-                    $tenant = Tenant::where("id", $userId)->first();
-                    $subscription = Subscription::where("id", $subscriptionId)->first();
-
-                    $tenant->payment_status = "success";
-                    $tenant->payment_method = "stripe";
-                    $tenant->billing_mode = $billingMode;
-                    $tenant->stripe_subscription_id  = $billingMode === 'auto_renew' ? $stripeSubscriptionId : '';
-                    $tenant->stripe_customer_id  = $stripeCustomerId;
-                    $tenant->payment_amount = $subscription->amount;
-                    // $this->syncTenantData($tenant);
-                    $tenant->save();
-
-                    if($subscription->billing_cycle == "monthly"){
-                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 month'));
-                    }
-                    elseif($subscription->billing_cycle == "quarterly"){
-                        $tenant->expiry_date = date('Y-m-d', strtotime('+3 months'));
-                    }
-                    elseif($subscription->billing_cycle == "yearly"){
-                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
-                    }
-                    $tenant->subscription_start_date = date('Y-m-d');
-                    // $this->syncTenantData($tenant);
-                    $tenant->save();
-
-                    $userSubscription = new UserSubscription;
-                    $userSubscription->subscription_id = $subscription->id;
-                    $userSubscription->user_id = $tenant->id;
-                    $userSubscription->plan_name = $subscription->plan_name;
-                    $userSubscription->billing_cycle = $subscription->billing_cycle;
-                    $userSubscription->amount = $subscription->amount;
-                    $userSubscription->features = $subscription->features;
-                    $userSubscription->status = 'active';
-                    if($subscription->billing_cycle == "monthly"){
-                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
-                    }
-                    elseif($subscription->billing_cycle == "quarterly"){
-                        $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
-                    }
-                    elseif($subscription->billing_cycle == "yearly"){
-                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
-                    }
-                    $userSubscription->save();
-
-                    $this->recordStripeRevenue($session, $tenant, $subscription);
+                    $this->applyStripeSessionPayment($session);
 
                     $paymentMethodId = null;
 
@@ -1735,56 +1767,7 @@ class CompanyController extends Controller
 
                 case 'invoice.payment_succeeded':
                     $session = $event->data->object;
-                    $userId = $session->subscription_details->metadata->user_id ?? null;
-                    $subscriptionId = $session->subscription_details->metadata->subscription_id ?? null;
-                    $stripeSubscriptionId = $session->subscription;
-                    $stripeCustomerId = $session->customer;
-
-                    $tenant = Tenant::where("id", $userId)->first();
-                    $subscription = Subscription::where("id", $subscriptionId)->first();
-
-                    $tenant->payment_status = "success";
-                    $tenant->payment_method = "stripe";
-                    $tenant->billing_mode = "auto_renew";
-                    $tenant->stripe_subscription_id  = $stripeSubscriptionId;
-                    $tenant->stripe_customer_id  = $stripeCustomerId;
-                    $tenant->payment_amount = $subscription->amount;
-                    // $this->syncTenantData($tenant);
-                    $tenant->save();
-
-                    if($subscription->billing_cycle == "monthly"){
-                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 month'));
-                    }
-                    elseif($subscription->billing_cycle == "quarterly"){
-                        $tenant->expiry_date = date('Y-m-d', strtotime('+3 months'));
-                    }
-                    elseif($subscription->billing_cycle == "yearly"){
-                        $tenant->expiry_date = date('Y-m-d', strtotime('+1 year'));
-                    }
-                    $tenant->subscription_start_date = date('Y-m-d');
-                    // $this->syncTenantData($tenant);
-                    $tenant->save();
-
-                    $userSubscription = new UserSubscription;
-                    $userSubscription->subscription_id = $subscription->id;
-                    $userSubscription->user_id = $tenant->id;
-                    $userSubscription->plan_name = $subscription->plan_name;
-                    $userSubscription->billing_cycle = $subscription->billing_cycle;
-                    $userSubscription->amount = $subscription->amount;
-                    $userSubscription->features = $subscription->features;
-                    $userSubscription->status = 'active';
-                    if($subscription->billing_cycle == "monthly"){
-                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 month'));
-                    }
-                    elseif($subscription->billing_cycle == "quarterly"){
-                        $userSubscription->expire_at = date('Y-m-d', strtotime('+3 months'));
-                    }
-                    elseif($subscription->billing_cycle == "yearly"){
-                        $userSubscription->expire_at = date('Y-m-d', strtotime('+1 year'));
-                    }
-                    $userSubscription->save();
-
-                    $this->recordStripeRevenue($session, $tenant, $subscription);
+                    $this->applyStripeSessionPayment($session);
                     break;
 
                 // case 'invoice.payment_failed':

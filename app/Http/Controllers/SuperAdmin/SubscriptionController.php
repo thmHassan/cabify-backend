@@ -8,6 +8,7 @@ use App\Models\Subscription;
 use App\Models\Tenant;
 use App\Models\Setting;
 use Carbon\Carbon;
+use App\Services\CurrencyCatalogService;
 
 class SubscriptionController extends Controller
 {
@@ -143,9 +144,51 @@ class SubscriptionController extends Controller
         }
     }
 
-    public function subscriptionManagement(Request $request){
+    public function subscriptionManagement(Request $request, CurrencyCatalogService $currencyCatalog){
         try{
-            $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::now()->format('Y-m-d'))->orderBy('created_at','DESC')->with('subscription')->paginate(10);
+            $perPage = max(1, min(100, (int) $request->input('perPage', 10)));
+            $activeSubscription = Tenant::where('data->expiry_date', '>=', Carbon::today()->toDateString())
+                ->when($request->filled('search'), function ($query) use ($request) {
+                    $search = trim((string) $request->search);
+                    $query->where(function ($builder) use ($search) {
+                        $builder->where('data->company_name', 'like', "%{$search}%")
+                            ->orWhere('data->email', 'like', "%{$search}%")
+                            ->orWhere('data->phone', 'like', "%{$search}%");
+                    });
+                })
+                ->orderBy('data->expiry_date')
+                ->with('subscription')
+                ->paginate($perPage);
+
+            $activeSubscription->getCollection()->transform(function (Tenant $tenant) use ($currencyCatalog) {
+                $expiryDate = filled($tenant->expiry_date)
+                    ? Carbon::parse($tenant->expiry_date)->startOfDay()
+                    : null;
+                $daysRemaining = $expiryDate
+                    ? Carbon::today()->diffInDays($expiryDate, false)
+                    : null;
+                $paymentStatus = strtolower(trim((string) ($tenant->payment_status ?? '')));
+
+                if (! in_array($paymentStatus, ['success', 'paid'], true)) {
+                    $subscriptionStatus = 'payment_pending';
+                } elseif ($daysRemaining === 0) {
+                    $subscriptionStatus = 'expires_today';
+                } elseif ($daysRemaining !== null && $daysRemaining <= 10) {
+                    $subscriptionStatus = 'expiring_soon';
+                } else {
+                    $subscriptionStatus = 'active';
+                }
+
+                $currency = strtoupper((string) ($tenant->currency ?: 'USD'));
+                $payment = $currencyCatalog->format($tenant->payment_amount, $currency);
+                $tenant->days_remaining = $daysRemaining;
+                $tenant->subscription_status = $subscriptionStatus;
+                $tenant->currency_symbol = $payment['currency_symbol'];
+                $tenant->formatted_payment_amount = $payment['formatted_amount'];
+
+                return $tenant;
+            });
+
             return response()->json([
                 'success' => 1,
                 'list' => $activeSubscription
