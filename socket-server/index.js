@@ -622,6 +622,15 @@ const emitTenantRooms = (database, event, payload) => {
     io.to(`client_${dbName}`).emit(event, eventPayload);
 };
 
+const emitTenantRoomsExcept = (socket, database, event, payload) => {
+    if (!socket || !database || !event) return;
+    const dbName = toTenantSocketName(database);
+    const eventPayload = { ...payload, database: dbName };
+    socket.to(`dispatcher_${dbName}`).emit(event, eventPayload);
+    socket.to(`admin_${dbName}`).emit(event, eventPayload);
+    socket.to(`client_${dbName}`).emit(event, eventPayload);
+};
+
 const pendingLiveGpsBroadcasts = new Map();
 const liveGpsBroadcastTimers = new Map();
 
@@ -3226,6 +3235,27 @@ io.on("connection", (socket) => {
         } catch (err) {
             console.error("[update-driver-rank] Error:", err.message);
             socket.emit("update-driver-rank-response", { success: 0, message: err.message });
+        }
+    });
+
+    socket.on("ticket-typing", (data = {}) => {
+        try {
+            const payload = typeof data === "string" ? JSON.parse(data) : (data || {});
+            const dbName = toTenantSocketName(payload.database || socket.handshake.query.database);
+            const ticketId = payload.ticket_id || payload.ticketId;
+
+            if (!dbName || !ticketId) return;
+
+            emitTenantRoomsExcept(socket, dbName, "ticket-typing", {
+                ticket_id: ticketId,
+                ticket_reference: payload.ticket_reference,
+                is_typing: Boolean(payload.is_typing),
+                actor_type: payload.actor_type || socket.handshake.query.role || "company",
+                actor_id: payload.actor_id || socket.handshake.query.dispatcher_id || socket.handshake.query.client_id || null,
+                actor_name: payload.actor_name || "Someone",
+            });
+        } catch (err) {
+            console.error("[ticket-typing] Error:", err.message);
         }
     });
 
@@ -6634,6 +6664,107 @@ app.post("/driver-message-notification", (req, res) => {
 
     return res.json({ success: true, delivered });
 });
+
+const emitTicketReply = (req, res) => {
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
+    const { ticket_id, ticket_reference, reply, reply_count, target_user_type, target_user_id } = req.body || {};
+
+    if (!dbName || !ticket_id || !reply) {
+        return res.status(400).json({ success: false, message: "Missing database, ticket_id, or reply" });
+    }
+
+    const payload = {
+        database: dbName,
+        ticket_id,
+        ticket_reference,
+        reply,
+        reply_count,
+        target_user_type,
+        target_user_id,
+    };
+
+    emitTenantRooms(dbName, "ticket-reply", payload);
+    emitTenantRooms(dbName, "ticket-updated", payload);
+
+    const targetId = target_user_id ? String(target_user_id) : null;
+    const targetType = String(target_user_type || "").toLowerCase();
+    if (targetId && targetType === "driver") {
+        const socketId = getTenantSocket(driverSockets, dbName, targetId);
+        if (socketId) io.to(socketId).emit("ticket-reply", payload);
+    }
+    if (targetId && ["user", "rider", "customer"].includes(targetType)) {
+        const socketId = getTenantSocket(userSockets, dbName, targetId);
+        if (socketId) io.to(socketId).emit("ticket-reply", payload);
+    }
+
+    return res.json({ success: true });
+};
+
+app.post("/ticket-reply", emitTicketReply);
+app.post("/socket-api/ticket-reply", emitTicketReply);
+
+const emitTicketCreated = (req, res) => {
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
+    const { ticket } = req.body || {};
+
+    if (!dbName || !ticket?.id) {
+        return res.status(400).json({ success: false, message: "Missing database or ticket" });
+    }
+
+    const payload = {
+        database: dbName,
+        ticket,
+    };
+
+    emitTenantRooms(dbName, "ticket-created", payload);
+    emitTenantRooms(dbName, "ticket-updated", {
+        ticket_id: ticket.id,
+        ticket_reference: ticket.ticket_id,
+        ticket,
+    });
+
+    return res.json({ success: true });
+};
+
+app.post("/ticket-created", emitTicketCreated);
+app.post("/socket-api/ticket-created", emitTicketCreated);
+
+const emitTicketStatusChanged = (req, res) => {
+    const dbName = toTenantSocketName(req.tenantDb || req.headers.database || req.headers['x-database'] || req.body?.database || req.body?.tenantDb);
+    const { ticket_id, ticket_reference, status, target_user_type, target_user_id } = req.body || {};
+
+    if (!dbName || !ticket_id || !status) {
+        return res.status(400).json({ success: false, message: "Missing database, ticket_id, or status" });
+    }
+
+    const payload = {
+        database: dbName,
+        ticket_id,
+        ticket_reference,
+        status,
+        target_user_type,
+        target_user_id,
+    };
+
+    emitTenantRooms(dbName, "ticket-status-changed", payload);
+    emitTenantRooms(dbName, "ticket-updated", payload);
+
+    const targetId = target_user_id ? String(target_user_id) : null;
+    const targetType = String(target_user_type || "").toLowerCase();
+    if (targetId && targetType === "driver") {
+        const socketId = getTenantSocket(driverSockets, dbName, targetId);
+        if (socketId) io.to(socketId).emit("ticket-status-changed", payload);
+    }
+    if (targetId && ["user", "rider", "customer"].includes(targetType)) {
+        const socketId = getTenantSocket(userSockets, dbName, targetId);
+        if (socketId) io.to(socketId).emit("ticket-status-changed", payload);
+    }
+
+    return res.json({ success: true });
+};
+
+app.post("/ticket-status-changed", emitTicketStatusChanged);
+app.post("/socket-api/ticket-status-changed", emitTicketStatusChanged);
 
 app.post("/driver-force-logout", async (req, res) => {
     try {
