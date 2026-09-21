@@ -36,12 +36,14 @@ use App\Http\Controllers\Driver\AuthController as DriverAuthController;
 use App\Http\Controllers\Driver\SettingController as DriverSettingController;
 use App\Http\Controllers\Driver\DocumentController as DriverDocumentController;
 use App\Http\Controllers\Driver\TicketController as DriverTicketController;
+use App\Http\Controllers\Driver\LostFoundController as DriverLostFoundController;
 use App\Http\Controllers\Driver\BookingController as DriverBookingController;
 use App\Http\Controllers\Driver\VehicleController as DriverVehicleController;
 use App\Http\Controllers\Rider\AuthController as RiderAuthController;
 use App\Http\Controllers\Rider\EmergencyContactController as RiderEmergencyContactController;
 use App\Http\Controllers\Rider\SettingController as RiderSettingController;
 use App\Http\Controllers\Rider\TicketController as RiderTicketController;
+use App\Http\Controllers\Rider\LostFoundController as RiderLostFoundController;
 use App\Http\Controllers\Rider\BookingController as RiderBookingController;
 use App\Http\Controllers\Rider\NearbyDriverController as RiderNearbyDriverController;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
@@ -433,6 +435,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::post('/driver/create-ticket', [DriverTicketController::class, 'createTicket']);
         Route::get('/driver/list-ticket', [DriverTicketController::class, 'ticketList']);
+        Route::post('/driver/create-lost-found', [DriverLostFoundController::class, 'createLostFound']);
+        Route::get('/driver/list-lost-found', [DriverLostFoundController::class, 'listLostFound']);
 
         Route::get('/driver/completed-ride', [DriverBookingController::class, 'completedRide']);
         Route::get('/driver/cancelled-ride', [DriverBookingController::class, 'cancelledRide']);
@@ -493,6 +497,8 @@ Route::group(['middleware' => ['tenant.db']], function () {
 
         Route::post('/rider/create-ticket', [RiderTicketController::class, 'createTicket']);
         Route::get('/rider/list-ticket', [RiderTicketController::class, 'listTicket']);
+        Route::post('/rider/create-lost-found', [RiderLostFoundController::class, 'createLostFound']);
+        Route::get('/rider/list-lost-found', [RiderLostFoundController::class, 'listLostFound']);
 
         Route::get('rider/logout', [RiderAuthController::class, 'logout']);
         Route::post('/rider/delete-account', [RiderAuthController::class, 'deleteAccount']);
